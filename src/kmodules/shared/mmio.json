@@ -1,0 +1,21 @@
+{
+  "name": "mmio",
+  "exports": [
+    {
+      "name": "mmio.init",
+      "symbol": "mmio_surface_init"
+    },
+    {
+      "name": "mmio.map",
+      "symbol": "mmio_surface_map"
+    },
+    {
+      "name": "mmio.read",
+      "symbol": "mmio_surface_read"
+    },
+    {
+      "name": "mmio.write",
+      "symbol": "mmio_surface_write"
+    }
+  ]
+}

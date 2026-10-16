@@ -1,0 +1,29 @@
+{
+  "name": "nvme",
+  "exports": [
+    {
+      "name": "nvme.init",
+      "symbol": "nvme_surface_init"
+    },
+    {
+      "name": "nvme.open",
+      "symbol": "nvme_surface_open"
+    },
+    {
+      "name": "nvme.read",
+      "symbol": "nvme_surface_read"
+    },
+    {
+      "name": "nvme.info",
+      "symbol": "nvme_surface_info"
+    },
+    {
+      "name": "nvme.close",
+      "symbol": "nvme_surface_close"
+    },
+    {
+      "name": "nvme.interrupt",
+      "symbol": "nvme_surface_interrupt"
+    }
+  ]
+}

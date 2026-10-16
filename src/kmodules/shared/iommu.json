@@ -1,0 +1,41 @@
+{
+  "name": "iommu",
+  "exports": [
+    {
+      "name": "iommu.init",
+      "symbol": "iommu_surface_init"
+    },
+    {
+      "name": "iommu.attach",
+      "symbol": "iommu_surface_attach"
+    },
+    {
+      "name": "iommu.map",
+      "symbol": "iommu_surface_map"
+    },
+    {
+      "name": "iommu.unmap",
+      "symbol": "iommu_surface_unmap"
+    },
+    {
+      "name": "iommu.detach",
+      "symbol": "iommu_surface_detach"
+    },
+    {
+      "name": "iommu.info",
+      "symbol": "iommu_surface_info"
+    },
+    {
+      "name": "iommu.lookup",
+      "symbol": "iommu_surface_lookup"
+    },
+    {
+      "name": "iommu.ready",
+      "symbol": "iommu_surface_ready"
+    },
+    {
+      "name": "iommu.platform",
+      "symbol": "iommu_surface_platform"
+    }
+  ]
+}

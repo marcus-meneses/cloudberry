@@ -1,0 +1,572 @@
+SHELL := /bin/bash
+.DEFAULT_GOAL := build
+ROOT := $(abspath ..)
+BUILD := ../bin
+TEST_BUILD := $(ROOT)/bin/tests/isolated
+TOOLCHAIN_DIR ?= $(ROOT)/.toolchain
+CROSS_PREFIX ?= $(TOOLCHAIN_DIR)/cross/bin/x86_64-elf-
+LIMINE_DIR ?= $(TOOLCHAIN_DIR)/limine
+CC := $(CROSS_PREFIX)gcc
+KERNEL := $(BUILD)/kernel.elf
+ISO := $(BUILD)/cloudberry.iso
+# Distinct object/staging names keep archived implementation artifacts out.
+XHCI_HOTPLUG ?= 0
+X2APIC ?= 0
+ifeq ($(filter $(X2APIC),0 1),)
+$(error X2APIC must be 0 or 1)
+endif
+COMMON_OBJECTS := $(BUILD)/src-boot-memory.o $(BUILD)/src-modules.o $(BUILD)/src-mediate.o $(BUILD)/src-limine-x2apic$(X2APIC).o $(BUILD)/src-cpu.o
+OBJECTS := $(BUILD)/src-main.o $(COMMON_OBJECTS)
+SPLASH_MODULE := $(BUILD)/kmodules/splash.kmod
+MEM_MODULE := $(BUILD)/kmodules/mem.kmod
+HWENUM_MODULE := $(BUILD)/kmodules/hwenum.kmod
+INTHANDLE_MODULE := $(BUILD)/kmodules/inthandle.kmod
+EVENT_MODULE := $(BUILD)/kmodules/event.kmod
+THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
+IOMMU_MODULE := $(BUILD)/kmodules/iommu.kmod
+PCI_MODULE := $(BUILD)/kmodules/pci.kmod
+NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
+XHCI_MODULE := $(BUILD)/kmodules/xhci.kmod
+IRQ_MODULE := $(BUILD)/kmodules/irq.kmod
+SMP_MODULE := $(BUILD)/kmodules/smp.kmod
+APIC_MODULE := $(BUILD)/kmodules/apic.kmod
+TIMER_MODULE := $(BUILD)/kmodules/timer.kmod
+CLOCK_MODULE := $(BUILD)/kmodules/clock.kmod
+MMIO_MODULE := $(BUILD)/kmodules/mmio.kmod
+SCHEDULER_MODULE := $(BUILD)/kmodules/scheduler.kmod
+OBJCOPY := $(CROSS_PREFIX)objcopy
+STAGE := $(BUILD)/src-iso-root
+NVME_DISK ?= $(BUILD)/cloudberry-nvme.img
+SATA_DISK ?= $(BUILD)/cloudberry-sata.img
+OVMF ?= /usr/share/ovmf/OVMF.fd
+QEMU ?= qemu-system-x86_64
+QEMU_ACCEL ?= tcg
+# VM topology: one socket, QEMU_CPUS cores, one thread per core.
+QEMU_CPUS ?= 1
+QEMU_DISPLAY ?= gtk
+QEMU_IOMMU ?= none
+ifeq ($(filter $(QEMU_IOMMU),none intel amd),)
+$(error QEMU_IOMMU must be none, intel or amd)
+endif
+comma := ,
+QEMU_IOMMU_FLAGS = $(if $(filter intel,$(QEMU_IOMMU)),-device intel-iommu$(comma)intremap=off,$(if $(filter amd,$(QEMU_IOMMU)),-device amd-iommu$(comma)intremap=off,))
+QEMU_CPU ?= $(if $(filter kvm,$(QEMU_ACCEL)),host$(comma)migratable=off$(comma)+invtsc,max)
+CFLAGS := -std=c11 -O2 -g -Wall -Wextra -Werror -ffreestanding \
+    -fno-stack-protector -fno-pic -fno-pie -m64 -mno-red-zone \
+    -mgeneral-regs-only -mcmodel=kernel -MMD -MP
+LDFLAGS := -nostdlib -static -no-pie -Wl,--build-id=none \
+    -Wl,-z,noexecstack -Wl,-z,max-page-size=0x1000 -Wl,-T,boot/linker.ld
+
+# USB boot medium avoids attaching a legacy IDE optical drive. SATA uses AHCI.
+QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
+    $(QEMU_IOMMU_FLAGS) -accel $(QEMU_ACCEL) -cpu $(QEMU_CPU) -smp cpus=$(QEMU_CPUS),sockets=1,cores=$(QEMU_CPUS),threads=1 -bios "$(OVMF)" \
+    -device VGA -device qemu-xhci,id=xhci \
+    -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
+    -drive if=none,id=bootmedia,format=raw,readonly=on,file="$(ISO)" \
+    -device usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1 \
+    -drive if=none,id=nvmedisk,format=raw,file="$(NVME_DISK)" \
+    -device nvme,drive=nvmedisk,serial=CLOUDBERRY2NVME \
+    -drive if=none,id=satadisk,format=raw,file="$(SATA_DISK)" \
+    -device ide-hd,bus=ide.0,drive=satadisk \
+    -display $(QEMU_DISPLAY) -name Cloudberry-v2 \
+    -debugcon stdio -global isa-debugcon.iobase=0xe9 \
+    -monitor none -no-reboot -no-shutdown
+
+.PHONY: build run debug clean check-tools FORCE
+build: $(ISO) $(NVME_DISK) $(SATA_DISK) $(BUILD)/kmodules/mem.o
+check-tools:
+	@test -x "$(CC)" || { echo 'Missing cross compiler in .toolchain'; exit 1; }
+	@test -f "$(LIMINE_DIR)/BOOTX64.EFI" -a -f "$(LIMINE_DIR)/limine-uefi-cd.bin"
+	@command -v xorriso >/dev/null
+
+$(BUILD)/src-main.o: kernel/main.c kernel/modules.h kernel/surfaces.h boot/memory.h | check-tools
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Always relink/repackage candidate output from the active source tree.
+$(BUILD)/src-logo.rgb: assets/cloudberry.png tools/pack-logo.py
+	@mkdir -p $(BUILD)
+	python3 tools/pack-logo.py $< $@
+
+$(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h | check-tools
+	$(CC) $(CFLAGS) -DBOOT_PREFER_X2APIC=$(X2APIC) -c $< -o $@
+
+$(KERNEL): $(OBJECTS) boot/linker.ld FORCE
+	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+
+$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) boot/limine.conf
+	rm -rf $(STAGE)
+	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
+	cp $(KERNEL) $(STAGE)/boot/kernel.elf
+	cp $(BUILD)/kmodules/xstate.kmod $(BACKENDS) $(STAGE)/boot/kmodules/
+	cp $(MEM_MODULE) $(STAGE)/boot/kmodules/mem.kmod
+	cp $(HWENUM_MODULE) $(STAGE)/boot/kmodules/hwenum.kmod
+	cp $(INTHANDLE_MODULE) $(STAGE)/boot/kmodules/inthandle.kmod
+	cp $(SCHEDULER_MODULE) $(STAGE)/boot/kmodules/scheduler.kmod
+	cp $(MMIO_MODULE) $(STAGE)/boot/kmodules/mmio.kmod
+	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
+	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
+	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
+	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(STAGE)/boot/kmodules/
+	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
+	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
+	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
+	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
+	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
+	xorriso -as mkisofs -R -r -J --efi-boot boot/limine/limine-uefi-cd.bin \
+	    -efi-boot-part --efi-boot-image --protective-msdos-label $(STAGE) -o $@
+
+# Sparse, blank 1 GiB media, created once; no filesystem or boot-time formatting.
+$(NVME_DISK) $(SATA_DISK):
+	@mkdir -p $(@D)
+	qemu-img create -f raw "$@" 1G
+
+run: build
+	@test -f "$(OVMF)" || { echo 'Set OVMF to the installed UEFI firmware path'; exit 1; }
+	bash boot/run-qemu.sh $(QEMU) $(QEMU_FLAGS)
+
+debug: build
+	bash boot/run-qemu.sh $(QEMU) $(QEMU_FLAGS) -S -gdb tcp:127.0.0.1:1234
+
+# Persistent virtual disks are retained by clean.
+clean:
+	rm -f $(BUILD)/src-*.o $(BUILD)/src-*.d $(BUILD)/src-logo.rgb $(KERNEL) $(ISO)
+	rm -rf $(BUILD)/kmodules $(STAGE)
+
+# Native debug object for the standalone allocator; the loaded module uses PIC below.
+$(BUILD)/kmodules/mem.o: kmodules/shared/mem.c kmodules/shared/mem.h | check-tools
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -fno-strict-aliasing -c $< -o $@
+
+.PHONY: test-mem
+test-mem:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing \
+	    -fsanitize=undefined tests/mem.c kmodules/shared/mem.c -o $(BUILD)/tests/src-mem
+	$(BUILD)/tests/src-mem
+
+$(BUILD)/src-boot-memory.o: boot/memory.c boot/memory.h | check-tools
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/src-modules.o: kernel/modules.c kernel/modules.h kernel/surfaces.h boot/memory.h kmodules/shared/module.h kmodules/shared/hwenum.h | check-tools
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# PIC kmodule, loaded separately by Limine; no mem implementation in kernel.elf.
+$(BUILD)/tests/src-main-test.o: kernel/main.c kernel/modules.h kernel/surfaces.h boot/memory.h | check-tools
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_MEM_TEST -c $< -o $@
+
+$(BUILD)/tests/src-mem-boot.o: tests/mem-boot.c kernel/modules.h kernel/surfaces.h kmodules/shared/mem.h kmodules/shared/hwenum.h kmodules/shared/inthandle.h boot/memory.h | check-tools
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_MEM_TEST -c $< -o $@
+
+$(BUILD)/tests/src-kernel.elf: FORCE $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-mem-boot.o $(BUILD)/tests/src-scheduler-boot.o $(BUILD)/tests/src-mmio-boot.o $(BUILD)/tests/src-clock-boot.o $(BUILD)/tests/src-events-boot.o $(BUILD)/tests/src-mem-pages-boot.o $(BUILD)/tests/src-stack-call.o $(BUILD)/tests/src-threads-boot.o $(BUILD)/tests/src-irq-boot.o $(BUILD)/tests/src-nvme-boot.o $(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o $(COMMON_OBJECTS) boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+
+.PHONY: test-mem-boot
+test-mem-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-mem-boot
+
+.PHONY: _test-mem-boot
+_test-mem-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))"
+
+.PHONY: test-hwenum test-hwenum-boot
+test-hwenum:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing \
+	    -fsanitize=undefined tests/hwenum.c kmodules/shared/hwenum.c kmodules/shared/mem.c -o $(BUILD)/tests/src-hwenum
+	$(BUILD)/tests/src-hwenum
+
+test-hwenum-boot: test-mem-boot
+
+MODULE_CFLAGS = $(filter-out -fno-pic -fno-pie -mcmodel=kernel,$(CFLAGS)) -fPIE -fvisibility=hidden -mcmodel=small -fno-strict-aliasing
+MODULE_HEADERS = kmodules/shared/module.h kernel/surfaces.h boot/memory.h
+
+$(BUILD)/src-mediate.o: kernel/mediate.S
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/%-pic.o: kmodules/shared/%.c $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/%.exports.S: kmodules/shared/%.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+
+$(BUILD)/kmodules/%.exports.o: $(BUILD)/kmodules/%.exports.S
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/inthandle-entry.o: kmodules/shared/inthandle-entry.S
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/mem.elf: $(BUILD)/kmodules/mem-pic.o $(BUILD)/kmodules/mem-module-pic.o $(BUILD)/kmodules/mem-pages-pic.o $(BUILD)/kmodules/mem.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/hwenum.elf: $(BUILD)/kmodules/hwenum-pic.o $(BUILD)/kmodules/hwenum-module-pic.o $(BUILD)/kmodules/hwenum.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/inthandle.elf: $(BUILD)/kmodules/inthandle-pic.o $(BUILD)/kmodules/inthandle-entry.o $(BUILD)/kmodules/inthandle.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/%.kmod: $(BUILD)/kmodules/%.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BUILD)/kmodules/mem-pic.o $(BUILD)/kmodules/mem-module-pic.o: kmodules/shared/mem.h
+$(BUILD)/kmodules/hwenum-pic.o $(BUILD)/kmodules/hwenum-module-pic.o: kmodules/shared/hwenum.h
+$(BUILD)/kmodules/inthandle-pic.o: kmodules/shared/inthandle.h
+
+$(BUILD)/kmodules/probe-pic.o: tests/probe.c tests/probe.h kmodules/shared/inthandle.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/probe.exports.S: tests/probe.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+
+$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-reservations
+test-reservations:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
+	    tests/reservations.c boot/memory.c -o $(BUILD)/tests/src-reservations
+	$(BUILD)/tests/src-reservations
+
+$(BUILD)/tests/src-fault-%.o: kernel/main.c kernel/modules.h kernel/surfaces.h boot/memory.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_FAULT=$* -c $< -o $@
+
+$(BUILD)/tests/src-fault-%.elf: $(BUILD)/tests/src-fault-%.o $(COMMON_OBJECTS) boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+
+.PHONY: test-inthandle-faults
+test-inthandle-faults:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-inthandle-faults
+
+.PHONY: _test-inthandle-faults
+_test-inthandle-faults: $(ISO) $(addprefix $(BUILD)/tests/src-fault-,1.elf 2.elf 3.elf)
+	python3 tests/inthandle-faults.py "$(abspath $(BUILD))"
+
+# Dependencies are compiler side effects, never targets for implicit linking.
+$(BUILD)/%.d: ;
+.SECONDARY:
+
+-include $(wildcard $(BUILD)/src-*.d $(BUILD)/kmodules/*.d $(BUILD)/tests/src-*.d)
+
+$(BUILD)/kmodules/scheduler-pic.o: kmodules/shared/scheduler.h kmodules/shared/inthandle.h
+$(BUILD)/kmodules/scheduler.elf: $(BUILD)/kmodules/scheduler-pic.o $(BUILD)/kmodules/scheduler.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-scheduler test-scheduler-boot
+test-scheduler:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing \
+	    -fsanitize=undefined tests/scheduler.c kmodules/shared/scheduler.c kmodules/shared/mem.c -o $(BUILD)/tests/src-scheduler
+	$(BUILD)/tests/src-scheduler
+
+test-scheduler-boot: test-mem-boot
+
+$(BUILD)/tests/src-scheduler-boot.o: tests/scheduler-boot.c tests/probe.h kmodules/shared/scheduler.h kernel/surfaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/mmio.elf: $(BUILD)/kmodules/mmio-pic.o $(BUILD)/kmodules/mmio.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-mmio test-mmio-boot
+test-mmio:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing \
+	    -fsanitize=undefined tests/mmio.c kmodules/shared/mmio.c kmodules/shared/mem.c -o $(BUILD)/tests/src-mmio
+	$(BUILD)/tests/src-mmio
+
+test-mmio-boot: test-mem-boot
+
+$(BUILD)/tests/src-mmio-boot.o: tests/mmio-boot.c kmodules/shared/mmio.h kmodules/shared/hwenum.h kernel/surfaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/clock.elf: $(BUILD)/kmodules/clock-pic.o $(BUILD)/kmodules/clock-x86-pic.o $(BUILD)/kmodules/clock.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-clock test-clock-boot
+test-clock:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
+	    tests/clock.c kmodules/shared/clock.c -o $(BUILD)/tests/src-clock
+	@for mode in tsc hpet enumerated stalled-enumerated no-rtc no-century shared-tsc shared-tsc-drift; do $(BUILD)/tests/src-clock $$mode || exit $$?; done
+
+test-clock-boot: test-mem-boot
+
+$(BUILD)/tests/src-clock-boot.o: tests/clock-boot.c kmodules/shared/clock.h kernel/surfaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/timer.elf: $(BUILD)/kmodules/timer-pic.o $(BUILD)/kmodules/timer-x86-pic.o $(BUILD)/kmodules/timer.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-timer test-events-boot
+test-timer:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
+	    tests/timer.c kmodules/shared/timer.c -o $(BUILD)/tests/src-timer
+	$(BUILD)/tests/src-timer
+
+test-events-boot: test-mem-boot
+
+$(BUILD)/tests/src-events-boot.o: tests/events-boot.c kmodules/shared/event.h kmodules/shared/timer.h kmodules/shared/scheduler.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/event.elf: $(BUILD)/kmodules/event-pic.o $(BUILD)/kmodules/event.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/splash-logo.o: kmodules/shared/splash-logo.S $(BUILD)/src-logo.rgb
+	$(CC) $(MODULE_CFLAGS) -DSPLASH_LOGO_PATH='"$(abspath $(BUILD)/src-logo.rgb)"' -c $< -o $@
+
+$(BUILD)/kmodules/splash.elf: $(BUILD)/kmodules/splash-pic.o $(BUILD)/kmodules/splash-module-pic.o $(BUILD)/kmodules/splash-logo.o $(BUILD)/kmodules/splash.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-splash
+test-splash:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
+	    tests/splash.c kmodules/shared/splash.c -o $(BUILD)/tests/src-splash
+	$(BUILD)/tests/src-splash
+
+$(BUILD)/kmodules/apic.elf: $(BUILD)/kmodules/apic-pic.o $(BUILD)/kmodules/apic-x86-pic.o $(BUILD)/kmodules/apic.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-apic test-pages
+test-apic:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/apic.c kmodules/shared/apic.c -o $(BUILD)/tests/src-apic
+	$(BUILD)/tests/src-apic
+	$(BUILD)/tests/src-apic x2apic
+
+test-pages:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing -fsanitize=undefined tests/mem-pages.c kmodules/shared/mem-pages.c kmodules/shared/mem.c boot/memory.c -o $(BUILD)/tests/src-mem-pages
+	$(BUILD)/tests/src-mem-pages
+
+$(BUILD)/tests/src-mem-pages-boot.o: tests/mem-pages-boot.c kmodules/shared/mem-pages.h boot/memory.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: test-startup-failure _test-startup-failure
+test-startup-failure:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-startup-failure
+
+_test-startup-failure: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --missing-clock
+
+$(BUILD)/tests/src-stack-call.o: tests/stack-call.S
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/src-cpu.o: kernel/cpu.c kernel/cpu.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/threads-entry.o: kmodules/shared/threads-entry.S
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/threads.elf: $(BUILD)/kmodules/threads-pic.o $(BUILD)/kmodules/threads-entry.o $(BUILD)/kmodules/threads.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/smp-entry.o: kmodules/shared/smp-entry.S
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/smp.elf: $(BUILD)/kmodules/smp-pic.o $(BUILD)/kmodules/smp-entry.o $(BUILD)/kmodules/tsc-validation-pic.o $(BUILD)/kmodules/smp.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/src-threads-boot.o: tests/threads-boot.c tests/probe.h kmodules/shared/threads.h kmodules/shared/smp.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+.PHONY: test-threads-smp _test-threads-smp
+test-threads-smp:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-threads-smp
+_test-threads-smp: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=1
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=4
+
+$(BUILD)/kmodules/irq.elf: $(BUILD)/kmodules/irq-pic.o $(BUILD)/kmodules/irq.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/src-irq-boot.o: tests/irq-boot.c tests/probe.h kmodules/shared/irq.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: test-smp-clock test-tsc-profile test-tsc-validation
+test-smp-clock:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/smp-clock.c kmodules/shared/tsc-validation.c -o $(BUILD)/tests/src-smp-clock
+	$(BUILD)/tests/src-smp-clock
+
+test-tsc-profile:
+	python3 tests/tsc_profile.py
+
+test-tsc-validation:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/tsc-validation.c kmodules/shared/tsc-validation.c -o $(BUILD)/tests/src-tsc-validation
+	$(BUILD)/tests/src-tsc-validation
+
+.PHONY: test-irq
+test-irq:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/irq.c kmodules/shared/irq.c -o $(BUILD)/tests/src-irq
+	$(BUILD)/tests/src-irq
+
+$(BUILD)/kmodules/pci.elf: $(BUILD)/kmodules/pci-pic.o $(BUILD)/kmodules/pci-x86-pic.o $(BUILD)/kmodules/pci.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/nvme.elf: $(BUILD)/kmodules/nvme-pic.o $(BUILD)/kmodules/nvme.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/src-nvme-boot.o: tests/nvme-boot.c tests/probe.h kmodules/shared/nvme.h kmodules/shared/pci.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: test-pci
+test-pci:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/pci.c kmodules/shared/pci.c -o $(BUILD)/tests/src-pci
+	$(BUILD)/tests/src-pci
+	$(BUILD)/tests/src-pci iommu
+	$(BUILD)/tests/src-pci translated
+
+.PHONY: test-nvme-boot
+test-nvme-boot: test-mem-boot
+
+$(BUILD)/kmodules/iommu.elf: $(BUILD)/kmodules/iommu-pic.o $(BUILD)/kmodules/iommu.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-iommu test-native _test-iommu _test-native
+test-iommu:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-iommu
+_test-iommu: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=intel
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=amd
+
+test-native:
+	python3 tests/native-check.py
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-native
+_test-native: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=kvm --cpu=$(if $(filter command line environment override,$(origin QEMU_CPU)),$(QEMU_CPU),host$(comma)migratable=off$(comma)+invtsc) --x2apic-requested=$(X2APIC)
+
+.PHONY: test-iommu-host
+test-iommu-host:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/iommu.c -o $(BUILD)/tests/src-iommu
+	$(BUILD)/tests/src-iommu
+
+$(BUILD)/tests/src-lock-watchdog.o: tests/lock-watchdog.c tests/probe.h kernel/cpu.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-lock-watchdog.elf: $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-lock-watchdog.o $(COMMON_OBJECTS) boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+.PHONY: test-lock-watchdog _test-lock-watchdog
+test-lock-watchdog:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-lock-watchdog
+_test-lock-watchdog: $(ISO) $(BUILD)/tests/src-lock-watchdog.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=2 --watchdog
+
+# Boot alternatives share frontend signatures, but have independent code/state.
+CPU_BACKENDS = $(BUILD)/kmodules/cpu-intel.kmod $(BUILD)/kmodules/cpu-amd.kmod
+IOMMU_BACKENDS = $(BUILD)/kmodules/iommu-intel.kmod $(BUILD)/kmodules/iommu-amd.kmod
+BACKENDS = $(CPU_BACKENDS) $(IOMMU_BACKENDS)
+$(BUILD)/kmodules/cpu-intel-pic.o: kmodules/intel/cpu-intel.c kmodules/shared/cpu-platform.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/iommu-intel-pic.o: kmodules/intel/iommu-intel.c kmodules/shared/iommu-internal.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/cpu-intel.exports.S: kmodules/intel/cpu-intel.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/iommu-intel.exports.S: kmodules/intel/iommu-intel.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/cpu-amd-pic.o: kmodules/amd/cpu-amd.c kmodules/shared/cpu-platform.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/iommu-amd-pic.o: kmodules/amd/iommu-amd.c kmodules/shared/iommu-internal.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/cpu-amd.exports.S: kmodules/amd/cpu-amd.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/iommu-amd.exports.S: kmodules/amd/iommu-amd.json tools/module-exports.py
+	@mkdir -p $(@D)
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/cpu-%.elf: $(BUILD)/kmodules/cpu-%-pic.o $(BUILD)/kmodules/cpu-ops-pic.o $(BUILD)/kmodules/cpu-topology-pic.o $(BUILD)/kmodules/cpu-tsc-pic.o $(BUILD)/kmodules/cpu-%.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/kmodules/iommu-%.elf: $(BUILD)/kmodules/iommu-%-pic.o $(BUILD)/kmodules/iommu-%.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(ISO): $(BACKENDS) $(BUILD)/kmodules/xstate.kmod
+
+$(BUILD)/kmodules/xstate.elf: $(BUILD)/kmodules/xstate-pic.o $(BUILD)/kmodules/xstate.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-portability test-cpu-topology test-cpu-tsc _test-portability
+test-cpu-tsc:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/cpu-tsc.c kmodules/shared/cpu-tsc.c -o $(BUILD)/tests/src-cpu-tsc
+	$(BUILD)/tests/src-cpu-tsc
+test-cpu-topology:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/cpu-topology.c kmodules/shared/cpu-topology.c -o $(BUILD)/tests/src-cpu-topology
+	$(BUILD)/tests/src-cpu-topology
+test-portability:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-portability
+_test-portability: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod test-cpu-topology test-cpu-tsc test-iommu-host
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=4 --cpu=max,vendor=GenuineIntel --iommu=intel
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=4 --cpu=max,vendor=AuthenticAMD --iommu=amd
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=1 --cpu=max,vendor=GenuineIntel --iommu=amd
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=1 --cpu=max,-avx
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=1 --cpu=max,-xsave,-avx
+
+.PHONY: test-iommu-backend
+test-iommu-backend:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/iommu-amd-backend.c -o $(BUILD)/tests/src-iommu-amd-backend
+	$(BUILD)/tests/src-iommu-amd-backend
+test-iommu-host: test-iommu-backend
+
+.PHONY: test-xstate-host
+test-xstate-host:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -mgeneral-regs-only -fsanitize=undefined tests/xstate-host.c -o $(BUILD)/tests/src-xstate-host
+	$(BUILD)/tests/src-xstate-host
+_test-portability: test-xstate-host
+
+.PHONY: test-backend-contracts
+test-backend-contracts:
+	python3 tests/backend-contracts.py
+_test-portability: test-backend-contracts
+
+$(BUILD)/kmodules/xhci.elf: $(BUILD)/kmodules/xhci-pic.o $(BUILD)/kmodules/xhci.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-xhci
+test-xhci:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/xhci.c -o $(TEST_BUILD)/tests/src-xhci
+	$(TEST_BUILD)/tests/src-xhci
+
+$(BUILD)/kmodules/probe-xhci-pic.o: tests/probe-xhci.c tests/probe.h kmodules/shared/xhci.h kmodules/shared/usb-host.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o: tests/xhci-boot.c tests/probe.h kmodules/shared/xhci.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(if $(filter 1,$(XHCI_HOTPLUG)),-DXHCI_HOTPLUG_TEST,) -c $< -o $@
+
+.PHONY: test-xhci-boot _test-xhci-boot
+test-xhci-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" XHCI_HOTPLUG=1 _test-xhci-boot
+_test-xhci-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --xhci-hotplug

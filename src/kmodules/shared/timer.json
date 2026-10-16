@@ -1,0 +1,33 @@
+{
+  "name": "timer",
+  "exports": [
+    {
+      "name": "timer.init",
+      "symbol": "timer_surface_init"
+    },
+    {
+      "name": "timer.arm",
+      "symbol": "timer_surface_arm"
+    },
+    {
+      "name": "timer.stop",
+      "symbol": "timer_surface_stop"
+    },
+    {
+      "name": "timer.take",
+      "symbol": "timer_surface_take"
+    },
+    {
+      "name": "timer.info",
+      "symbol": "timer_surface_info",
+      "version": [
+        2,
+        0
+      ]
+    },
+    {
+      "name": "timer.interrupt",
+      "symbol": "timer_surface_interrupt"
+    }
+  ]
+}

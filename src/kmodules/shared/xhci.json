@@ -1,0 +1,61 @@
+{
+  "name": "xhci",
+  "exports": [
+    {
+      "name": "xhci.init",
+      "symbol": "xhci_surface_init"
+    },
+    {
+      "name": "xhci.open",
+      "symbol": "xhci_surface_open"
+    },
+    {
+      "name": "xhci.info",
+      "symbol": "xhci_surface_info"
+    },
+    {
+      "name": "xhci.port",
+      "symbol": "xhci_surface_port"
+    },
+    {
+      "name": "xhci.reset_port",
+      "symbol": "xhci_surface_reset_port"
+    },
+    {
+      "name": "xhci.device",
+      "symbol": "xhci_surface_device"
+    },
+    {
+      "name": "xhci.endpoint",
+      "symbol": "xhci_surface_endpoint"
+    },
+    {
+      "name": "xhci.transfer",
+      "symbol": "xhci_surface_transfer"
+    },
+    {
+      "name": "xhci.result",
+      "symbol": "xhci_surface_result"
+    },
+    {
+      "name": "xhci.cancel",
+      "symbol": "xhci_surface_cancel"
+    },
+    {
+      "name": "xhci.remove",
+      "symbol": "xhci_surface_remove"
+    },
+    {
+      "name": "xhci.close",
+      "symbol": "xhci_surface_close"
+    },
+    {
+      "name": "xhci.interrupt",
+      "symbol": "xhci_surface_interrupt"
+    },
+    {
+      "name": "xhci.wait",
+      "symbol": "xhci_surface_wait"
+    }
+  ]
+}

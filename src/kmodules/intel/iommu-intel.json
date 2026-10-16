@@ -1,0 +1,33 @@
+{
+  "name": "iommu-backend",
+  "exports": [
+    {
+      "name": "iommu.backend.init",
+      "symbol": "iommu_backend_init"
+    },
+    {
+      "name": "iommu.backend.start",
+      "symbol": "iommu_backend_start"
+    },
+    {
+      "name": "iommu.backend.context",
+      "symbol": "iommu_backend_context"
+    },
+    {
+      "name": "iommu.backend.invalidate",
+      "symbol": "iommu_backend_invalidate"
+    },
+    {
+      "name": "iommu.backend.discover",
+      "symbol": "iommu_backend_discover"
+    },
+    {
+      "name": "iommu.backend.route",
+      "symbol": "iommu_backend_route"
+    },
+    {
+      "name": "iommu.backend.collect",
+      "symbol": "iommu_backend_collect"
+    }
+  ]
+}

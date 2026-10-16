@@ -1,0 +1,57 @@
+{
+  "name": "smp",
+  "exports": [
+    {
+      "name": "smp.prepare",
+      "symbol": "smp_surface_prepare"
+    },
+    {
+      "name": "smp.start",
+      "symbol": "smp_surface_start"
+    },
+    {
+      "name": "smp.info",
+      "symbol": "smp_surface_info"
+    },
+    {
+      "name": "smp.interrupt",
+      "symbol": "smp_surface_interrupt"
+    },
+    {
+      "name": "smp.run",
+      "symbol": "smp_surface_run"
+    },
+    {
+      "name": "smp.validate_clock",
+      "symbol": "smp_surface_validate_clock"
+    },
+    {
+      "name": "smp.clock_info",
+      "symbol": "smp_surface_clock_info"
+    },
+    {
+      "name": "smp.clock_status",
+      "symbol": "smp_surface_clock_status"
+    },
+    {
+      "name": "smp.clock_sample",
+      "symbol": "smp_surface_clock_sample"
+    },
+    {
+      "name": "smp.clock_group",
+      "symbol": "smp_surface_clock_group"
+    },
+    {
+      "name": "smp.clock_cost",
+      "symbol": "smp_surface_clock_cost"
+    },
+    {
+      "name": "smp.clock_exchange",
+      "symbol": "smp_surface_clock_exchange"
+    },
+    {
+      "name": "smp.clock_offsets",
+      "symbol": "smp_surface_clock_offsets"
+    }
+  ]
+}

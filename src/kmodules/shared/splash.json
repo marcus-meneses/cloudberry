@@ -1,0 +1,9 @@
+{
+  "name": "splash",
+  "exports": [
+    {
+      "name": "splash.show",
+      "symbol": "splash_surface_show"
+    }
+  ]
+}

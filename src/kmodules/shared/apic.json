@@ -1,0 +1,21 @@
+{
+  "name": "apic",
+  "exports": [
+    {
+      "name": "apic.init",
+      "symbol": "apic_surface_init"
+    },
+    {
+      "name": "apic.info",
+      "symbol": "apic_surface_info"
+    },
+    {
+      "name": "apic.spurious",
+      "symbol": "apic_surface_spurious"
+    },
+    {
+      "name": "apic.cpu_init",
+      "symbol": "apic_surface_cpu_init"
+    }
+  ]
+}

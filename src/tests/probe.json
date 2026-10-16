@@ -1,0 +1,61 @@
+{
+  "name": "probe",
+  "exports": [
+    {
+      "name": "probe.arguments",
+      "symbol": "probe_arguments",
+      "version": [
+        2,
+        3
+      ]
+    },
+    {
+      "name": "probe.add",
+      "symbol": "probe_add"
+    },
+    {
+      "name": "probe.interrupt",
+      "symbol": "probe_interrupt"
+    },
+    {
+      "name": "probe.payload",
+      "symbol": "probe_payload_call"
+    },
+    {
+      "name": "probe.failed",
+      "symbol": "probe_failed"
+    },
+    {
+      "name": "probe.deferred",
+      "symbol": "probe_deferred"
+    },
+    {
+      "name": "probe.timestamp",
+      "symbol": "probe_timestamp"
+    },
+    {
+      "name": "probe.thread",
+      "symbol": "probe_thread_call"
+    },
+    {
+      "name": "probe.delay",
+      "symbol": "probe_delay"
+    },
+    {
+      "name": "probe.irq",
+      "symbol": "probe_irq_call"
+    },
+    {
+      "name": "probe.nvme",
+      "symbol": "probe_nvme_call"
+    },
+    {
+      "name": "probe.xstate",
+      "symbol": "probe_xstate"
+    },
+    {
+      "name": "probe.xhci",
+      "symbol": "probe_xhci_call"
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""One modern-bus TCG boot using disposable media and a test-only kernel."""
+from tsc_profile import summarize as summarize_tsc, parse_exchanges
+import re
+import json
+import sys
+import pathlib
+import shlex
+import shutil
+import subprocess
+import time
+import atexit
+import datetime
+import uuid
+import select
+
+root = pathlib.Path(__file__).resolve().parents[2]
+build = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv)>1 else root/'bin/tests/isolated'
+if not build.is_relative_to((root/'bin/tests').resolve()):
+    raise SystemExit('Boot tests require an isolated build below bin/tests')
+missing_clock = '--missing-clock' in sys.argv[2:]
+watchdog = '--watchdog' in sys.argv[2:]
+xhci_hotplug = '--xhci-hotplug' in sys.argv[2:]
+cpus = next((int(arg.split('=')[1]) for arg in sys.argv[2:] if arg.startswith('--cpus=')), 1)
+iommu = next((arg.split('=')[1] for arg in sys.argv[2:] if arg.startswith('--iommu=')), 'none')
+cpu_model = next((arg.split('=',1)[1] for arg in sys.argv[2:] if arg.startswith('--cpu=')), 'host,migratable=off,+invtsc' if '--accel=kvm' in sys.argv[2:] else 'max')
+accel = next((arg.split('=')[1] for arg in sys.argv[2:] if arg.startswith('--accel=')), 'tcg')
+if iommu not in ('none','intel','amd') or accel not in ('tcg','kvm'):
+    raise SystemExit('Unsupported test topology')
+if accel == 'kvm':
+    subprocess.run([sys.executable, str(root/'src/tests/native-check.py')],check=True)
+suffix = ('-intelcpu' if 'GenuineIntel' in cpu_model else '-amdcpu' if 'AuthenticAMD' in cpu_model else '-fxsave' if '-xsave' in cpu_model else '-sse-xsave' if '-avx' in cpu_model else '') + ('' if iommu == 'none' else '-'+iommu) + ('' if accel == 'tcg' else '-native')
+if watchdog and cpus<2:
+    raise SystemExit('Lock watchdog requires at least two CPUs')
+if xhci_hotplug: suffix += '-xhci-hotplug'
+test = build / ('tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
+test.mkdir(parents=True, exist_ok=True)
+# A failed rerun must never leave an older successful report looking current.
+report_path=test/'report.json'
+if report_path.exists():
+    history=test/'history';history.mkdir(exist_ok=True)
+    saved=history/f'success-{report_path.stat().st_mtime_ns}-{uuid.uuid4().hex[:8]}.json'
+    report_path.replace(saved)
+run_id=uuid.uuid4().hex
+run_result={'run_id':run_id,'status':'running','started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'accelerator':accel,'cpus':cpus,'iommu':iommu}
+def finish(status,reason=None):
+    run_result.update(status=status,finished_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+    if reason is not None:run_result['reason']=str(reason)[-4096:]
+    if status=='failed':report_path.unlink(missing_ok=True)
+    (test/'result.json').write_text(json.dumps(run_result,indent=2)+'\n')
+(test/'result.json').write_text(json.dumps(run_result,indent=2)+'\n')
+atexit.register(lambda:finish('failed','Harness exited before completion') if run_result['status']=='running' else None)
+stage = test / 'iso-root'
+if stage.exists():
+    shutil.rmtree(stage)
+shutil.copytree(build / 'src-iso-root', stage)
+shutil.copyfile(build / ('tests/src-lock-watchdog.elf' if watchdog else 'tests/src-kernel.elf'), stage / 'boot/kernel.elf')
+shutil.copyfile(build / 'kmodules/probe.kmod', stage / 'boot/kmodules/probe.kmod')
+with (stage / 'boot/limine/limine.conf').open('a') as config:
+    config.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
+if missing_clock:
+    config=stage/'boot/limine/limine.conf'
+    config.write_text(config.read_text().replace('    module_path: boot():/boot/kmodules/clock.kmod\n    module_cmdline: clock\n',''))
+iso = test / 'test.iso' 
+subprocess.run(['xorriso', '-as', 'mkisofs', '-R', '-r', '-J', '--efi-boot',
+    'boot/limine/limine-uefi-cd.bin', '-efi-boot-part', '--efi-boot-image',
+    '--protective-msdos-label', str(stage), '-o', str(iso)], check=True,
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+for name in ('nvme.img', 'sata.img'):
+    with (test / name).open('wb') as output:
+        output.truncate(1024 ** 3)
+with (test / 'nvme.img').open('r+b') as disk:
+    disk.write(bytes((i*37+11)%256 for i in range(16384)))
+    disk.seek(1024**3-512)
+    disk.write(b'CLOUDBERRY-NVME-END'+bytes(512-len(b'CLOUDBERRY-NVME-END')))
+plan = subprocess.check_output(['make', '-s', '-n', '-C', str(root / 'src'), 'run',
+    f'BUILD={build}', f'QEMU_CPU={cpu_model}', f'QEMU_CPUS={cpus}', 'QEMU_DISPLAY=none', f'QEMU_ACCEL={accel}', f'QEMU_IOMMU={iommu}', f'ISO={iso}',
+    f'NVME_DISK={test}/nvme.img', f'SATA_DISK={test}/sata.img'], text=True)
+command = next(line for line in plan.splitlines() if line.startswith('bash boot/run-qemu.sh'))
+command = command.replace('id=nvmedisk,format=raw,', 'id=nvmedisk,format=raw,readonly=on,')
+if '--xhci-trace' in sys.argv[2:]:
+    for event in ('usb_xhci_oper_write','usb_xhci_runtime_write','usb_xhci_doorbell_write','usb_xhci_fetch_trb','usb_xhci_queue_event','usb_xhci_irq_msix','usb_xhci_run','usb_xhci_stop'):
+        command += f' -trace enable={event}'
+log = test / 'boot.log'
+if xhci_hotplug:
+    command = command.replace('-device usb-kbd,bus=xhci.0', '-device usb-kbd,id=xhci-test-keyboard,bus=xhci.0,port=1')
+    command = command.replace('-debugcon stdio', f'-debugcon file:{log}')
+    command += ' -qmp stdio'
+with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
+    process = subprocess.Popen(shlex.split(command), cwd=root / 'src', bufsize=0, stdin=subprocess.PIPE if xhci_hotplug else None, stdout=subprocess.PIPE if xhci_hotplug else output, stderr=qemu_errors if xhci_hotplug else output)
+    try:
+        deadline = time.monotonic() + (45 if xhci_hotplug else 30)
+        removed = added = False
+        def qmp_call(name, arguments=None):
+            request = {'execute':name}
+            if arguments is not None: request['arguments'] = arguments
+            process.stdin.write((json.dumps(request)+'\n').encode()); process.stdin.flush()
+            while True:
+                if not select.select([process.stdout],[],[],3)[0]: raise TimeoutError('QMP response timeout')
+                response = json.loads(process.stdout.readline())
+                if 'error' in response: raise RuntimeError(response)
+                if 'return' in response: return response['return']
+        if xhci_hotplug:
+            if not select.select([process.stdout],[],[],3)[0]: raise TimeoutError('QMP greeting timeout')
+            json.loads(process.stdout.readline()); qmp_call('qmp_capabilities')
+        while time.monotonic() < deadline:
+            content = log.read_text()
+            if xhci_hotplug and 'WAIT XHCI REMOVE' in content and not removed:
+                qmp_call('device_del', {'id':'xhci-test-keyboard'}); removed = True
+            if xhci_hotplug and 'WAIT XHCI ADD' in content and not added:
+                qmp_call('device_add', {'driver':'usb-kbd','id':'xhci-test-keyboard','bus':'xhci.0','port':'1'}); added = True
+            if watchdog and 'inthandle: CPU halted' in content:
+                assert 'fatal lock acquisition timeout' in content and 'vector=0x0000000000000006' in content and 'rsp=0x' in content
+                print('PASS: failed lock owner triggers bounded watchdog, register dump and halt')
+                break
+            if missing_clock and 'Cloudberry startup: clock.init missing' in content:
+                assert 'BOOT OK;' not in content
+                print('PASS: isolated startup failure identifies clock.init as missing')
+                break
+            if not watchdog and not missing_clock and 'PASS mem surface test' in content and 'managed BSP event stack active' in content:
+                methods = ('init', 'malloc', 'free', 'calloc', 'realloc', 'aligned_alloc', 'usable_size')
+                for method in methods:
+                    assert re.search(rf'^mem\.{method} -> 0x[0-9a-f]{{16}}$', content, re.MULTILINE)
+                for method in ('hub.publish_table', 'hub.dump', 'splash.show', 'hardware.read', 'hwenum.enumerate', 'hwenum.find', 'hwenum.dump', 'hwenum.hardware', 'scheduler.init', 'scheduler.submit', 'scheduler.run', 'scheduler.cancel', 'scheduler.result', 'scheduler.stats', 'scheduler.remove_process', 'hardware.map_mmio', 'mmio.init', 'mmio.map', 'mmio.read', 'mmio.write', 'mmio.regions', 'clock.init', 'clock.calibrate', 'clock.now_ns', 'clock.now_us', 'clock.now_ms', 'clock.info', 'clock.rtc', 'inthandle.claim', 'inthandle.release', 'inthandle.cmos_read', 'inthandle.nmi_mask', 'scheduler.next_deadline', 'timer.init', 'timer.arm', 'timer.stop', 'timer.take', 'timer.info', 'timer.interrupt', 'apic.init', 'apic.info', 'apic.spurious', 'scheduler.info', 'event.info', 'memory.release', 'memory.map_owned', 'memory.unmap_owned', 'mem.pages_init', 'mem.pages_alloc', 'mem.pages_free', 'mem.stack_alloc', 'mem.stack_free', 'mem.pages_info', 'event.init', 'event.step', 'event.run'):
+                    assert re.search(rf'^{re.escape(method)} -> 0x[0-9a-f]{{16}}$', content, re.MULTILINE)
+                assert content.index('Cloudberry v2: inthandle ready') < content.index('Cloudberry v2: pre-flight Cloudberry logo displayed') < content.index('Cloudberry backend: cpu-')
+                if iommu != 'none':
+                    assert 'PASS IOMMU:' in content
+                assert 'PASS xHCI:' in content
+                if xhci_hotplug: assert removed and added
+                assert 'PASS NVMe:' in content
+                assert 'PASS device IRQ:' in content
+                assert 'MEASURE max managed IRQ-off ticks:' in content
+                assert 'MEASURE thread max runnable wait ns:' in content
+                assert 'MEASURE TSC validation status:' in content
+                assert 'PASS xstate:' in content
+                assert 'PASS threads/SMP:' in content
+                assert f'CPUs online: {cpus}' in content
+                assert 'PASS managed pages:' in content
+                assert 'PASS event loop:' in content
+                assert 'PASS clock boot:' in content
+                count = re.search(r'^hwenum\.hardware \((\d+) descriptors\)$', content, re.MULTILINE)
+                assert count and int(count.group(1)) == len(re.findall(r'^hw ', content, re.MULTILINE))
+                for category in ('memory', 'acpi', 'cpu', 'pci', 'local-apic', 'io-apic', 'hpet'):
+                    assert re.search(rf'^hw {category}\b', content, re.MULTILINE)
+                for pci_class in ('01:08:02', '01:06:01', '0c:03:30'):
+                    assert f'class={pci_class}' in content
+                measurements = {}
+                for key, value in re.findall(r'^MEASURE ([^:]+): (-?\d+)$', content, re.MULTILINE):
+                    measurements.setdefault(key, []).append(int(value))
+                expected_vendor='intel' if 'GenuineIntel' in cpu_model else 'amd' if 'AuthenticAMD' in cpu_model else None
+                selected_vendor=re.search(r'Cloudberry backend: cpu-(\w+)',content).group(1)
+                if expected_vendor: assert selected_vendor==expected_vendor
+                assert len(re.findall(r'Cloudberry backend: cpu-',content))==1
+                if iommu!='none':
+                    assert f'Cloudberry backend: iommu-{iommu}' in content
+                    assert len(re.findall(r'Cloudberry backend: iommu-',content))==1
+                else: assert 'Cloudberry backend: iommu-' not in content
+                host_snapshot=None
+                if accel=='kvm':
+                    proc=pathlib.Path('/proc/cpuinfo')
+                    first=proc.read_text().split('\n\n',1)[0] if proc.exists() else ''
+                    host_snapshot={key:value.strip() for line in first.splitlines() if ':' in line for key,value in [line.split(':',1)] if key.strip() in ('vendor_id','cpu family','model','model name','stepping','flags')}
+                    host_snapshot={key.strip():value for key,value in host_snapshot.items()}
+                report = {'run_id':run_id,'status':'passed','started_at':run_result['started_at'],'host_cpu':host_snapshot,'cpu_model': cpu_model, 'cpu_backend': re.search(r'Cloudberry backend: cpu-(\w+)',content).group(1), 'accelerator': accel, 'cpus': cpus, 'iommu': iommu, 'qemu_command': shlex.split(command), 'measurements': measurements, 'notes': re.findall(r'^NOTE .+$', content, re.MULTILINE), 'physical_hardware_validated': False, 'physical_dma_takeover_validated': False, 'x2apic_requested': next((arg.split('=',1)[1]=='1' for arg in sys.argv[2:] if arg.startswith('--x2apic-requested=')),False), 'x2apic_validated': measurements.get('APIC mode')==[2]}
+                reasons=('none','not initialized','TSC missing','invariant TSC missing','HPET missing','uncalibrated','calibration jitter','frequency mismatch','counter regression','CPU capability mismatch','reference failure','conversion failure','CPU offset','CPU drift','measurement uncertainty','timeout','activation failure','reference source','setup failure','missing method')
+                reason=measurements['TSC rejection reason'][0]
+                report['tsc_rejection_reason']=reasons[reason] if reason<len(reasons) else f'unknown {reason}'
+                report['tsc_profile']=summarize_tsc(measurements, parse_exchanges(content))
+                report_path.write_text(json.dumps(report,indent=2)+'\n')
+                print('Acceptance report:',test/'report.json')
+                print(f'PASS: {cpus} CPU boot, timer-preempted threads, block/wake, SMP allocation and remote TLB reuse; separate mem/hwenum modules, hub methods/table publication, memory/CPU/NVMe/AHCI/xHCI enumeration, scheduler method/interrupt jobs, real HPET MMIO mapping/read/write, clock calibration/monotonic timestamps, RTC/NMI preservation and APIC deadline event loop')
+                break
+            if re.search(r'^Cloudberry v2:.*failed|^.*\bFAIL\b', content, re.MULTILINE) or process.poll() is not None:
+                raise SystemExit(content)
+            time.sleep(0.1)
+        else:
+            raise SystemExit('Boot timed out:\n' + log.read_text())
+    except BaseException as error:
+        finish('failed',f'{type(error).__name__}: {error}')
+        raise
+    else:
+        finish('passed')
+    finally:
+        try:
+            if process.poll() is None:process.terminate()
+            process.wait(timeout=5)
+        except BaseException as error:
+            finish('failed',f'VM cleanup failed: {error}')
+            raise
+print('Boot log:', log)

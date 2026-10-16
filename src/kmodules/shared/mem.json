@@ -1,0 +1,65 @@
+{
+  "name": "mem",
+  "exports": [
+    {
+      "name": "mem.configure",
+      "symbol": "mem_surface_configure"
+    },
+    {
+      "name": "mem.context",
+      "symbol": "mem_surface_context"
+    },
+    {
+      "name": "mem.init",
+      "symbol": "mem_surface_init"
+    },
+    {
+      "name": "mem.malloc",
+      "symbol": "mem_surface_malloc"
+    },
+    {
+      "name": "mem.free",
+      "symbol": "mem_surface_free"
+    },
+    {
+      "name": "mem.calloc",
+      "symbol": "mem_surface_calloc"
+    },
+    {
+      "name": "mem.realloc",
+      "symbol": "mem_surface_realloc"
+    },
+    {
+      "name": "mem.aligned_alloc",
+      "symbol": "mem_surface_aligned"
+    },
+    {
+      "name": "mem.usable_size",
+      "symbol": "mem_surface_usable"
+    },
+    {
+      "name": "mem.pages_init",
+      "symbol": "mem_surface_pages_init"
+    },
+    {
+      "name": "mem.pages_alloc",
+      "symbol": "mem_surface_pages_alloc"
+    },
+    {
+      "name": "mem.pages_free",
+      "symbol": "mem_surface_pages_free"
+    },
+    {
+      "name": "mem.stack_alloc",
+      "symbol": "mem_surface_stack_alloc"
+    },
+    {
+      "name": "mem.stack_free",
+      "symbol": "mem_surface_stack_free"
+    },
+    {
+      "name": "mem.pages_info",
+      "symbol": "mem_surface_pages_info"
+    }
+  ]
+}

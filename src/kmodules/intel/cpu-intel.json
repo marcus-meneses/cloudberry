@@ -1,0 +1,29 @@
+{
+  "name": "cpu-backend",
+  "exports": [
+    {
+      "name": "cpu.init",
+      "symbol": "cpu_surface_init"
+    },
+    {
+      "name": "cpu.id",
+      "symbol": "cpu_surface_id"
+    },
+    {
+      "name": "cpu.ticks",
+      "symbol": "cpu_surface_ticks"
+    },
+    {
+      "name": "cpu.ipi_fence",
+      "symbol": "cpu_surface_fence"
+    },
+    {
+      "name": "cpu.features",
+      "symbol": "cpu_surface_features"
+    },
+    {
+      "name": "cpu.tsc",
+      "symbol": "cpu_surface_tsc"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "xstate",
+  "exports": [
+    {
+      "name": "xstate.cpu_init",
+      "symbol": "xstate_cpu_init"
+    },
+    {
+      "name": "xstate.info",
+      "symbol": "xstate_info"
+    },
+    {
+      "name": "xstate.init",
+      "symbol": "xstate_init"
+    },
+    {
+      "name": "xstate.save",
+      "symbol": "xstate_save"
+    },
+    {
+      "name": "xstate.restore",
+      "symbol": "xstate_restore"
+    }
+  ]
+}

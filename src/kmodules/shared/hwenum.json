@@ -1,0 +1,17 @@
+{
+  "name": "hwenum",
+  "exports": [
+    {
+      "name": "hwenum.enumerate",
+      "symbol": "hwenum_surface_enumerate"
+    },
+    {
+      "name": "hwenum.find",
+      "symbol": "hwenum_surface_find"
+    },
+    {
+      "name": "hwenum.dump",
+      "symbol": "hwenum_surface_dump"
+    }
+  ]
+}

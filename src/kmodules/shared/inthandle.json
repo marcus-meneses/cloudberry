@@ -1,0 +1,53 @@
+{
+  "name": "inthandle",
+  "exports": [
+    {
+      "name": "inthandle.init",
+      "symbol": "inthandle_surface_init"
+    },
+    {
+      "name": "inthandle.bind",
+      "symbol": "inthandle_surface_bind",
+      "version": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "inthandle.check",
+      "symbol": "inthandle_surface_check"
+    },
+    {
+      "name": "inthandle.dispatch",
+      "symbol": "inthandle_surface_dispatch",
+      "version": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "inthandle.is_bound",
+      "symbol": "inthandle_surface_is_bound"
+    },
+    {
+      "name": "inthandle.claim",
+      "symbol": "inthandle_surface_claim"
+    },
+    {
+      "name": "inthandle.release",
+      "symbol": "inthandle_surface_release"
+    },
+    {
+      "name": "inthandle.cmos_read",
+      "symbol": "inthandle_surface_cmos_read"
+    },
+    {
+      "name": "inthandle.nmi_mask",
+      "symbol": "inthandle_surface_nmi_mask"
+    },
+    {
+      "name": "inthandle.cpu_init",
+      "symbol": "inthandle_surface_cpu_init"
+    }
+  ]
+}

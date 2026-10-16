@@ -1,0 +1,41 @@
+# Owned PCI configuration and DMA
+
+`pci.kmod` supplies BSP foreground ownership of enumerated PCI endpoints. It uses
+hwenum's ECAM addresses and mmio's checked mappings; it does not duplicate PCI
+enumeration. Definitions are in [pci.h](pci.h).
+
+- `init(hub,heap)` allocates endpoint ownership records, without claiming devices.
+- `claim(hardware_index,owner,out)` requires an unclaimed type-0 endpoint and a
+  nonzero owner. It disables bus mastering, port/memory decode and old message
+  interrupts, walks standard capabilities with bounds/cycle checks, probes each
+  assigned memory BAR with decoding disabled, restores BAR values, checks sizes
+  and alignment, and maps their full extents. Memory decoding is then available;
+  bus mastering remains off. No BAR relocation is performed.
+- `busmaster(index,owner,enable)` explicitly controls DMA enabling.
+- `dma_alloc(index,owner,pages,out)` returns tracked, zeroed, physically contiguous
+  page-aligned memory. `dma_free(index,owner,id)` requires bus mastering off.
+- `msix(request)` programs an owned, bounds-checked table entry using an irq route
+  message, masking the entry/function while changing it. MSI-X remains enabled
+  with the requested entry mask. The driver supplies queue/vector associations.
+- `release(index,owner,hardware_quiesced=1)` requires DMA disabled and no tracked
+  buffers. It restores command settings with bus mastering kept disabled;
+  firmware's old DMA queues/interrupt enable state are never resurrected.
+
+Clearing bus mastering alone does not prove old transactions have drained. The
+owner must reset/quiesce its device and observe completion before freeing DMA or
+releasing routes. Initialization failure can leave boot-lifetime MMIO mappings,
+which are retained rather than reclaimed unsafely.
+
+PCI delegates DMA attachment, pinning, translation and invalidation to
+[iommu](iommu.md), with Intel VT-d and AMD-Vi backends. Supported firmware no longer
+causes blanket DMA rejection. Unsupported scopes/features still fail closed.
+DMA allocation/free/release run outside an operation-wide global lock; per-device
+operation ownership prevents concurrent enabling/release. A failed map returns
+its retained allocation descriptor/ID for explicit cleanup; it must not be lost. There is no bridge/port-BAR support, INTx routing, hotplug,
+interrupt remapping, or arbitrary DMA address-width support. Active ATS/PRI/PASID is rejected. Generic routing
+still produces MSI messages; this module programs MSI-X, not MSI capabilities.
+
+Focused UBSan host tests cover BAR probe/restore, malformed capability cycles,
+ownership, MSI-X bounds, failed allocation cleanup, DMA lifetime and IOMMU
+rejection. Isolated NVMe boots validate the adapter against actual QEMU ECAM and
+MSI-X delivery.

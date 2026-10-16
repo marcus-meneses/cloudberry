@@ -1,0 +1,25 @@
+{
+  "name": "threads",
+  "exports": [
+    {
+      "name": "threads.init",
+      "symbol": "threads_surface_init"
+    },
+    {
+      "name": "threads.create",
+      "symbol": "threads_surface_create"
+    },
+    {
+      "name": "threads.run",
+      "symbol": "threads_surface_run"
+    },
+    {
+      "name": "threads.control",
+      "symbol": "threads_surface_control"
+    },
+    {
+      "name": "threads.tick",
+      "symbol": "threads_surface_tick"
+    }
+  ]
+}

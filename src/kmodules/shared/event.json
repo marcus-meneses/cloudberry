@@ -1,0 +1,25 @@
+{
+  "name": "event",
+  "exports": [
+    {
+      "name": "event.init",
+      "symbol": "event_surface_init"
+    },
+    {
+      "name": "event.step",
+      "symbol": "event_surface_step"
+    },
+    {
+      "name": "event.run",
+      "symbol": "event_surface_run"
+    },
+    {
+      "name": "event.info",
+      "symbol": "event_surface_info"
+    },
+    {
+      "name": "event.worker",
+      "symbol": "event_surface_worker"
+    }
+  ]
+}

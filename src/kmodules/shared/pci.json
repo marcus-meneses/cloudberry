@@ -1,0 +1,33 @@
+{
+  "name": "pci",
+  "exports": [
+    {
+      "name": "pci.init",
+      "symbol": "pci_surface_init"
+    },
+    {
+      "name": "pci.claim",
+      "symbol": "pci_surface_claim"
+    },
+    {
+      "name": "pci.busmaster",
+      "symbol": "pci_surface_busmaster"
+    },
+    {
+      "name": "pci.msix",
+      "symbol": "pci_surface_msix"
+    },
+    {
+      "name": "pci.dma_alloc",
+      "symbol": "pci_surface_dma_alloc"
+    },
+    {
+      "name": "pci.dma_free",
+      "symbol": "pci_surface_dma_free"
+    },
+    {
+      "name": "pci.release",
+      "symbol": "pci_surface_release"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "name": "irq",
+  "exports": [
+    {
+      "name": "irq.init",
+      "symbol": "irq_surface_init"
+    },
+    {
+      "name": "irq.route",
+      "symbol": "irq_surface_route"
+    },
+    {
+      "name": "irq.enable",
+      "symbol": "irq_surface_enable"
+    },
+    {
+      "name": "irq.release",
+      "symbol": "irq_surface_release"
+    },
+    {
+      "name": "irq.info",
+      "symbol": "irq_surface_info"
+    },
+    {
+      "name": "irq.pending",
+      "symbol": "irq_surface_pending"
+    },
+    {
+      "name": "irq.drain",
+      "symbol": "irq_surface_drain"
+    },
+    {
+      "name": "irq.interrupt",
+      "symbol": "irq_surface_interrupt"
+    },
+    {
+      "name": "irq.context",
+      "symbol": "irq_surface_context"
+    }
+  ]
+}

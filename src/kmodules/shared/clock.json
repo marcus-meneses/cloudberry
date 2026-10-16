@@ -1,0 +1,53 @@
+{
+  "name": "clock",
+  "exports": [
+    {
+      "name": "clock.init",
+      "symbol": "clock_surface_init"
+    },
+    {
+      "name": "clock.calibrate",
+      "symbol": "clock_surface_calibrate"
+    },
+    {
+      "name": "clock.now_ns",
+      "symbol": "clock_surface_now_ns"
+    },
+    {
+      "name": "clock.now_us",
+      "symbol": "clock_surface_now_us"
+    },
+    {
+      "name": "clock.now_ms",
+      "symbol": "clock_surface_now_ms"
+    },
+    {
+      "name": "clock.info",
+      "symbol": "clock_surface_info"
+    },
+    {
+      "name": "clock.rtc",
+      "symbol": "clock_surface_rtc"
+    },
+    {
+      "name": "clock.shared",
+      "symbol": "clock_surface_shared"
+    },
+    {
+      "name": "clock.sample",
+      "symbol": "clock_surface_sample"
+    },
+    {
+      "name": "clock.smp_tsc",
+      "symbol": "clock_surface_smp_tsc"
+    },
+    {
+      "name": "clock.tsc_status",
+      "symbol": "clock_surface_tsc_status"
+    },
+    {
+      "name": "clock.refine",
+      "symbol": "clock_surface_refine"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "scheduler",
+  "exports": [
+    {
+      "name": "scheduler.init",
+      "symbol": "scheduler_surface_init"
+    },
+    {
+      "name": "scheduler.submit",
+      "symbol": "scheduler_surface_submit",
+      "version": [
+        3,
+        0
+      ]
+    },
+    {
+      "name": "scheduler.run",
+      "symbol": "scheduler_surface_run"
+    },
+    {
+      "name": "scheduler.cancel",
+      "symbol": "scheduler_surface_cancel"
+    },
+    {
+      "name": "scheduler.result",
+      "symbol": "scheduler_surface_result",
+      "version": [
+        2,
+        0
+      ]
+    },
+    {
+      "name": "scheduler.stats",
+      "symbol": "scheduler_surface_stats",
+      "version": [
+        2,
+        0
+      ]
+    },
+    {
+      "name": "scheduler.remove_process",
+      "symbol": "scheduler_surface_remove_process"
+    },
+    {
+      "name": "scheduler.next_deadline",
+      "symbol": "scheduler_surface_next_deadline"
+    },
+    {
+      "name": "scheduler.info",
+      "symbol": "scheduler_surface_info"
+    }
+  ]
+}
