@@ -1,0 +1,29 @@
+{
+  "name": "acpi",
+  "exports": [
+    {
+      "name": "acpi.init",
+      "symbol": "acpi_surface_init"
+    },
+    {
+      "name": "acpi.info",
+      "symbol": "acpi_surface_info"
+    },
+    {
+      "name": "acpi.device",
+      "symbol": "acpi_surface_device"
+    },
+    {
+      "name": "acpi.eval_integer",
+      "symbol": "acpi_surface_eval_integer"
+    },
+    {
+      "name": "acpi.eval_buffer",
+      "symbol": "acpi_surface_eval_buffer"
+    },
+    {
+      "name": "acpi.interrupt",
+      "symbol": "acpi_surface_interrupt"
+    }
+  ]
+}

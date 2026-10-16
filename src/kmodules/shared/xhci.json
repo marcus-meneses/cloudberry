@@ -56,6 +56,18 @@
     {
       "name": "xhci.wait",
       "symbol": "xhci_surface_wait"
+    },
+    {
+      "name": "xhci.watch",
+      "symbol": "xhci_surface_watch"
+    },
+    {
+      "name": "xhci.hub",
+      "symbol": "xhci_surface_hub"
+    },
+    {
+      "name": "xhci.disconnect",
+      "symbol": "xhci_surface_disconnect"
     }
   ]
 }

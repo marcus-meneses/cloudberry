@@ -4,7 +4,15 @@
 hwenum's ECAM addresses and mmio's checked mappings; it does not duplicate PCI
 enumeration. Definitions are in [pci.h](pci.h).
 
-- `init(hub,heap)` allocates endpoint ownership records, without claiming devices.
+- `init(hub,heap)` allocates endpoint ownership records and publishes the owned
+  `pci.devices` inventory, without claiming devices. Bridge bus information
+  identifies parents; this does not add bridge ownership or BAR relocation.
+- `device(hardware_index,out)` snapshots identity, parent and companion metadata.
+  `associate(hardware_index,acpi_ref)` sets a boot-time generation-qualified ACPI
+  companion before driver ownership; an existing different reference is refused.
+- `firmware_read/write(access)` adapt AML PCI operation regions through enumerated
+  ECAM. Writes refuse owned devices, headers/BARs, extended configuration and
+  the standard capability area. These conservative accesses never claim devices.
 - `claim(hardware_index,owner,out)` requires an unclaimed type-0 endpoint and a
   nonzero owner. It disables bus mastering, port/memory decode and old message
   interrupts, walks standard capabilities with bounds/cycle checks, probes each
@@ -31,7 +39,7 @@ PCI delegates DMA attachment, pinning, translation and invalidation to
 causes blanket DMA rejection. Unsupported scopes/features still fail closed.
 DMA allocation/free/release run outside an operation-wide global lock; per-device
 operation ownership prevents concurrent enabling/release. A failed map returns
-its retained allocation descriptor/ID for explicit cleanup; it must not be lost. There is no bridge/port-BAR support, INTx routing, hotplug,
+its retained allocation descriptor/ID for explicit cleanup; it must not be lost. There is no bridge ownership/port-BAR support, INTx routing, hotplug,
 interrupt remapping, or arbitrary DMA address-width support. Active ATS/PRI/PASID is rejected. Generic routing
 still produces MSI messages; this module programs MSI-X, not MSI capabilities.
 

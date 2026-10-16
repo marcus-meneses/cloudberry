@@ -5,8 +5,8 @@
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 struct dma_record {struct dma_record *next;struct mem_pages pages;int mapped;};
-struct device {struct pci_device info;uintptr_t config;uint16_t command;int master,operations,attached;struct dma_record *dma;};
-static struct {const struct kernel_surfaces *hub;const struct hwenum_table *hw;const struct mmio_table *mmio;struct device *devices;uintptr_t heap;int iommu;kernel_surface_call cpu,map,alloc,free,pages,release,attach,map_dma,unmap,detach,ready;} state;
+struct device {struct pci_record *record;struct pci_device info;uintptr_t config;uint16_t command;int master,operations,attached;struct dma_record *dma;};
+static struct {const struct kernel_surfaces *hub;const struct hwenum_table *hw;const struct mmio_table *mmio;struct device *devices;struct pci_table table;uintptr_t heap;int iommu;kernel_surface_call cpu,map,alloc,free,pages,release,attach,map_dma,unmap,detach,ready;} state;
 static int bsp(void) {return state.cpu && !CALL(state.cpu,CPU_CURRENT,0,0).value;}
 static struct device *owned(size_t i,uint64_t owner) {return state.devices && i<state.hw->count && owner && state.devices[i].info.owner==owner?&state.devices[i]:NULL;}
 static uintptr_t mapping(size_t hw,unsigned kind,unsigned bar,uint64_t bytes) {
@@ -16,22 +16,53 @@ static uintptr_t mapping(size_t hw,unsigned kind,unsigned bar,uint64_t bytes) {
         }
     }return 0;
 }
+static struct kernel_surface_result init_failed(void) {
+    if(state.free) {
+        if(state.table.entries)CALL(state.free,state.heap,state.table.entries,0);
+        if(state.devices)CALL(state.free,state.heap,state.devices,0);
+    }
+    state=(__typeof__(state)){0};return module_result(0,0);
+}
 struct kernel_surface_result pci_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if(state.hub)return module_result(1,state.hub==hub && state.heap==b);
     if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || !b)return module_result(0,0);
-    state.cpu=kernel_surface_find(hub,"cpu.control");if(!bsp())return module_result(0,0);
+    state.cpu=kernel_surface_find(hub,"cpu.control");if(!bsp())return init_failed();
     const struct kernel_hub_table *hw=kernel_hub_find_table(hub,HWENUM_TABLE_NAME),*mm=kernel_hub_find_table(hub,MMIO_TABLE_NAME);
-    if(!hw || !mm)return module_result(0,0);
+    if(!hw || !mm)return init_failed();
     state.hw=(const void *)hw->address;state.mmio=(const void *)mm->address;
     state.map=kernel_surface_find(hub,"mmio.map");state.alloc=kernel_surface_find(hub,"mem.calloc");state.free=kernel_surface_find(hub,"mem.free");state.pages=kernel_surface_find(hub,"mem.pages_alloc");state.release=kernel_surface_find(hub,"mem.pages_free");
     state.attach=kernel_surface_find(hub,"iommu.attach");state.map_dma=kernel_surface_find(hub,"iommu.map");state.unmap=kernel_surface_find(hub,"iommu.unmap");state.detach=kernel_surface_find(hub,"iommu.detach");state.ready=kernel_surface_find(hub,"iommu.ready");
-    if(!state.map || !state.alloc || !state.free || !state.pages || !state.release)return module_result(0,0);
-    struct kernel_surface_result memory=CALL(state.alloc,b,state.hw->count,sizeof(struct device));if(memory.status)return memory;
+    if(!state.map || !state.alloc || !state.free || !state.pages || !state.release)return init_failed();
+    struct kernel_surface_result memory=CALL(state.alloc,b,state.hw->count,sizeof(struct device));if(memory.status)return init_failed();
     state.devices=(void *)memory.value;state.heap=b;
     for(size_t i=0;i<state.hw->count;++i) {const struct hwenum_descriptor *h=&state.hw->entries[i];
         if(h->kind==HWENUM_ACPI_TABLE && ((h->data.acpi.signature[0]=='D' && h->data.acpi.signature[1]=='M' && h->data.acpi.signature[2]=='A' && h->data.acpi.signature[3]=='R') || (h->data.acpi.signature[0]=='I' && h->data.acpi.signature[1]=='V' && h->data.acpi.signature[2]=='R' && h->data.acpi.signature[3]=='S')))state.iommu=1;
     }
+    size_t count=0;for(size_t i=0;i<state.hw->count;++i)if(state.hw->entries[i].kind==HWENUM_PCI)++count;
+    struct kernel_surface_result records=CALL(state.alloc,b,count?count:1,sizeof(struct pci_record));if(records.status)return init_failed();
+    state.table=(struct pci_table){.magic=PCI_TABLE_MAGIC,.major=1,.entry_bytes=sizeof(struct pci_record),.count=count,.entries=(void *)records.value};
+    kernel_surface_call read=kernel_surface_find(hub,"hardware.read"),publish=kernel_surface_find(hub,"hub.publish_table");
+    if(!read || !publish)return init_failed();
+    count=0;for(size_t i=0;i<state.hw->count;++i) {const struct hwenum_descriptor *h=&state.hw->entries[i];if(h->kind!=HWENUM_PCI)continue;
+        struct pci_record *r=&state.table.entries[count++];state.devices[i].record=r;r->hardware_index=i;r->parent_hardware_index=UINT64_MAX;r->config_physical=h->address;
+        r->identity=(struct device_identity){.id=DEVICE_PCI_ID(i),.generation=1,.bus=DEVICE_BUS_PCI,.flags=DEVICE_PRESENT|DEVICE_ENABLED|DEVICE_FUNCTIONING};
+        r->segment=h->data.pci.segment;r->bus=h->data.pci.bus;r->slot=h->data.pci.slot;r->function=h->data.pci.function;r->header_type=h->data.pci.header_type;
+        if((r->header_type&127)==1) {uint8_t buses[3];struct kernel_surface_result readback=CALL(read,h->address+0x18,buses,3);
+            if(readback.status || readback.value!=3 || buses[0]!=r->bus || (buses[1] && (buses[1]==r->bus || buses[2]<buses[1])))r->identity.flags|=DEVICE_ASSOCIATION_ERROR;
+            else {r->secondary_bus=buses[1];r->subordinate_bus=buses[2];}
+        }
+    }
+    for(size_t i=0;i<state.table.count;++i) {struct pci_record *r=&state.table.entries[i];unsigned best=256;int ambiguous=0;
+        for(size_t j=0;j<state.table.count;++j) {const struct pci_record *p=&state.table.entries[j];if(p==r || p->segment!=r->segment || !p->secondary_bus || p->bus==r->bus || r->bus<p->secondary_bus || r->bus>p->subordinate_bus || (p->identity.flags&DEVICE_ASSOCIATION_ERROR))continue;
+            unsigned span=p->subordinate_bus-p->secondary_bus;
+            if(span<best) {best=span;ambiguous=0;r->parent_hardware_index=p->hardware_index;r->identity.parent_id=p->identity.id;}
+            else if(span==best)ambiguous=1;
+        }
+        if(ambiguous)r->identity.flags|=DEVICE_ASSOCIATION_ERROR;
+    }
+    struct kernel_hub_table table={.name=PCI_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
+    if(CALL(publish,&table,0,0).status)return init_failed();
     state.hub=hub;return module_result(1,1);
 }
 static int capabilities(struct device *d) {
@@ -93,9 +124,9 @@ struct kernel_surface_result pci_surface_claim(MODULE_ARGS) {
     for(unsigned bar=0;bar<6;++bar)if(dev->info.bars[bar].bytes) {
         struct pci_bar *r=&dev->info.bars[bar];r->address=mapping(a,MMIO_PCI_BAR,bar,r->bytes);if(!r->address)goto fail;
     }
-    dev->info.owner=b;*(struct pci_device *)c=dev->info;return module_result(1,1);
+    dev->info.owner=b;dev->record->identity.owner=b;dev->info.acpi=dev->record->identity.acpi;*(struct pci_device *)c=dev->info;return module_result(1,1);
 fail:
-    pci_write16(dev->config+4,dev->command&~4u);*dev=(struct device){0};return module_result(0,0);
+    pci_write16(dev->config+4,dev->command&~4u);struct pci_record *record=dev->record;*dev=(struct device){.record=record};return module_result(0,0);
 }
 struct kernel_surface_result pci_surface_busmaster(MODULE_ARGS) {
     MODULE_UNUSED();struct device *dev=owned(a,b);if(!dev || !bsp() || c>1 || (c && (dev->operations || (state.ready?CALL(state.ready,a,b,0).status:(uintptr_t)state.iommu))))return module_result(0,0);
@@ -151,5 +182,50 @@ struct kernel_surface_result pci_surface_dma_free(MODULE_ARGS) {
 struct kernel_surface_result pci_surface_release(MODULE_ARGS) {
     MODULE_UNUSED();struct device *dev=owned(a,b);if(!dev || !bsp() || c!=1 || dev->master || dev->dma || !begin(dev,a,b,1,1))return module_result(0,0);
     if(dev->attached && CALL(state.detach,a,b,1).status)return end(dev,0,0);
-    pci_write16(dev->config+4,dev->command&~4u);uint64_t flags=lock();*dev=(struct device){0};unlock(flags);return module_result(1,1);
+    pci_write16(dev->config+4,dev->command&~4u);uint64_t flags=lock();struct pci_record *record=dev->record;record->identity.owner=0;*dev=(struct device){.record=record};unlock(flags);return module_result(1,1);
+}
+
+struct kernel_surface_result pci_surface_device(MODULE_ARGS) {
+    MODULE_UNUSED();if(!state.hub || !bsp() || a>=state.hw->count || !b || !state.devices[a].record)return module_result(0,0);
+    uint64_t flags=lock();*(struct pci_record *)b=*state.devices[a].record;unlock(flags);return module_result(1,1);
+}
+struct kernel_surface_result pci_surface_associate(MODULE_ARGS) {
+    MODULE_UNUSED();const struct device_acpi_ref *ref=(const void *)b;
+    if(!state.hub || !bsp() || a>=state.hw->count || !ref || !ref->id || !ref->generation || !state.devices[a].record)return module_result(0,0);
+    uint64_t flags=lock();struct pci_record *r=state.devices[a].record;
+    int ok=!r->identity.owner && (!r->identity.acpi.id || (r->identity.acpi.id==ref->id && r->identity.acpi.generation==ref->generation));
+    if(ok) {r->identity.acpi=*ref;state.devices[a].info.acpi=*ref;}unlock(flags);return module_result(ok,ok);
+}
+static struct device *firmware_device(const struct pci_firmware_access *r) {
+    if(!state.hub || !r || r->slot>=32 || r->function>=8 || (r->width!=1 && r->width!=2 && r->width!=4) || r->offset>4096-r->width || (r->offset&(r->width-1)))return NULL;
+    for(size_t i=0;i<state.table.count;++i) {const struct pci_record *p=&state.table.entries[i];if(p->segment==r->segment && p->bus==r->bus && p->slot==r->slot && p->function==r->function)return &state.devices[p->hardware_index];}return NULL;
+}
+struct kernel_surface_result pci_surface_firmware_read(MODULE_ARGS) {
+    MODULE_UNUSED();struct pci_firmware_access *r=(void *)a;if(!bsp())return module_result(0,0);struct device *dev=firmware_device(r);if(!dev)return module_result(0,0);
+    kernel_surface_call read=kernel_surface_find(state.hub,"hardware.read");uint32_t value=0;struct kernel_surface_result result=CALL(read,dev->record->config_physical+r->offset,&value,r->width);
+    if(result.status || result.value!=r->width)return module_result(0,0);
+    r->value=value;return module_result(value,1);
+}
+struct kernel_surface_result pci_surface_firmware_write(MODULE_ARGS) {
+    MODULE_UNUSED();const struct pci_firmware_access *r=(void *)a;if(!bsp())return module_result(0,0);struct device *dev=firmware_device(r);
+    /* Firmware may access device-specific registers only while unclaimed.
+     * Header/BAR/capability control belongs to the PCI owner. */
+    if(!dev || dev->info.owner || r->offset<0x40 || r->offset>=0x100 || (dev->record->header_type&127)!=0)return module_result(0,0);
+    uintptr_t config=mapping(dev->record->hardware_index,MMIO_PCI_CONFIG,0,0);if(!config)return module_result(0,0);
+    /* Fail closed around the entire capability area, including unknown vendor
+     * capabilities. Firmware may write only registers before the first cap. */
+    if(pci_read16(config+6)&16) {
+        unsigned offset=*(volatile uint8_t *)(config+0x34),first=256;uint64_t seen=0;
+        if(!offset)return module_result(0,0);
+        while(offset) {
+            if(offset<0x40 || offset>0xfc || (offset&3))return module_result(0,0);
+            uint64_t bit=UINT64_C(1)<<(offset/4);if(seen&bit)return module_result(0,0);seen|=bit;
+            if(offset<first)first=offset;
+            offset=*(volatile uint8_t *)(config+offset+1);
+        }
+        if(r->offset+r->width>first)return module_result(0,0);
+    }
+    if(r->width==1)*(volatile uint8_t *)(config+r->offset)=r->value;
+    else if(r->width==2)pci_write16(config+r->offset,r->value);else pci_write32(config+r->offset,r->value);
+    return module_result(1,1);
 }

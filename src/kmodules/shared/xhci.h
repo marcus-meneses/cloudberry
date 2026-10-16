@@ -13,7 +13,7 @@ struct xhci_table {uint64_t magic;uint16_t major,minor;uint32_t record_bytes;uin
  * info(id,out), port(id,1-based port,out). Raw registry views require caller
  * synchronization; snapshot methods copy under the CPU lock.
  * reset_port(id,port) handles USB2 PR / USB3 WPR without enumeration.
- * device(id,host_device_request,out token) enables/addresses a root-port slot.
+ * device(id,host_device_request,out token) enables/addresses a root or downstream slot.
  * endpoint(id,host_endpoint_request) configures bulk/interrupt endpoints;
  * endpoint address is the USB endpoint address (0x81 = EP1 IN). Address 0
  * with HOST_CONTROL evaluates the existing EP0 maximum packet size.
@@ -24,13 +24,21 @@ struct xhci_table {uint64_t magic;uint16_t major,minor;uint32_t record_bytes;uin
  * leaves the request owned and pending until completion/cancel. One waiter per
  * request. Reap before closing; close refuses outstanding results/waiters.
  * cancel(id,device,endpoint) stops/resets endpoint and advances its dequeue.
- * remove(id,device) disables slot; close(id) halts/resets controller and releases
+ * hub(id,request) configures hub/TT context. disconnect(id,token) invalidates
+ * the subtree and wakes pending I/O without releasing DMA.
+ * remove(id,device) disables a slot only after all children were removed; close(id) halts/resets controller and releases
  * ownership after draining callbacks. Failed quiescence retains all DMA storage.
  * Device tokens are fresh per binding; port_generation rejects stale attachment.
  * open/close/reset/device/endpoint/cancel/remove require a preemptible BSP thread with IF=1, outside critical
- * sections and IRQ callbacks. These synchronous operations reject overlap;
- * transfers may coexist on different endpoints. No external hubs, streams,
+ * sections and IRQ callbacks. Command mutations use bounded wake-driven
+ * serialization; transfers may coexist on different endpoints. No streams,
  * isochronous transfers, power management or image unloading in this layer yet. */
+/* watch(id,current_thread_id) registers the root-bus owner; watch(id,0) clears
+ * its subscription. Port changes/controller failures credit a thread wake from
+ * deferred context. Unsubscribe before close. No polling worker is introduced. */
+struct kernel_surface_result xhci_surface_hub(MODULE_ARGS);
+struct kernel_surface_result xhci_surface_disconnect(MODULE_ARGS);
+struct kernel_surface_result xhci_surface_watch(MODULE_ARGS);
 struct kernel_surface_result xhci_surface_init(MODULE_ARGS);
 struct kernel_surface_result xhci_surface_open(MODULE_ARGS);
 struct kernel_surface_result xhci_surface_info(MODULE_ARGS);

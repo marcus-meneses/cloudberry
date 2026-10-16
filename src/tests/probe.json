@@ -56,6 +56,18 @@
     {
       "name": "probe.xhci",
       "symbol": "probe_xhci_call"
+    },
+    {
+      "name": "probe.usb",
+      "symbol": "probe_usb_call"
+    },
+    {
+      "name": "probe.usb_wait",
+      "symbol": "probe_usb_wait"
+    },
+    {
+      "name": "probe.hubs",
+      "symbol": "probe_hubs_call"
     }
   ]
 }

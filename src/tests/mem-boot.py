@@ -21,6 +21,10 @@ if not build.is_relative_to((root/'bin/tests').resolve()):
 missing_clock = '--missing-clock' in sys.argv[2:]
 watchdog = '--watchdog' in sys.argv[2:]
 xhci_hotplug = '--xhci-hotplug' in sys.argv[2:]
+acpi_fixture = '--acpi-fixture' in sys.argv[2:]
+usb_hotplug = '--usb-hotplug' in sys.argv[2:]
+usb_hubs = '--usb-hubs' in sys.argv[2:]
+hotplug = xhci_hotplug or usb_hotplug or usb_hubs
 cpus = next((int(arg.split('=')[1]) for arg in sys.argv[2:] if arg.startswith('--cpus=')), 1)
 iommu = next((arg.split('=')[1] for arg in sys.argv[2:] if arg.startswith('--iommu=')), 'none')
 cpu_model = next((arg.split('=',1)[1] for arg in sys.argv[2:] if arg.startswith('--cpu=')), 'host,migratable=off,+invtsc' if '--accel=kvm' in sys.argv[2:] else 'max')
@@ -33,6 +37,9 @@ suffix = ('-intelcpu' if 'GenuineIntel' in cpu_model else '-amdcpu' if 'Authenti
 if watchdog and cpus<2:
     raise SystemExit('Lock watchdog requires at least two CPUs')
 if xhci_hotplug: suffix += '-xhci-hotplug'
+if acpi_fixture: suffix += '-acpi'
+if usb_hotplug: suffix += '-usb-hotplug'
+if usb_hubs: suffix += '-usb-hubs'
 test = build / ('tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
 test.mkdir(parents=True, exist_ok=True)
 # A failed rerun must never leave an older successful report looking current.
@@ -81,16 +88,24 @@ command = command.replace('id=nvmedisk,format=raw,', 'id=nvmedisk,format=raw,rea
 if '--xhci-trace' in sys.argv[2:]:
     for event in ('usb_xhci_oper_write','usb_xhci_runtime_write','usb_xhci_doorbell_write','usb_xhci_fetch_trb','usb_xhci_queue_event','usb_xhci_irq_msix','usb_xhci_run','usb_xhci_stop'):
         command += f' -trace enable={event}'
+if acpi_fixture:
+    fixture_path=test/'fixture.aml'
+    subprocess.run([sys.executable,str(root/'src/tests/acpi-fixture.py'),str(fixture_path)],check=True)
+    command += ' -acpitable file=' + shlex.quote(str(fixture_path))
+if usb_hubs:
+    command += ' -device usb-hub,id=testhub,bus=xhci.0,port=4 -device usb-kbd,id=hub-child,bus=xhci.0,port=4.1 -device usb-hub,id=nestedhub,bus=xhci.0,port=4.2 -device usb-mouse,id=hub-grandchild,bus=xhci.0,port=4.2.1'
 log = test / 'boot.log'
-if xhci_hotplug:
+if hotplug:
     command = command.replace('-device usb-kbd,bus=xhci.0', '-device usb-kbd,id=xhci-test-keyboard,bus=xhci.0,port=1')
     command = command.replace('-debugcon stdio', f'-debugcon file:{log}')
     command += ' -qmp stdio'
 with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
-    process = subprocess.Popen(shlex.split(command), cwd=root / 'src', bufsize=0, stdin=subprocess.PIPE if xhci_hotplug else None, stdout=subprocess.PIPE if xhci_hotplug else output, stderr=qemu_errors if xhci_hotplug else output)
+    process = subprocess.Popen(shlex.split(command), cwd=root / 'src', bufsize=0, stdin=subprocess.PIPE if hotplug else None, stdout=subprocess.PIPE if hotplug else output, stderr=qemu_errors if hotplug else output)
     try:
-        deadline = time.monotonic() + (45 if xhci_hotplug else 30)
+        deadline = time.monotonic() + (45 if hotplug else 30)
         removed = added = False
+        usb_removed = usb_added = False
+        hub_child_removed = hub_child_added = hub_removed = hub_added = False
         def qmp_call(name, arguments=None):
             request = {'execute':name}
             if arguments is not None: request['arguments'] = arguments
@@ -100,7 +115,7 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 response = json.loads(process.stdout.readline())
                 if 'error' in response: raise RuntimeError(response)
                 if 'return' in response: return response['return']
-        if xhci_hotplug:
+        if hotplug:
             if not select.select([process.stdout],[],[],3)[0]: raise TimeoutError('QMP greeting timeout')
             json.loads(process.stdout.readline()); qmp_call('qmp_capabilities')
         while time.monotonic() < deadline:
@@ -109,6 +124,21 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 qmp_call('device_del', {'id':'xhci-test-keyboard'}); removed = True
             if xhci_hotplug and 'WAIT XHCI ADD' in content and not added:
                 qmp_call('device_add', {'driver':'usb-kbd','id':'xhci-test-keyboard','bus':'xhci.0','port':'1'}); added = True
+            if usb_hotplug and 'WAIT USB REMOVE' in content and not usb_removed:
+                qmp_call('device_del', {'id':'xhci-test-keyboard'}); usb_removed = True
+            if usb_hotplug and 'WAIT USB ADD' in content and not usb_added:
+                qmp_call('device_add', {'driver':'usb-kbd','id':'xhci-test-keyboard','bus':'xhci.0','port':'1'}); usb_added = True
+            if usb_hubs and 'WAIT HUB CHILD REMOVE' in content and not hub_child_removed:
+                qmp_call('device_del', {'id':'hub-child'}); hub_child_removed=True
+            if usb_hubs and 'WAIT HUB CHILD ADD' in content and not hub_child_added:
+                qmp_call('device_add', {'driver':'usb-kbd','id':'hub-child','bus':'xhci.0','port':'4.1'}); hub_child_added=True
+            if usb_hubs and 'WAIT HUB REMOVE' in content and not hub_removed:
+                qmp_call('device_del', {'id':'testhub'}); hub_removed=True
+            if usb_hubs and 'WAIT HUB ADD' in content and not hub_added:
+                qmp_call('device_add', {'driver':'usb-hub','id':'testhub','bus':'xhci.0','port':'4'})
+                qmp_call('device_add', {'driver':'usb-kbd','id':'hub-child','bus':'xhci.0','port':'4.1'})
+                qmp_call('device_add', {'driver':'usb-hub','id':'nestedhub','bus':'xhci.0','port':'4.2'})
+                qmp_call('device_add', {'driver':'usb-mouse','id':'hub-grandchild','bus':'xhci.0','port':'4.2.1'}); hub_added=True
             if watchdog and 'inthandle: CPU halted' in content:
                 assert 'fatal lock acquisition timeout' in content and 'vector=0x0000000000000006' in content and 'rsp=0x' in content
                 print('PASS: failed lock owner triggers bounded watchdog, register dump and halt')
@@ -126,6 +156,12 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 assert content.index('Cloudberry v2: inthandle ready') < content.index('Cloudberry v2: pre-flight Cloudberry logo displayed') < content.index('Cloudberry backend: cpu-')
                 if iommu != 'none':
                     assert 'PASS IOMMU:' in content
+                assert ('PASS ACPI AML fixture:' if acpi_fixture else 'PASS ACPI:') in content
+                assert ('PASS USB hubs:' if usb_hubs else 'PASS USB core:') in content
+                if usb_hubs:
+                    assert hub_child_removed and hub_child_added and hub_removed and hub_added
+                    assert 'PASS USB hub class restart:' in content
+                if usb_hotplug: assert usb_removed and usb_added
                 assert 'PASS xHCI:' in content
                 if xhci_hotplug: assert removed and added
                 assert 'PASS NVMe:' in content

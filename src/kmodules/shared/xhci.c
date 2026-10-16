@@ -17,13 +17,14 @@ struct endpoint {
     struct host_transfer_result result;void *buffer;uint32_t bytes,direction;
     uint64_t event_pointer,data_pointer,setup_pointer,waiter;unsigned short_bytes,short_seen,configured,halted;
 };
-struct slot {uint64_t token,port_generation;unsigned port,addressed;struct dma *contexts;struct endpoint *ep[32];};
+struct slot {uint64_t token,port_generation,parent;unsigned port,addressed,route,depth,speed,downstream,hub_ports,multi_tt,think_time,tt_slot,tt_port,disconnected;struct dma *contexts;struct endpoint *ep[32];};
+struct command_waiter {struct command_waiter *next;uint64_t thread;};
 struct controller {
     struct xhci_record record;struct controller *next;struct pci_device pci;
     struct dma *dma,*base;struct slot *slots;struct irq_route route;struct ring commands;
     uintptr_t registers,op,runtime,doorbells;uint64_t extent,owner,command_pointer;
     unsigned event_head,event_cycle,command_wait,command_code,command_slot,busy,claimed,routed,master,callback_active,firmware_busy;
-    uint32_t hcc;uint64_t command_events;
+    uint32_t hcc;uint64_t command_events,watcher;struct command_waiter *waiters;
 };
 static struct {
     const struct kernel_surfaces *hub;const struct hwenum_table *hw;uintptr_t heap;
@@ -57,11 +58,35 @@ static void copy(void *to,const void *from,size_t n) {unsigned char *d=to;const 
 static void *allocate(size_t n,size_t size) {struct kernel_surface_result r=CALL(state.alloc,state.heap,n,size);return r.status?NULL:(void *)r.value;}
 static struct controller *find(uint64_t id) {for(struct controller *c=state.head;c;c=c->next)if(c->record.info.id==id)return c;
     return NULL;}
+/* Concurrent topology/class workers serialize command-ring mutation by sleeping.
+ * Waiter nodes live on blocked kernel stacks; unlink before every return. */
 static int begin(struct controller *c,uint64_t id) {
-    if(!c || !foreground() || !CALL(state.thread,THREAD_CURRENT,0,0).value)return 0;
-    uint64_t flags=lock();int ok=c->record.info.id==id && !c->busy && c->record.info.state==XHCI_ONLINE;if(ok)c->busy=1;unlock(flags);return ok;
+    if(!c || !foreground())return 0;
+    struct command_waiter waiter={.thread=CALL(state.thread,THREAD_CURRENT,0,0).value};
+    if(!waiter.thread)return 0;
+    uint64_t start=now();int linked=0,ok=0;
+    for(;;) {
+        uint64_t flags=lock();
+        int valid=c->record.info.id==id && c->record.info.state==XHCI_ONLINE;
+        uint64_t time=now();
+        if(!valid || time==UINT64_MAX || time<start || time-start>=TIMEOUT || !c->busy) {
+            ok=valid && time!=UINT64_MAX && time>=start && time-start<TIMEOUT && !c->busy;
+            if(linked){struct command_waiter **p=&c->waiters;while(*p && *p!=&waiter)p=&(*p)->next;if(*p)*p=waiter.next;}
+            if(ok)c->busy=1;
+            unlock(flags);return ok;
+        }
+        if(!linked){waiter.next=c->waiters;c->waiters=&waiter;linked=1;}
+        unlock(flags);
+        if(CALL(state.thread,THREAD_BLOCK_UNTIL,start+TIMEOUT,0).status) {
+            flags=lock();struct command_waiter **p=&c->waiters;while(*p && *p!=&waiter)p=&(*p)->next;if(*p)*p=waiter.next;unlock(flags);return 0;
+        }
+    }
 }
-static struct kernel_surface_result finish(struct controller *c,uintptr_t value,int ok) {uint64_t flags=lock();c->busy=0;unlock(flags);return module_result(value,ok);}
+static struct kernel_surface_result finish(struct controller *c,uintptr_t value,int ok) {
+    uint64_t flags=lock();c->busy=0;
+    for(struct command_waiter *p=c->waiters;p;p=p->next)CALL(state.thread,THREAD_WAKE,p->thread,0);
+    unlock(flags);return module_result(value,ok);
+}
 static struct dma *dma_allocate(struct controller *c,size_t pages) {
     struct dma *d=allocate(1,sizeof(*d));if(!d)return NULL;
     struct kernel_surface_result r=state.dma_alloc(c->pci.hardware_index,c->owner,pages,(uintptr_t)&d->pages,0,0);
@@ -98,12 +123,14 @@ static void port_update(struct controller *c,unsigned port,int initial) {
         ++p->generation;if(!p->generation) {c->record.info.state=XHCI_FAILED;return;}
         if(!initial)complete_disconnected(c,port);
     }
+    if(!initial && (((p->status^status)&1) || (status&PORT_CHANGES)) && c->watcher)CALL(state.thread,THREAD_WAKE,c->watcher,0);
     p->status=status;if(status&PORT_CHANGES)++p->changes;
     if(status&PORT_CHANGES)xhci_write32(port_register(c,port),(status&PORT_KEEP)|(status&PORT_CHANGES));
 }
 static void mark_failed(struct controller *c) {
     if(c->record.info.state==XHCI_FAILED)return;
     c->record.info.state=XHCI_FAILED;
+    if(c->watcher)CALL(state.thread,THREAD_WAKE,c->watcher,0);
     for(unsigned s=1;s<=c->record.info.slots;++s)if(c->slots && c->slots[s].token)
         for(unsigned e=1;e<32;++e)if(c->slots[s].ep[e] && c->slots[s].ep[e]->result.state==HOST_PENDING){c->slots[s].ep[e]->result.state=HOST_FAILED;notify(c->slots[s].ep[e]);}
 }
@@ -357,7 +384,8 @@ static struct slot *device_find(struct controller *c,uint64_t token,unsigned *in
     if(!token || !c || !c->slots)return NULL;
     for(unsigned s=1;s<=c->record.info.slots;++s)if(c->slots[s].token==token) {
         struct slot *slot=&c->slots[s];struct xhci_port *p=&c->record.ports[slot->port-1];
-        if(connected && (p->generation!=slot->port_generation || (p->status&3)!=3))return NULL;
+        if(connected && (slot->disconnected || p->generation!=slot->port_generation || (p->status&3)!=3))return NULL;
+        if(connected && slot->parent && !device_find(c,slot->parent,NULL,1))return NULL;
         if(index)*index=s;
         return slot;
     }return NULL;
@@ -378,19 +406,29 @@ struct kernel_surface_result xhci_surface_device(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);const struct host_device_request *r=(const void *)b;if(!r || !c || !begin(p,a))return failure();
     if(!r->port || r->port>p->record.info.ports || !r->max_packet || r->max_packet>512 || state.serial==UINT64_MAX)return finish(p,0,0);
     struct xhci_port port=p->record.ports[r->port-1];if((port.status&3)!=3 || port.generation!=r->port_generation)return finish(p,0,0);
-    for(unsigned i=1;i<=p->record.info.slots;++i)if(p->slots[i].token && p->slots[i].port==r->port)return finish(p,0,0);
+    unsigned parent_index=0;struct slot *parent=NULL;unsigned route=0,depth=0,speed=(port.status>>10)&15,tt_slot=0,tt_port=0;
+    if(r->parent) {
+        parent=device_find(p,r->parent,&parent_index,1);
+        if(!parent || !parent->addressed || !parent->hub_ports || parent->port!=r->port || parent->depth>=5 || !r->downstream_port || r->downstream_port>parent->hub_ports || !r->speed_id || r->speed_id>15)return finish(p,0,0);
+        depth=parent->depth+1;route=parent->route|((r->downstream_port>15?15:r->downstream_port)<<(parent->depth*4));speed=r->speed_id;
+        if(speed==1 || speed==2) {
+            if(parent->speed==3){tt_slot=parent_index;tt_port=r->downstream_port;}
+            else {tt_slot=parent->tt_slot;tt_port=parent->tt_port;}
+        }
+    } else if(r->downstream_port || r->speed_id)return finish(p,0,0);
+    for(unsigned i=1;i<=p->record.info.slots;++i)if(p->slots[i].token && p->slots[i].parent==r->parent && (r->parent?p->slots[i].downstream==r->downstream_port:p->slots[i].port==r->port))return finish(p,0,0);
     unsigned slot=0;if(!command(p,(struct trb){.control=(9u<<10)|(port.slot_type<<16)},&slot) || !slot || slot>p->record.info.slots)return finish(p,0,0);
-    struct slot *s=&p->slots[slot];s->port=r->port;s->port_generation=port.generation;s->token=next_id();
+    struct slot *s=&p->slots[slot];s->port=r->port;s->port_generation=port.generation;s->token=next_id();s->parent=r->parent;s->route=route;s->depth=depth;s->speed=speed;s->downstream=r->downstream_port;s->tt_slot=tt_slot;s->tt_port=tt_port;s->hub_ports=s->multi_tt=s->think_time=s->disconnected=0;
     for(unsigned i=1;i<32;++i)if(s->ep[i] && (s->ep[i]->result.id || s->ep[i]->waiter))goto fail;
     if(!s->contexts)s->contexts=dma_allocate(p,2);
     struct endpoint *ep=endpoint_allocate(p,s,1);
     if(!s->contexts || !ep)goto fail;
     zero((void *)s->contexts->pages.address,8192);zero(ep->ring.trbs,4096);ring_init(&ep->ring,ep->storage,0);
     uint64_t *dcbaa=(void *)p->base->pages.address;dcbaa[slot]=s->contexts->pages.physical;
-    input(p,s,0)[1]=3;uint32_t *ctx=input(p,s,1);ctx[0]=((port.status>>10)&15)<<20|1u<<27;ctx[1]=r->port<<16;
+    input(p,s,0)[1]=3;uint32_t *ctx=input(p,s,1);ctx[0]=route|(speed<<20)|1u<<27;if(tt_slot && p->slots[tt_slot].multi_tt)ctx[0]|=1u<<25;ctx[1]=r->port<<16;ctx[2]=tt_slot|(tt_port<<8);
     context_endpoint(p,s,1,ep,4,r->max_packet,0,0,0);
     if(!command(p,(struct trb){.parameter=s->contexts->pages.physical+4096,.control=(11u<<10)|(slot<<24)},NULL))goto fail;
-    uint64_t flags=lock();struct xhci_port *latest=&p->record.ports[r->port-1];int connected=latest->generation==r->port_generation && (latest->status&3)==3;
+    uint64_t flags=lock();struct xhci_port *latest=&p->record.ports[r->port-1];int connected=latest->generation==r->port_generation && (latest->status&3)==3 && (!r->parent || device_find(p,r->parent,NULL,1));
     if(connected) {s->addressed=1;ep->configured=1;ep->halted=0;ep->definition=(struct host_endpoint_request){.device=s->token,.type=HOST_CONTROL,.max_packet=r->max_packet};*(uint64_t *)c=s->token;}
     unlock(flags);if(!connected)goto fail;
     return finish(p,s->token,1);
@@ -425,12 +463,12 @@ struct kernel_surface_result xhci_surface_endpoint(MODULE_ARGS) {
 }
 struct kernel_surface_result xhci_surface_transfer(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);const struct host_transfer_request *r=(const void *)b;
-    if(!foreground() || !p || !r || r->bytes>4096 || (r->bytes && !r->buffer) || (r->endpoint&~143u) || (r->endpoint && !(r->endpoint&15)) || state.serial==UINT64_MAX)return failure();
+    if(!foreground() || !p || !r || r->bytes>4096 || (r->bytes && !r->buffer) || (r->endpoint&~143u) || (r->endpoint && !(r->endpoint&15)) || state.serial==UINT64_MAX || !begin(p,a))return failure();
     uint64_t flags=lock();unsigned number;struct slot *s=device_find(p,r->device,&number,1);unsigned dci=endpoint_index(r->endpoint);
     struct endpoint *ep=s?s->ep[dci]:NULL;
-    if(p->record.info.id!=a || p->busy || p->record.info.state!=XHCI_ONLINE || !s || !s->addressed || !ep || !ep->configured || ep->halted || ep->result.id) {unlock(flags);return failure();}
+    if(p->record.info.id!=a || p->record.info.state!=XHCI_ONLINE || !s || !s->addressed || !ep || !ep->configured || ep->halted || ep->result.id) {unlock(flags);return finish(p,0,0);}
     unsigned direction=dci==1?!!(r->setup[0]&128):!!(r->endpoint&128);
-    if(dci==1 && ((unsigned)r->setup[6]|((unsigned)r->setup[7]<<8))!=r->bytes) {unlock(flags);return failure();}
+    if(dci==1 && ((unsigned)r->setup[6]|((unsigned)r->setup[7]<<8))!=r->bytes) {unlock(flags);return finish(p,0,0);}
     ep->result=(struct host_transfer_result){.id=next_id(),.state=HOST_PENDING};ep->buffer=r->buffer;ep->bytes=r->bytes;ep->direction=direction;ep->short_seen=0;
     /* At most one 4KiB copy here; no allocation or callbacks under this lock. */
     void *buffer=(void *)(ep->storage->pages.address+4096);if(direction)zero(buffer,4096);else if(r->bytes)copy(buffer,r->buffer,r->bytes);
@@ -440,7 +478,7 @@ struct kernel_surface_result xhci_surface_transfer(MODULE_ARGS) {
         ep->data_pointer=0;if(r->bytes)ep->data_pointer=enqueue(&ep->ring,(struct trb){.parameter=ep->storage->pages.physical+4096,.status=r->bytes,.control=(3u<<10)|(1u<<2)|(direction<<16)});
         ep->event_pointer=enqueue(&ep->ring,(struct trb){.control=(4u<<10)|(1u<<5)|((!r->bytes || !direction)?1u<<16:0)});
     } else ep->data_pointer=ep->event_pointer=enqueue(&ep->ring,(struct trb){.parameter=ep->storage->pages.physical+4096,.status=r->bytes,.control=(1u<<10)|(1u<<5)|(1u<<2)});
-    xhci_write32(p->doorbells+number*4,dci);uint64_t id=ep->result.id;unlock(flags);return module_result(id,1);
+    xhci_write32(p->doorbells+number*4,dci);uint64_t id=ep->result.id;unlock(flags);return finish(p,id,1);
 }
 static struct endpoint *request_find(struct controller *p,uint64_t id) {
     if(!id || !p->slots)return NULL;
@@ -475,13 +513,14 @@ struct kernel_surface_result xhci_surface_remove(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);if(!begin(p,a))return failure();
     unsigned number;
     struct slot *s=device_find(p,b,&number,0);if(!s)return finish(p,0,0);
+    for(unsigned i=1;i<=p->record.info.slots;++i)if(p->slots[i].token && p->slots[i].parent==b)return finish(p,0,0);
     if(!command(p,(struct trb){.control=(10u<<10)|(number<<24)},NULL))return finish(p,0,0);
     uint64_t flags=lock();for(unsigned i=1;i<32;++i)if(s->ep[i]) {if(s->ep[i]->result.state==HOST_PENDING)s->ep[i]->result.state=HOST_DISCONNECTED;notify(s->ep[i]);s->ep[i]->configured=0;}
     s->addressed=0;s->token=0;((uint64_t *)p->base->pages.address)[number]=0;unlock(flags);return finish(p,1,1);
 }
 struct kernel_surface_result xhci_surface_close(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);if(!foreground() || !CALL(state.thread,THREAD_CURRENT,0,0).value || !p)return failure();
-    uint64_t flags=lock();if(p->record.info.id!=a || p->busy || p->callback_active) {unlock(flags);return failure();}
+    uint64_t flags=lock();if(p->record.info.id!=a || p->busy || p->waiters || p->callback_active || p->watcher) {unlock(flags);return failure();}
     if(p->record.info.state==XHCI_CLOSED) {unlock(flags);return module_result(1,1);}
     /* Do not drop retained results or a completion waiter's storage on close. */
     if(p->slots)for(unsigned slot=1;slot<=p->record.info.slots;++slot)for(unsigned ep=1;ep<32;++ep)
@@ -502,4 +541,44 @@ struct kernel_surface_result xhci_surface_wait(MODULE_ARGS) {
         /* Wake credits cover completion between the check and blocking. */
         if(CALL(state.thread,THREAD_BLOCK_UNTIL,d,0).status) {flags=lock();ep->waiter=0;unlock(flags);return failure();}
     }
+}
+
+/* A single root-bus owner receives coalesced wake credits, never an ISR callback.
+ * Register before taking the first port snapshot to close the check/block race. */
+struct kernel_surface_result xhci_surface_watch(MODULE_ARGS) {
+    MODULE_UNUSED();struct controller *p=find(a);
+    if(!foreground() || !p)return failure();
+    uint64_t current=CALL(state.thread,THREAD_CURRENT,0,0).value;
+    if(!current || (b && b!=current))return failure();
+    uint64_t flags=lock();int ok=p->record.info.id==a && (!b || p->record.info.state==XHCI_ONLINE) && (!p->watcher || p->watcher==current);
+    if(ok)p->watcher=b;
+    unlock(flags);return module_result(1,ok);
+}
+
+struct kernel_surface_result xhci_surface_hub(MODULE_ARGS) {
+    MODULE_UNUSED();struct controller *p=find(a);const struct host_hub_request *r=(void *)b;
+    if(!r || !r->ports || r->ports>255 || r->multi_tt>1 || r->think_time>3 || r->reserved || !begin(p,a))return failure();
+    unsigned number;struct slot *s=device_find(p,r->device,&number,1);
+    if(!s || s->depth>=5 || (r->multi_tt && s->speed!=3))return finish(p,0,0);
+    zero((void *)(s->contexts->pages.address+4096),4096);input(p,s,0)[1]=1;
+    copy(input(p,s,1),(void *)s->contexts->pages.address,p->record.info.context_bytes);
+    uint32_t *ctx=input(p,s,1);ctx[0]|=1u<<26;if(s->speed==3)ctx[0]=(ctx[0]&~(1u<<25))|(r->multi_tt<<25);
+    ctx[1]=(ctx[1]&0x00ffffff)|(r->ports<<24);ctx[2]=(ctx[2]&~(3u<<16))|(r->think_time<<16);
+    if(!command(p,(struct trb){.parameter=s->contexts->pages.physical+4096,.control=(12u<<10)|(number<<24)},NULL))return finish(p,0,0);
+    s->hub_ports=r->ports;s->multi_tt=r->multi_tt;s->think_time=r->think_time;return finish(p,1,1);
+}
+static int below(struct controller *p,struct slot *s,uint64_t token) {
+    for(unsigned depth=0;depth<=5 && s;++depth) {
+        if(s->token==token)return 1;
+        s=s->parent?device_find(p,s->parent,NULL,0):NULL;
+    }return 0;
+}
+struct kernel_surface_result xhci_surface_disconnect(MODULE_ARGS) {
+    MODULE_UNUSED();struct controller *p=find(a);if(!foreground() || !p || !device_find(p,b,NULL,0))return failure();
+    uint64_t flags=lock();
+    for(unsigned i=1;i<=p->record.info.slots;++i)if(p->slots[i].token && below(p,&p->slots[i],b)) {
+        struct slot *s=&p->slots[i];s->disconnected=1;
+        for(unsigned ep=1;ep<32;++ep)if(s->ep[ep] && s->ep[ep]->result.state==HOST_PENDING){s->ep[ep]->result.state=HOST_DISCONNECTED;notify(s->ep[ep]);}
+    }
+    unlock(flags);return module_result(1,1);
 }

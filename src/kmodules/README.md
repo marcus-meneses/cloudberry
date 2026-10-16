@@ -9,7 +9,10 @@ arguments are defined in headers. Runtime module unload is not implemented.
 
 | Module | Responsibility and contract |
 | --- | --- |
-| [xhci](shared/xhci.md) | Owned controller/port registry, command/event rings, root slots/endpoints, asynchronous transfers and restart cleanup; USB core/HID deferred |
+| [acpi/platform](shared/acpi.md) | AML namespace, stable firmware companions and non-PCI platform inventory; runtime SCI/driver policy deferred |
+| [usb](shared/usb.md) | Root/downstream enumeration, configuration validation, interface ownership and scoped synchronous I/O; HID/storage class drivers deferred |
+| [usb-hub](shared/usb-hub.md) | Hub discovery, owned port registry, power/reset, nested enumeration and interrupt-driven hotplug |
+| [xhci](shared/xhci.md) | Owned controller/port registry, command/event rings, root/downstream slots/endpoints, asynchronous transfers and restart cleanup; HID/storage class drivers deferred |
 | [mem](shared/mem-pages.md) | Caller-owned heaps plus owned pages, sanitization/reuse and guarded stacks |
 | [inthandle](shared/inthandle.md) | Early faults, per-CPU descriptor tables, owned vectors and CMOS/NMI policy |
 | [hwenum](shared/hwenum.md) | Firmware/PCI enumeration and hardware descriptor table/dump |
@@ -47,13 +50,14 @@ New modules must supply their own shared-state/reentrancy contract.
 
 Threads are pinned, preemptible outside critical sections and eagerly preserve
 x87/SSE/available AVX through [xstate](shared/xstate.md). Infrastructure uses
-general registers only. Migration/balancing, hotplug and process lifetime are future work. SMP begins on HPET and requires successful uncertainty/offset/drift
+general registers only. Migration/balancing, CPU hotplug and process lifetime are future work. USB
+device/hub hotplug is implemented. SMP begins on HPET and requires successful uncertainty/offset/drift
 validation before TSC activation, retaining HPET health checks/fallback. Shared
 address-space mapping changes wait for remote invalidation before physical reuse.
 Owners must quiesce in-flight IRQ callbacks before freeing a binding's context.
 
 Focused test targets include test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
-test-scheduler, test-irq, test-pci, test-tsc-validation and test-threads-smp. The latter uses one/four-CPU disposable TCG
+test-scheduler, test-irq, test-acpi, test-acpi-boot, test-usb, test-usb-boot, test-usb-hub, test-usb-hub-boot, test-pci, test-tsc-validation and test-threads-smp. The latter uses one/four-CPU disposable TCG
 boots, including timer preemption on every CPU and remote cached mapping reuse.
 These boots also validate real NVMe MSI-X reads and lost-completion timeout/reset
 on read-only disposable media. Native acceptance is available through test-native; physical-machine validation

@@ -87,22 +87,66 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     only. Deferred quanta rearm a CPU-local timer retry instead of losing the
     preemption source during IRQ-enabled lock waits. AVX-512/AMX, lazy ownership and thread migration remain disabled.
 
+12. ACPI/platform inventory: pinned uACPI runtime, DSDT/SSDT namespace initialization,
+    HID/CID/UID/STA/ADR/SEG/BBN/CRS/DEP descriptions, generation-qualified firmware
+    companions, segmented/bridged PCI matching with duplicate refusal, and owned
+    platform.devices publication. Checked firmware/port/PCI adapters retain kernel
+    ownership restrictions. SCI is reserved masked; enabling it, namespace/hotplug
+    reconciliation, EC support, power management and platform drivers are deferred.
+    Isolated SSDT tests and Intel/AMD TCG boots validate inventory and failure flags;
+    native/physical ACPI acceptance remains open.
+
+13. USB core: owned root-device/configuration/interface registry, speed/descriptor
+    validation, interface claims, scoped synchronous class/endpoint I/O and
+    core-owned bounce buffers. BSP workers consume xHCI port-change wake credits
+    instead of periodic polling; class-driver threads can subscribe to USB-level
+    device/worker-state wakes. Controlled detach/rebind and stop/restart retain
+    uncertain ownership, invalidate old identities and reuse connector records.
+    Isolated tests cover keyboard/mouse/storage enumeration, class control,
+    pending-I/O shutdown and hotplug with one/four CPUs and both IOMMU models.
+    HID/storage class drivers and physical USB acceptance remain open.
+
+14. USB hubs: separate hub-class module and owned `usb.hubs` registry; dynamically
+    sized port state, power/reset, interrupt change bitmaps and nested attachment.
+    xHCI derives route/TT contexts; USB core serializes topology and invalidates
+    subtrees before postorder teardown. Generation-qualified references reject
+    old attachments; malformed children fail locally. Isolated one/four-CPU TCG
+    tests cover nested QEMU hubs, child hotplug, active grandchild disconnect,
+    reattachment and shutdown with Intel/AMD CPU and IOMMU models. Physical,
+    native KVM and real high-speed multi-TT/SuperSpeed hub acceptance remain open.
+    Lifecycle/descriptor closure (2026-10-16): class-only restart preserves the
+    root attachment while rebuilding descendants; blocked reads disconnect and
+    manager/worker stacks are reclaimed. Two repeated cycles are tested. Full
+    descriptors must match their validated prefix; malformed/short second reads
+    fail before configuration. Failed-hub automatic recovery stays deferred.
+
 ## Next priorities
 
-1. Close clock work with boot-cost measurements: report qualification duration,
-   attempts and final source. Calibration runs every boot; multi-CPU startup
-   additionally qualifies every CPU. Latest native runs include 685 ms of
-   requested waiting plus measurement overhead. Keep per-boot qualification,
-   runtime safeguards and HPET fallback; no persisted profile or statistical
-   retuning is planned without evidence of a problem.
-2. Build USB core then HID keyboard/mouse on the now-tested xHCI transport.
-   USB enumeration/class policy remain separate from controller mechanics.
-   Keep lengthy driver processing in preemptible threads. SATA and further
-   storage support follow; resolve ACPI PCI routing before INTx.
-3. Establish process address spaces, user/kernel privilege separation, safe
-   boundary copying and teardown/ownership cleanup before application-facing
-   handlers/handles. Preserve explicit extended-state ownership. CPU pinning may
-   remain; cancellation, migration and balancing require their own designs.
+Review update: 2026-10-16. Hub lifecycle/descriptor closure is complete; retain
+the existing storage-first sequence.
+
+1. Storage before HID: implement USB mass-storage Bulk-Only Transport/SCSI reads
+   on USB core, exposing a common read-only block contract alongside NVMe. Then
+   add bounded partition discovery and an ext4 reader. Retain device transport
+   and correlate available Limine disk/partition identities with the boot volume;
+   absent or ambiguous matches remain explicit. Build-time boot-image preparation
+   may append the planned >=512 MiB ext4 driver partition; no boot formatting or
+   migrations. SATA/AHCI and UAS are separate later backends, not prerequisites
+   for reaching the current USB boot medium.
+2. Load driver modules from disk through the kernel: reuse image/contract checks,
+   resolve hub dependencies and select drivers for discovered devices. Foundational
+   USB/xHCI/mass-storage/partition/filesystem modules must initially arrive through
+   Limine so the kernel can reach that driver partition. Loading and safe hot
+   executable replacement are separate milestones.
+
+After disk loading: establish process address spaces, user/kernel privilege
+separation, safe boundary copying and teardown/ownership cleanup before
+application-facing handlers/handles. HID/input and native display follow the
+storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
+
+Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
+qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI
+INTx routing also remain deferred until required by a consumer.
 
 Outstanding acceptance: native Intel CPU (including shared TSC), physical
 Intel/AMD firmware/device DMA takeover and posted-write drain. Both emulated
@@ -348,6 +392,7 @@ fresh generations/IDs; stale device tokens cannot bind to a replacement attachme
 Existing hub facilities supply PCI/DMA/IOMMU/IRQ/mem/clock/thread mechanisms.
 Production init claims no controller; tests alone issue raw USB requests.
 UBSan lifecycle/ring/failure tests and isolated one/four-CPU QEMU hotplug probes
-pass, including Intel VT-d and AMD-Vi DMA paths. USB core/HID, driver-manager and
-image-unload work remain deferred; native/physical controller acceptance is open.
-Current production exports 162 methods and five table references (49.85% hub).
+pass, including Intel VT-d and AMD-Vi DMA paths. At this transport-only revision,
+USB core/HID, driver-manager and image-unload work remained deferred; native/physical controller acceptance is open.
+That transport-only revision exported 162 methods and five table references
+(49.85% hub). Current ACPI/USB inventories and usage are documented in maps/startup.md.

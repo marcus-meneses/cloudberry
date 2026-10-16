@@ -5,7 +5,11 @@
  * Trusted kernel buffers; no exposed DMA addresses or xHCI contexts/TRBs. */
 enum host_endpoint_type {HOST_CONTROL=1,HOST_BULK,HOST_INTERRUPT};
 enum host_transfer_state {HOST_PENDING=1,HOST_COMPLETE,HOST_CANCELLED,HOST_DISCONNECTED,HOST_FAILED};
-struct host_device_request {uint32_t port,max_packet;uint64_t port_generation;};
+/* port/generation identify the root connector. parent=0 binds its root device;
+ * otherwise parent is a live configured hub token, downstream_port its port,
+ * and speed_id the xHCI speed code. Hub topology is limited by five route nibbles. */
+struct host_device_request {uint32_t port,max_packet;uint64_t port_generation,parent;uint32_t downstream_port,speed_id;};
+struct host_hub_request {uint64_t device;uint32_t ports,multi_tt,think_time,reserved;};
 struct host_endpoint_request {uint64_t device;uint32_t address,type,max_packet,interval,max_burst,max_esit;};
 struct host_transfer_request {uint64_t device;uint32_t endpoint,bytes;void *buffer;uint8_t setup[8];};
 struct host_transfer_result {uint64_t id;uint32_t state,completion_code,bytes,reserved;};

@@ -93,7 +93,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     if (r.status || !r.value) return test_failure(__LINE__);
     if (CALL(release, &heap, r.value, 0).status) return test_failure(__LINE__);
     const struct kernel_hub_table *hardware = kernel_hub_find_table(page, HWENUM_TABLE_NAME);
-    if (!hardware || page->table_count != 5 || hardware->entry_bytes != sizeof(struct hwenum_descriptor) ||
+    if (!hardware || page->table_count != 10 || hardware->entry_bytes != sizeof(struct hwenum_descriptor) ||
         hardware->entries_offset != sizeof(struct hwenum_table)) return test_failure(__LINE__);
     const struct hwenum_table *table = (const struct hwenum_table *)hardware->address;
     if (table->magic != HWENUM_TABLE_MAGIC || table->count != hardware->count || !table->count ||
@@ -115,14 +115,14 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
         }
     }
     if (!nvme || !sata || !xhci || !cpu || !memory) return test_failure(__LINE__);
-    if (CALL(publish, hardware, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 5) return test_failure(__LINE__);
+    if (CALL(publish, hardware, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 10) return test_failure(__LINE__);
     struct kernel_hub_table invalid = *hardware;
     invalid.name[0] = 'x'; invalid.entry_bytes = 0;
     if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED) return test_failure(__LINE__);
     invalid.entry_bytes = hardware->entry_bytes; invalid.count = UINT64_MAX;
     if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED) return test_failure(__LINE__);
     invalid.count = hardware->count; invalid.address = UINTPTR_MAX - 1;
-    if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 5) return test_failure(__LINE__);
+    if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 10) return test_failure(__LINE__);
     unsigned char invalid_image[sizeof(struct kmodule_image)+sizeof(struct kmodule_export)]={0};
     struct kmodule_image *bad=(void *)invalid_image;
     bad->magic=KMODULE_MAGIC; bad->format=999; bad->header_bytes=sizeof(*bad);
@@ -179,5 +179,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     extern bool kernel_threads_test(const struct kernel_surfaces *);
     extern bool kernel_nvme_test(const struct kernel_surfaces *);
     extern bool kernel_xhci_test(const struct kernel_surfaces *);
-    return kernel_xhci_test(page) && kernel_scheduler_test(page) && kernel_mmio_test(page) && kernel_clock_test(page) && kernel_events_test(page) && kernel_threads_test(page) && kernel_irq_test(page) && kernel_nvme_test(page);
+    extern bool kernel_acpi_test(const struct kernel_surfaces *);
+    extern bool kernel_usb_test(const struct kernel_surfaces *);
+    return kernel_acpi_test(page) && kernel_xhci_test(page) && kernel_usb_test(page) && kernel_scheduler_test(page) && kernel_mmio_test(page) && kernel_clock_test(page) && kernel_events_test(page) && kernel_threads_test(page) && kernel_irq_test(page) && kernel_nvme_test(page);
 }

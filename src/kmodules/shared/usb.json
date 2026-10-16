@@ -1,0 +1,73 @@
+{
+  "name": "usb",
+  "exports": [
+    {
+      "name": "usb.init",
+      "symbol": "usb_surface_init"
+    },
+    {
+      "name": "usb.start",
+      "symbol": "usb_surface_start"
+    },
+    {
+      "name": "usb.stop",
+      "symbol": "usb_surface_stop"
+    },
+    {
+      "name": "usb.worker",
+      "symbol": "usb_surface_worker"
+    },
+    {
+      "name": "usb.info",
+      "symbol": "usb_surface_info"
+    },
+    {
+      "name": "usb.device",
+      "symbol": "usb_surface_device"
+    },
+    {
+      "name": "usb.configuration",
+      "symbol": "usb_surface_configuration"
+    },
+    {
+      "name": "usb.interface",
+      "symbol": "usb_surface_interface"
+    },
+    {
+      "name": "usb.endpoint",
+      "symbol": "usb_surface_endpoint"
+    },
+    {
+      "name": "usb.claim",
+      "symbol": "usb_surface_claim"
+    },
+    {
+      "name": "usb.release",
+      "symbol": "usb_surface_release"
+    },
+    {
+      "name": "usb.control",
+      "symbol": "usb_surface_control"
+    },
+    {
+      "name": "usb.transfer",
+      "symbol": "usb_surface_transfer"
+    },
+    {
+      "name": "usb.watch",
+      "symbol": "usb_surface_watch"
+    },
+    {
+      "name": "usb.hub_configure",
+      "symbol": "usb_surface_hub_configure"
+    },
+    {
+      "name": "usb.downstream",
+      "symbol": "usb_surface_downstream"
+    },
+    {
+      "name": "usb.cancel",
+      "symbol": "usb_surface_cancel"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ static _Alignas(16) unsigned char hub_memory[16384];
 static struct {struct hwenum_table header;struct hwenum_descriptor entries[2];} hardware;
 static unsigned producer,producer_cycle=1,lock_depth,irq_callback,master_enabled,active_dma,fail_halt,drop_command,delay_transfer;
 static unsigned model_command_tail,model_command_cycle=1,next_slot=1,disabled_slots,short_read,command_count;
-static uint64_t ticks,route_id;
+static uint64_t ticks,route_id;static unsigned wakes;
 static uintptr_t irq_cookie;
 static uint32_t *reg(unsigned offset) {return (void *)(registers+offset);}
 uint64_t xhci_flags(void) {return 512;}
@@ -68,7 +68,7 @@ static struct kernel_surface_result route(MODULE_ARGS) {MODULE_UNUSED();const st
 static struct kernel_surface_result unroute(MODULE_ARGS) {MODULE_UNUSED();irq_cookie=0;return module_result(1,1);}
 static struct kernel_surface_result simple(MODULE_ARGS) {MODULE_UNUSED();return module_result(1,1);}
 static struct kernel_surface_result clock_now(MODULE_ARGS) {MODULE_UNUSED();ticks+=100000;return module_result(ticks,1);}
-static struct kernel_surface_result thread(MODULE_ARGS) {MODULE_UNUSED();if(a==THREAD_YIELD || a==THREAD_BLOCK_UNTIL)deliver();return module_result(a==THREAD_CURRENT?1:0,1);}
+static struct kernel_surface_result thread(MODULE_ARGS) {MODULE_UNUSED();if(a==THREAD_YIELD || a==THREAD_BLOCK_UNTIL)deliver();if(a==THREAD_WAKE)++wakes;return module_result(a==THREAD_CURRENT?1:0,1);}
 static struct kernel_surface_result context(MODULE_ARGS) {MODULE_UNUSED();return module_result(irq_callback,1);}
 static struct kernel_surface_result publish(MODULE_ARGS) {MODULE_UNUSED();assert(!strcmp(((struct kernel_hub_table *)a)->name,XHCI_TABLE_NAME));return module_result(1,1);}
 static void add(const char *name,kernel_surface_call fn) {struct kernel_surfaces *h=(void *)hub_memory;struct kernel_surface *m=(void *)(hub_memory+h->header_bytes);strcpy(m[h->count].name,name);m[h->count].call=fn;m[h->count++].major=1;}
@@ -100,8 +100,33 @@ int main(void) {
     assert(xhci_surface_close(id,0,0,0,0,0).status);
     assert(xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0).status);assert(!xhci_surface_cancel(id,token,0x81,0,0,0).status);reap(id,pending.value,HOST_CANCELLED);
     pending=xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0);assert(!pending.status);
+    assert(!xhci_surface_watch(id,1,0,0,0,0).status && xhci_surface_watch(id,2,0,0,0,0).status);
+    unsigned before_wake=wakes;
     *reg(0x440)=1u<<17|1u<<9;event((struct trb){.parameter=1u<<24,.status=1u<<24,.control=34u<<10});deliver();reap(id,pending.value,HOST_DISCONNECTED);
+    assert(wakes>before_wake && xhci_surface_close(id,0,0,0,0,0).status && !xhci_surface_watch(id,0,0,0,0,0).status);
     assert(xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0).status);assert(!xhci_surface_remove(id,token,0,0,0,0).status);
+    /* HS multi-TT hub -> FS hub -> LS leaf: routing and TT ownership must
+     * retain the original HS ancestor/port through a full-speed intermediary. */
+    *reg(0x440)=3u|1u<<9|3u<<10;port_update(state.head,1,0);
+    assert(!xhci_surface_port(id,1,(uintptr_t)&port,0,0,0).status);
+    struct host_device_request parent_request={.port=1,.max_packet=64,.port_generation=port.generation};uint64_t parent_token,child_token,leaf_token;
+    next_slot=1;assert(!xhci_surface_device(id,(uintptr_t)&parent_request,(uintptr_t)&parent_token,0,0,0).status);
+    struct host_hub_request hub_request={.device=parent_token,.ports=20,.multi_tt=1,.think_time=2};
+    assert(!xhci_surface_hub(id,(uintptr_t)&hub_request,0,0,0,0).status);
+    struct host_device_request child_request={.port=1,.max_packet=8,.port_generation=port.generation,.parent=parent_token,.downstream_port=17,.speed_id=1};
+    next_slot=2;assert(!xhci_surface_device(id,(uintptr_t)&child_request,(uintptr_t)&child_token,0,0,0).status);
+    uint32_t *ctx=(void *)state.head->slots[2].contexts->pages.address;
+    assert((ctx[0]&0xfffff)==15 && (ctx[0]&(1u<<25)) && (ctx[2]&65535)==(1u|(17u<<8)));
+    hub_request=(struct host_hub_request){.device=child_token,.ports=4};assert(!xhci_surface_hub(id,(uintptr_t)&hub_request,0,0,0,0).status);
+    child_request.parent=child_token;child_request.downstream_port=3;child_request.speed_id=2;next_slot=3;
+    assert(!xhci_surface_device(id,(uintptr_t)&child_request,(uintptr_t)&leaf_token,0,0,0).status);
+    ctx=(void *)state.head->slots[3].contexts->pages.address;
+    assert((ctx[0]&0xfffff)==0x3f && (ctx[0]&(1u<<25)) && (ctx[2]&65535)==(1u|(17u<<8)));
+    assert(xhci_surface_remove(id,parent_token,0,0,0,0).status);
+    assert(!xhci_surface_disconnect(id,child_token,0,0,0,0).status);
+    request.device=leaf_token;assert(xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0).status);
+    assert(!xhci_surface_remove(id,leaf_token,0,0,0,0).status && !xhci_surface_remove(id,child_token,0,0,0,0).status && !xhci_surface_remove(id,parent_token,0,0,0,0).status);
+    next_slot=1;
     for(unsigned i=0;i<300;++i)assert(command(state.head,(struct trb){.control=23u<<10},NULL));
     assert(command_count>255);
     unsigned retained=active_dma;fail_halt=1;assert(xhci_surface_close(id,0,0,0,0,0).status && active_dma==retained);fail_halt=0;

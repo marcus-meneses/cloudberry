@@ -64,14 +64,22 @@ Implemented foundations include:
 - Preemptible kernel threads, SMP startup, deadline scheduling and deferred IRQs.
 - Calibrated clocks, cross-CPU TSC qualification and HPET fallback.
 - Hardware/MMIO discovery, PCI ownership and initial Intel/AMD IOMMU backends.
+- ACPI AML device enumeration, PCI firmware companions and a platform-device inventory.
+- USB core with root/downstream enumeration, interface ownership and event-driven hotplug.
+- External hub class module with nested topology and interrupt-driven port changes.
 - Read-only NVMe and an xHCI transport with asynchronous transfers, hotplug
   detection and controlled controller restart.
 
-User processes, application-facing handles, USB core/HID, filesystems and general
-ACPI AML enumeration are still ahead. QEMU acceptance includes isolated one/four-CPU
+User processes, application-facing handles, HID/storage class drivers, filesystems and runtime
+ACPI notification/driver policy are still ahead. QEMU acceptance includes isolated one/four-CPU
 runs with both emulated IOMMU models. AMD-host KVM validates the earlier SMP,
 clock and extended-state foundation; native xHCI and physical-device validation
 remain pending.
+
+The [current assessment](src/README.md#current-assessment-2026-10-16) separates
+implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: implement
+read-only USB storage and boot-volume matching, then load driver modules from disk. Process isolation follows that
+foundation. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
 
 ## Build and run
 

@@ -49,11 +49,12 @@ Hub ABI2 stores only 48-byte method records (name, mediated entry, method versio
 and 64-byte table references, sharing the contiguous hub allocation dynamically. Argument definitions
 remain in headers. Registering exports moves the table-reference area within the
 hub, so clients must reacquire record pointers after registration; callable entry
-addresses and table backing addresses remain stable. Current production has 162
-methods and five table references, occupying 8,168 bytes (49.85%) of the four-page
-16 KiB hub. With five table references, up to 333 methods fit. Mediation backing
+addresses and table backing addresses remain stable. Current production without an IOMMU backend has 197
+methods and ten table references, occupying 10,168 bytes (62.06%) of the four-page
+16 KiB hub. With ten table references, up to 326 methods fit. Mediation backing
 is sized from method capacity and occupies three pages (12 KiB); current stubs
-use 5,184 bytes (42.19%). page_bytes describes the hub extent. Dynamic growth is not
+use 6,304 bytes (51.30%). An optional selected IOMMU backend adds seven methods:
+204 methods, 10,504 hub bytes (64.11%) and 6,528 stub bytes (53.13%). page_bytes describes the hub extent. Dynamic growth is not
 implemented. Capacity checks fail cleanly rather than overrunning this extent.
 
 Kmodules provide format2 named/versioned export manifests; the generic loader
@@ -100,7 +101,11 @@ MMIO table creation is allocation-only. Clock initialization subsequently maps
 HPET and enables its main counter without resetting it or programming HPET
 comparators. APIC initialization maps local/IO APIC regions for controller
 setup; x2APIC mode instead uses MSRs for the local controller. Device mappings
-and page-table allocations persist until reboot.
+and page-table allocations persist until reboot. `hardware.firmware_map` separately
+permits ACPI reclaimable/NVS in the same UC window, while continuing to reject
+usable RAM, loader/kernel storage and framebuffers; it does not assume an HHDM
+mapping exists. [ACPI/platform inventories](../kmodules/shared/acpi.md) own stable
+heap-backed records and generation-qualified PCI companion references.
 
 Hardware inventory formatting is owned by hwenum.dump; main only looks up and
 invokes the surface and has no dependency on hwenum descriptor definitions.
@@ -144,3 +149,19 @@ records outside the hub. Init publishes it empty; explicit controller open claim
 PCI and creates owned DMA rings/contexts through existing facilities. Failed
 quiescence retains pinned DMA; close only frees after halt/reset and IRQ drain.
 See kmodules/shared/xhci.md for allocation sizes, generation and restart contracts.
+
+`usb.devices` adds a live 40-byte registry header and dynamic 128-byte public
+connector records, with private enumeration state and separately allocated
+configuration/interface/endpoint data. One connector record is reused per observed
+topology path. Each observed device has a private 4 KiB I/O bounce buffer; no caller
+buffer is retained across USB surface return. Each controller has a preemptible
+32 KiB worker stack. Core host/device metadata persists for safe restart; transport
+DMA is released only after verified controller shutdown. See [USB core](../kmodules/shared/usb.md).
+
+`usb.hubs` adds a static 32-byte registry header and dynamic 56-byte public hub
+records, owned by usb-hub. Private connector records persist for reuse. Each
+active hub dynamically allocates port state (16 bytes per advertised port) and a
+32 KiB guarded worker stack; the manager has a separate 32 KiB guarded stack.
+Port arrays are freed on rebind and exited worker stacks are reaped. Interrupt
+bitmaps are bounded to 32 bytes by the USB descriptor's 255-port field. No USB
+class allocation occurs in the IRQ handler.

@@ -358,3 +358,100 @@ Latest isolated acceptance IDs (2026-10-15): one CPU / no IOMMU
 records 100 control transfers, 111 deferred interrupt notifications and 113
 controller events. Candidate build and relocation checks pass; persistent
 NVMe/SATA image identity, size and modification timestamps remain unchanged.
+
+## ACPI namespace and platform inventory
+
+`make -C src test-acpi` runs UBSan tests for segmented/bridged PCI associations,
+duplicate roots/BDFs, descendant invalidation, platform filtering/parentage and
+publication rollback. `make -C src test-pci` also checks firmware config access
+restrictions, companion ownership and initialization rollback.
+
+`make -C src test-acpi-boot` rebuilds only below bin/tests/isolated and injects a
+small test-only SSDT using QEMU `-acpitable`. It checks known memory/I/O/IRQ resources,
+_DEP resolution, AML integer/buffer evaluation, unchanged output on failure,
+malformed _CRS flags and non-PCI _ADR classification. No fixture enters candidate
+media. The ordinary boot suite also checks ACPI/PCI/platform consistency.
+
+After building the isolated images, vendor/model variants can be checked with:
+
+```sh
+python3 src/tests/mem-boot.py bin/tests/isolated --cpus=4 --iommu=intel --cpu=max,vendor=GenuineIntel --acpi-fixture
+python3 src/tests/mem-boot.py bin/tests/isolated --cpus=4 --iommu=amd --cpu=max,vendor=AuthenticAMD --acpi-fixture
+```
+
+Successful runs store reports under mem-boot-1cpu-acpi,
+mem-boot-4cpu-intelcpu-intel-acpi and mem-boot-4cpu-amdcpu-amd-acpi. These are
+emulated-firmware acceptance, not native KVM or physical ACPI qualification.
+
+## USB core
+
+```sh
+make -C src test-usb test-xhci
+make -C src test-usb-boot
+make -C src test-usb-boot QEMU_CPUS=4 QEMU_IOMMU=intel
+make -C src test-usb-boot QEMU_CPUS=4 QEMU_IOMMU=amd
+```
+
+Host tests exercise production parsing/core code with modeled transport under
+UBSan, including malformed descriptors, OOM rollback, interface scoping and
+connector reuse after detach and controller restart. xHCI watcher tests assert
+port/failure wake ownership and unsubscribe-before-close.
+
+Boot acceptance uses isolated images/disposable disks and QMP unplug/replug of
+the test keyboard. USB core enumerates the real QEMU keyboard, mouse and boot
+storage, retrieves/validates configurations, claims storage endpoints and issues
+GetMaxLUN through scoped class control. It performs no storage reads or writes.
+The test observer uses USB watch/block notifications rather than polling for
+attach/configuration. Pending keyboard interrupt I/O must return on shutdown, followed by a clean bus
+restart without growing the connector table. HID report interpretation remains
+outside this test and outside USB core.
+
+Successful reports live under mem-boot-<N>cpu[-intel|-amd]-usb-hotplug. USB3 parser
+rules are modeled; native/physical USB acceptance remains pending. Test probes
+never enter the candidate ISO. The build also checks new USB objects for absolute
+runtime pointer relocations, which the format2 loader cannot relocate.
+
+## External USB hubs
+
+```sh
+make -C src test-usb-hub test-usb test-xhci
+make -C src test-usb-hub-boot
+make -C src test-usb-hub-boot QEMU_CPUS=4 QEMU_IOMMU=intel QEMU_CPU=max,vendor=GenuineIntel
+make -C src test-usb-hub-boot QEMU_CPUS=4 QEMU_IOMMU=amd QEMU_CPU=max,vendor=AuthenticAMD
+```
+
+The host hub test exercises production descriptor and port policy under UBSan:
+descriptor bounds and the narrow QEMU legacy quirk, reset/debounce, connection
+edges arriving during enumeration, detach, SuperSpeed warm-reset selection and
+overcurrent. The core model checks an unauthorized downstream request fails and
+a malformed child remains a device-local failure. The xHCI model additionally
+checks route saturation, multi-TT inheritance and postorder slot removal.
+
+Isolated boot tests add an external hub, a nested hub and child devices to the
+disposable VM. QMP removes/re-adds a child, then removes the upstream hub while a
+grandchild interrupt read is blocked. The guest verifies terminal disconnect,
+stale references, record reuse after topology reattachment and class/core shutdown.
+Only test images include these devices/probes; no persistent development disk is
+attached. QEMU 6.2 emulates a full-speed hub, so actual high-speed multi-TT and
+SuperSpeed hub transfers, native KVM and physical hardware remain unqualified.
+
+Latest passing result/report pairs share these run IDs:
+
+| Configuration | Run ID |
+| --- | --- |
+| 1 CPU, TCG | `93bfacde1eb141d0afe063dfde381eb1` |
+| 4 CPUs, Intel CPU/IOMMU model | `e3b929c5717f41a3b5c3a27192461386` |
+| 4 CPUs, AMD CPU/IOMMU model | `0a248cf5c18245acafdeea9edebe20d4` |
+
+Reports are under `bin/tests/isolated/tests/mem-boot-<N>cpu[-intelcpu-intel|-amdcpu-amd]-usb-hubs/`.
+The existing root USB hotplug/restart regression also passes, run
+`01be06e4f9ff47e386ef12a9183cc073`.
+
+Lifecycle/descriptor closure (2026-10-16): the probe now performs two class-only
+stop/start cycles with USB core still running and the same root attachment ID.
+Each cycle disconnects a blocked grandchild interrupt read, rejects stale child
+references and restores fresh descendants. Page-ledger stack counts verify that
+all three manager/worker stacks are reclaimed on stop and restored without growth
+on restart. Host tests reject inconsistent second-read length, type, port count,
+characteristics and power fields, invalid prefixes and short responses, preserving
+the narrow QEMU legacy quirk. SuperSpeed's complete first read is checked too.

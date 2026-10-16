@@ -10,6 +10,8 @@ CC := $(CROSS_PREFIX)gcc
 KERNEL := $(BUILD)/kernel.elf
 ISO := $(BUILD)/cloudberry.iso
 # Distinct object/staging names keep archived implementation artifacts out.
+USB_HUB_TEST ?= 0
+USB_HOTPLUG ?= 0
 XHCI_HOTPLUG ?= 0
 X2APIC ?= 0
 ifeq ($(filter $(X2APIC),0 1),)
@@ -26,6 +28,10 @@ THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
 IOMMU_MODULE := $(BUILD)/kmodules/iommu.kmod
 PCI_MODULE := $(BUILD)/kmodules/pci.kmod
 NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
+USB_HUB_MODULE := $(BUILD)/kmodules/usb-hub.kmod
+USB_MODULE := $(BUILD)/kmodules/usb.kmod
+ACPI_MODULE := $(BUILD)/kmodules/acpi.kmod
+PLATFORM_MODULE := $(BUILD)/kmodules/platform.kmod
 XHCI_MODULE := $(BUILD)/kmodules/xhci.kmod
 IRQ_MODULE := $(BUILD)/kmodules/irq.kmod
 SMP_MODULE := $(BUILD)/kmodules/smp.kmod
@@ -94,7 +100,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) boot/limine.conf
+$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) boot/limine.conf
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -107,7 +113,7 @@ $(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER
 	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
 	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
 	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(STAGE)/boot/kmodules/
+	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
 	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
@@ -160,7 +166,7 @@ $(BUILD)/tests/src-mem-boot.o: tests/mem-boot.c kernel/modules.h kernel/surfaces
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBOOT_MEM_TEST -c $< -o $@
 
-$(BUILD)/tests/src-kernel.elf: FORCE $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-mem-boot.o $(BUILD)/tests/src-scheduler-boot.o $(BUILD)/tests/src-mmio-boot.o $(BUILD)/tests/src-clock-boot.o $(BUILD)/tests/src-events-boot.o $(BUILD)/tests/src-mem-pages-boot.o $(BUILD)/tests/src-stack-call.o $(BUILD)/tests/src-threads-boot.o $(BUILD)/tests/src-irq-boot.o $(BUILD)/tests/src-nvme-boot.o $(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o $(COMMON_OBJECTS) boot/linker.ld
+$(BUILD)/tests/src-kernel.elf: FORCE $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-mem-boot.o $(BUILD)/tests/src-acpi-boot.o $(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST).o $(BUILD)/tests/src-scheduler-boot.o $(BUILD)/tests/src-mmio-boot.o $(BUILD)/tests/src-clock-boot.o $(BUILD)/tests/src-events-boot.o $(BUILD)/tests/src-mem-pages-boot.o $(BUILD)/tests/src-stack-call.o $(BUILD)/tests/src-threads-boot.o $(BUILD)/tests/src-irq-boot.o $(BUILD)/tests/src-nvme-boot.o $(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o $(COMMON_OBJECTS) boot/linker.ld
 	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
 
 .PHONY: test-mem-boot
@@ -226,7 +232,7 @@ $(BUILD)/kmodules/probe.exports.S: tests/probe.json tools/module-exports.py
 	@mkdir -p $(@D)
 	python3 tools/module-exports.py $< $@
 
-$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
 .PHONY: test-reservations
@@ -570,3 +576,77 @@ test-xhci-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" XHCI_HOTPLUG=1 _test-xhci-boot
 _test-xhci-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --xhci-hotplug
+
+# ACPI owns the interpreter and applies its checked local RELATIVE relocations
+# before calling upstream code. No compiler ABI leaks into the public hub.
+UACPI_ROOT := kmodules/shared/acpi/vendor/uacpi
+ACPI_CFLAGS = $(MODULE_CFLAGS) -I$(UACPI_ROOT)/include -DUACPI_USE_BUILTIN_STRING
+UACPI_OBJECTS = $(patsubst $(UACPI_ROOT)/source/%.c,$(BUILD)/kmodules/acpi/uacpi-%.o,$(wildcard $(UACPI_ROOT)/source/*.c))
+ACPI_OBJECTS = $(addprefix $(BUILD)/kmodules/acpi/,acpi.o runtime.o association.o) $(UACPI_OBJECTS) $(BUILD)/kmodules/acpi.exports.o
+$(BUILD)/kmodules/acpi/%.o: kmodules/shared/acpi/%.c kmodules/shared/acpi/runtime.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(ACPI_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/acpi/uacpi-%.o: $(UACPI_ROOT)/source/%.c $(wildcard $(UACPI_ROOT)/include/uacpi/*.h) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(ACPI_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/acpi.elf: $(ACPI_OBJECTS) kmodules/shared/acpi/module.ld
+	$(CC) -nostdlib -pie -Wl,--no-dynamic-linker -Wl,-Bsymbolic -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/acpi/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/kmodules/platform.elf: $(BUILD)/kmodules/platform-pic.o $(BUILD)/kmodules/platform.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-acpi test-acpi-boot _test-acpi-boot
+test-acpi:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/acpi.c kmodules/shared/acpi/association.c kmodules/shared/platform.c -o $(BUILD)/tests/src-acpi
+	$(BUILD)/tests/src-acpi
+test-acpi-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-acpi-boot
+_test-acpi-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --acpi-fixture
+$(BUILD)/tests/src-acpi-boot.o: tests/acpi-boot.c $(MODULE_HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kmodules/acpi.kmod: $(BUILD)/kmodules/acpi.elf tools/check-acpi-image.py
+	$(OBJCOPY) -O binary $< $@
+	python3 tools/check-acpi-image.py $< $@
+
+$(BUILD)/kmodules/usb.elf: $(BUILD)/kmodules/usb-pic.o $(BUILD)/kmodules/usb-descriptors-pic.o $(BUILD)/kmodules/usb.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-usb
+test-usb:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/usb.c kmodules/shared/usb-descriptors.c -o $(TEST_BUILD)/tests/src-usb
+	$(TEST_BUILD)/tests/src-usb
+
+$(BUILD)/kmodules/probe-usb-pic.o: tests/probe-usb.c tests/probe.h kmodules/shared/usb.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST).o: tests/usb-boot.c tests/probe.h kmodules/shared/usb.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(if $(filter 1,$(USB_HOTPLUG)),-DUSB_HOTPLUG_TEST,) $(if $(filter 1,$(USB_HUB_TEST)),-DUSB_HUB_TEST,) -c $< -o $@
+.PHONY: test-usb-boot _test-usb-boot
+test-usb-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" USB_HOTPLUG=1 _test-usb-boot
+_test-usb-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --usb-hotplug
+
+$(BUILD)/kmodules/usb-hub.elf: $(BUILD)/kmodules/usb-hub-pic.o $(BUILD)/kmodules/usb-hub.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/probe-hubs-pic.o: tests/probe-hubs.c tests/probe.h kmodules/shared/usb-hub.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+.PHONY: test-usb-hub-boot _test-usb-hub-boot
+.PHONY: test-usb-hub
+test-usb-hub:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/usb-hub.c -o $(TEST_BUILD)/tests/src-usb-hub
+	$(TEST_BUILD)/tests/src-usb-hub
+test-usb-hub-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" USB_HUB_TEST=1 _test-usb-hub-boot
+_test-usb-hub-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --usb-hubs

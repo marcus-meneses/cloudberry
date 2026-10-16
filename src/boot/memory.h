@@ -51,5 +51,6 @@ bool boot_map_page(struct boot_pages *, uintptr_t virtual_address, uint64_t phys
                    bool writable, bool executable);
 bool boot_physical_read(struct boot_pages *, uint64_t physical, void *destination, size_t bytes);
 /* Boot-lifetime RW/UC/NX device mapping; rejects non-reserved memory ranges. */
+void *boot_firmware_map(struct boot_pages *, uint64_t physical, size_t bytes);
 void *boot_mmio_map(struct boot_pages *, uint64_t physical, size_t bytes);
 #endif

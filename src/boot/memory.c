@@ -165,7 +165,7 @@ bool boot_physical_read(struct boot_pages *pages, uint64_t physical, void *desti
     return true;
 }
 
-void *boot_mmio_map(struct boot_pages *pages,uint64_t physical,size_t bytes) {
+static void *map_device_or_firmware(struct boot_pages *pages,uint64_t physical,size_t bytes,int firmware) {
     const uint64_t base=UINT64_C(0xffffc00000000000),limit=UINT64_C(1)<<45;
     if (!pages || !pages->map || !physical || !bytes || physical>=limit || bytes>limit-physical) return NULL;
     uint64_t start=physical & ~UINT64_C(4095),end=(physical+bytes+4095) & ~UINT64_C(4095);
@@ -179,11 +179,20 @@ void *boot_mmio_map(struct boot_pages *pages,uint64_t physical,size_t bytes) {
     for (size_t i=0;i<pages->map->count;++i) {
         const struct boot_memory_entry *m=pages->map->entries[i];
         if (!m || m->length>UINT64_MAX-m->base) return NULL;
-        if (m->type!=1 && start<m->base+m->length && m->base<end) return NULL;
+        if (m->type!=1 && !(firmware && (m->type==2 || m->type==3)) && start<m->base+m->length && m->base<end) return NULL;
     }
     for (uint64_t page=start;page<end;page+=BOOT_PAGE_SIZE)
         if (!map_page(pages,base+page,page,true,false,true)) return NULL;
     return (void *)(uintptr_t)(base+physical);
+}
+
+void *boot_mmio_map(struct boot_pages *pages,uint64_t physical,size_t bytes) {
+    return map_device_or_firmware(pages,physical,bytes,0);
+}
+void *boot_firmware_map(struct boot_pages *pages,uint64_t physical,size_t bytes) {
+    /* Reuse physical_read's single UC alias; never assume Limine mapped ACPI
+     * reclaimable/NVS into HHDM, and never create another cache-type alias. */
+    return map_device_or_firmware(pages,physical,bytes,1);
 }
 
 static struct boot_reservation *owned_page(struct boot_pages *pages,uint64_t physical,uintptr_t owner) {

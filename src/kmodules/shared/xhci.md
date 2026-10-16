@@ -4,7 +4,8 @@
 other boot images and calls `xhci.init(hub,heap)` after PCI/IOMMU initialization.
 Initialization caches versioned hub dependencies and publishes `xhci.controllers`;
 it does not open a controller or access the developer's persistent disks.
-USB core, hub/HID class drivers and application-facing handlers remain deferred.
+[USB core](usb.md) consumes these surfaces. [Hub class policy](usb-hub.md) is a separate module; HID/storage class drivers
+and application-facing handlers remain deferred.
 
 The module uses existing PCI ownership/BAR/MSI-X surfaces, PCI-managed DMA/IOMMU
 mapping, mem allocation, irq routing/deferred notifications, clock deadlines and
@@ -15,9 +16,9 @@ register access and xHCI ring/context formats belong to this driver.
 
 `xhci.controllers` references a 32-byte static registry header with a live linked
 list of dynamic controller records. `count` counts discovered/opened controller
-records, not a fixed array extent. Each controller allocation is 480 bytes,
+records, not a fixed array extent. Each controller allocation is 512 bytes,
 including its 96-byte public record, with a 104-byte port record per advertised
-root port and 288-byte private slot record per advertised slot plus slot zero.
+root port and 336-byte private slot record per advertised slot plus slot zero.
 These records are allocated on explicit open, not during generic PCI enumeration.
 A closed controller's stable record is reused on reopen with a fresh ID/generation;
 port-array pointers must be reacquired. No unbounded per-restart history is kept.
@@ -31,7 +32,9 @@ requires the current generation. Disconnect invalidates submission through the
 old token even if another device immediately appears on the same connector.
 
 Controller states are OPENING, ONLINE, QUIESCING, FAILED and CLOSED. Each instance
-serializes its synchronous mutations with a busy flag; IRQ completion continues
+serializes synchronous mutations with a busy flag and stack-owned blocked
+waiters. Contending workers wake on completion, with a one-second acquisition
+deadline; close refuses outstanding command waiters. IRQ completion continues
 while commands wait. Blocking operations require a preemptible CPU0 thread,
 IF enabled, no kernel critical section and no deferred IRQ callback context.
 Multiple controllers have independent state; routes currently target CPU0.
@@ -63,18 +66,27 @@ The driver uses release/acquire publication and MMIO ordering for DMA rings.
 ## Host-controller surfaces
 
 Payloads are in [usb-host.h](usb-host.h), separate from hardware TRBs and contexts.
-The generic payload contract is ready for a future USB core; no USB policy module
-is implemented here.
+The generic payload contract is consumed by USB core; enumeration/class policy
+is not implemented in this transport.
 
+- `watch(id,current_thread_id)` registers one root-bus owner for coalesced port/failure
+  wake credits; `watch(id,0)` removes that subscription before close.
 - `open(hardware_index,out info)` returns a controller ID; `close(id)` is retryable.
 - `info(id,out)` and `port(id,one_based_port,out)` return snapshots.
 - `reset_port(id,port)` uses USB2 PR or USB3 WPR and checks connection/enabled state.
-- `device(id,host_device_request,out token)` enables and addresses one root-port
-  slot, with the caller-supplied initial EP0 maximum packet size.
+- `device(id,host_device_request,out token)` enables and addresses a root or downstream
+  slot, with the caller-supplied initial EP0 maximum packet size. Downstream
+  requests carry the parent token, parent port and speed ID. The driver builds
+  five route nibbles, saturates ports above 15, and derives the nearest high-speed
+  transaction translator, including multi-TT ancestry.
+- `hub(id,host_hub_request)` sets Hub/MTT, port-count and TT think-time context.
+- `disconnect(id,token)` invalidates a whole subtree and wakes its pending I/O
+  as disconnected; it does not free DMA or disable slots. `remove` refuses a
+  parent with live children, requiring postorder cleanup.
 - `endpoint(id,host_endpoint_request)` configures bulk/interrupt endpoints. Address
   zero with HOST_CONTROL evaluates EP0 packet size without exposing raw contexts.
-  The caller supplies xHCI-normalized interval/burst/ESIT values; future USB core
-  will derive them from descriptors and protocol speeds.
+  The caller supplies xHCI-normalized interval/burst/ESIT values; USB core
+  derives them from descriptors and protocol speeds.
 - `transfer(id,host_transfer_request)` returns an asynchronous request ID.
   Control transfers use setup/data/status stages; bulk/interrupt use normal TRBs.
   One request/result per endpoint is retained, with concurrent endpoints allowed.
@@ -119,9 +131,13 @@ probe passes four-CPU TCG with both emulated Intel/AMD IOMMUs. Tests do not ente
 candidate media or consume persistent disks. Controller startup uses no polling
 worker; command waits yield and transfer waits block on notifications.
 
-External hubs/TT routing, isochronous endpoints, streams, suspend/resume,
+Isochronous endpoints, streams, suspend/resume,
 PCI-controller hot removal and MSI/INTx fallback remain unsupported. USB3
 transport is represented by protocol/port support; real USB3 transfers, physical
 controller quirks, native KVM and physical hardware acceptance remain unqualified.
 
 Reference: [xHCI 1.2b requirements specification](https://cdrdv2-public.intel.com/625472/625472_xHCI_Rev1_2b.pdf).
+
+Modeled tests also check nested route saturation, high-speed multi-TT and
+inherited translators, subtree invalidation and parent-first removal refusal.
+`test-usb-hub-boot` exercises the class/transport integration with nested QEMU hubs.

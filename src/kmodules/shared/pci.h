@@ -3,8 +3,14 @@
 #include "module.h"
 #include "mem-pages.h"
 #include "irq.h"
+#include "device.h"
 struct pci_bar {uint64_t physical,bytes;uintptr_t address;};
-struct pci_device {uint64_t hardware_index,owner;struct pci_bar bars[6];uint16_t msix_cap,msix_count;uint32_t reserved;};
+#define PCI_TABLE_NAME "pci.devices"
+#define PCI_TABLE_MAGIC UINT64_C(0x3149435041424343)
+struct pci_record {struct device_identity identity;uint64_t hardware_index,parent_hardware_index,config_physical;uint16_t segment;uint8_t bus,slot,function,header_type,secondary_bus,subordinate_bus;};
+struct pci_table {uint64_t magic;uint16_t major,minor;uint32_t entry_bytes;uint64_t count;struct pci_record *entries;};
+struct pci_firmware_access {uint16_t segment;uint8_t bus,slot,function,width;uint16_t offset;uint32_t value;};
+struct pci_device {uint64_t hardware_index,owner;struct pci_bar bars[6];uint16_t msix_cap,msix_count;uint32_t reserved;struct device_acpi_ref acpi;};
 struct pci_msix {uint64_t hardware_index,owner;uint32_t entry,masked;struct irq_route route;};
 /* BSP foreground only, trusted owners. claim(index,owner,out) takes exclusive
  * boot ownership, disables DMA/INTx/MSI-X, probes and restores BARs with decode
@@ -24,4 +30,13 @@ struct kernel_surface_result pci_surface_msix(MODULE_ARGS);
 struct kernel_surface_result pci_surface_dma_alloc(MODULE_ARGS);
 struct kernel_surface_result pci_surface_dma_free(MODULE_ARGS);
 struct kernel_surface_result pci_surface_release(MODULE_ARGS);
+/* Companion changes are boot-only and refuse claimed devices or duplicates.
+ * associate(hardware_index,ref) updates the operational record; device(index,out)
+ * snapshots discovery/ownership even when unclaimed. firmware_read/write(request)
+ * validates BDF/width/bounds. Firmware writes refuse owned devices and resource,
+ * command and capability registers managed by the PCI owner. */
+struct kernel_surface_result pci_surface_device(MODULE_ARGS);
+struct kernel_surface_result pci_surface_associate(MODULE_ARGS);
+struct kernel_surface_result pci_surface_firmware_read(MODULE_ARGS);
+struct kernel_surface_result pci_surface_firmware_write(MODULE_ARGS);
 #endif

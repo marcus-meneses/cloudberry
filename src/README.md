@@ -4,8 +4,9 @@ The active source tree boots through Limine/UEFI into x86-64 long mode.
 Its current foundation includes independently loaded kernel modules, a versioned
 C ABI hub, owned memory/guarded stacks, hardware/MMIO discovery, clock/RTC,
 interrupt ownership, APIC timers, deadline callbacks, preemptible kernel threads, initial SMP execution, measured critical sections,
-validated SMP clock selection, deferred device IRQ delivery, PCI/DMA ownership
-a read-only NVMe path and an xHCI controller transport, with initial Intel VT-d/AMD-Vi DMA translation. Target hardware is modern (2016+) Intel/AMD x86-64.
+validated SMP clock selection, deferred device IRQ delivery, PCI/DMA ownership,
+a read-only NVMe path, xHCI transport, USB core and external hub class support,
+with initial Intel VT-d/AMD-Vi DMA translation. Target hardware is modern (2016+) Intel/AMD x86-64.
 
 Kmodules are coupled kernel methods in one shared address space. They are not
 resource handlers, user processes or isolation boundaries. Existing method calls
@@ -13,9 +14,9 @@ stay synchronous; a separate threads API explicitly creates saved contexts.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
-Application-facing handles/handlers, userland, filesystems, USB core/HID and SATA
-drivers do not exist in this rewrite yet. The xHCI transport supplies root-port,
-slot/endpoint and asynchronous transfer operations for the future USB layer. NVMe is an initial kernel-only read path. The superseded implementation is preserved locally in `../.src_old/`, excluded
+Application-facing handles/handlers, userland, filesystems, HID/USB-storage class drivers and SATA
+drivers do not exist in this rewrite yet. The xHCI transport supplies root/downstream
+slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe is an initial kernel-only read path. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
 ## Build and run
@@ -47,8 +48,8 @@ bin/cloudberry-nvme.img and bin/cloudberry-sata.img are blank sparse disks creat
 once during build and retained by clean. Boot never formats or migrates them.
 The NVMe module is available through explicit kernel surfaces; normal boot does
 not claim or access the persistent disks. xHCI initialization publishes an empty
-owned registry; an explicit caller opens a controller. USB core/HID and SATA
-drivers remain future work.
+owned registry; normal boot starts USB-core workers and the hub-class manager to claim
+controllers and enumerate root/downstream devices. HID/USB-storage class drivers and SATA remain future work.
 
 ## Execution and ownership
 
@@ -90,7 +91,8 @@ baseline, with latency/scalability work still needed; it is not unrestricted
 kernel preemption. New kmodules must define their critical/reentrancy contracts.
 Threads eagerly preserve x87/SSE and available AVX through the shared xstate
 kmodule; dispatcher/ISR infrastructure still builds with mgeneral-regs-only.
-Cancellation/process teardown, hotplug, migration and load balancing are not implemented.
+Forced thread cancellation/process teardown, CPU hotplug, migration and load
+balancing are not implemented. USB device/hub hotplug is implemented.
 
 Single-CPU clock selection prefers a validated invariant TSC with HPET fallback.
 SMP requires a healthy HPET reference, validates per-CPU frequency with HPET
@@ -103,8 +105,9 @@ invalidation. Heap backing, page tables and original boot allocations remain
 reserved. No per-process page tables or user isolation exists yet.
 
 A successful boot prints module/table names and addresses, hardware descriptors,
-BOOT OK, then "managed BSP event stack active". The candidate creates two production
-deferred workers, submits no demo/test tasks, and sleeps when they are blocked.
+BOOT OK, then "managed BSP event stack active". The candidate creates scheduler and IRQ deferred workers, a USB bus worker per
+controller, the hub-class manager and a worker per discovered external hub. It
+submits no demo/test tasks; idle workers block on notifications or deadlines.
 
 The [profiling surfaces](kmodules/shared/profiling.md) report lock wait/hold/attribution,
 managed IRQ-off intervals and runnable waiting; raw local TSC ticks include host
@@ -112,8 +115,47 @@ vCPU pauses. [Device IRQ routing](kmodules/shared/irq.md) adds exclusive IOAPIC 
 MSI/MSI-X messages, preallocated/coalesced notifications and foreground drain/rearm.
 It does not program PCI capabilities, resolve ACPI PCI INTx routing or initialize
 USB/storage devices. Controller-specific work belongs to NVMe/xHCI drivers;
-USB enumeration/HID remain deferred. IRQ affinity is CPU0.
-Production boot creates no test routes or periodic device polling.
+USB core now owns enumeration; HID/storage class drivers remain deferred. IRQ affinity is CPU0.
+Production boot creates no test routes or periodic device polling. ACPI reserves
+its SCI route masked. The [ACPI/platform modules](kmodules/shared/acpi.md) load
+DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmware
+companions to PCI records. SCI delivery, runtime namespace reconciliation, embedded
+controllers, platform drivers and PCI INTx firmware routing remain deferred.
+
+## Current assessment (2026-10-16)
+
+The shared kernel foundation supports the next storage milestone. It does not
+implement the original application's handler/handle model yet; that layer must
+follow process isolation and safe boundary transfer.
+
+| Area | Implemented | Remaining boundary |
+| --- | --- | --- |
+| Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Shared address space; no process isolation, migration or forced thread cancellation |
+| Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
+| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or mass-storage class driver |
+| Storage | Explicit read-only NVMe namespace access | No SATA driver, partition layer, mounted filesystem or boot-volume matching |
+| Modules | Separate Limine-loaded images, validated versioned exports and mediated hub | Disk loading, dependency-driven driver selection and executable hot replacement remain future work |
+
+Hub lifecycle and descriptor closure now pass focused validation. Class-only
+stop/start reclaims existing hubs while USB core and root attachment identity
+remain active. Tests cover blocked child I/O, fresh descendant identities and
+worker/manager stack reclamation over two cycles. Complete descriptor reads are
+validated against their prefix before configuration. Automatic failed-provider
+recovery and executable image unloading remain deferred. See the
+[hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
+
+The production hub uses 62.06% of its 16 KiB extent, or 64.11% with the selected
+IOMMU backend; mediation uses 51.30%/53.13% of 12 KiB. Capacity is sufficient for
+the immediate storage work. These figures measure registry/stub occupancy, not
+whole-kernel RAM use or a demonstrated throughput/latency bound.
+
+Current QEMU boot media is a read-only USB mass-storage ISO. USB storage is
+recognized by its descriptors but has no block-read class implementation yet.
+The kernel does not currently correlate Limine boot-volume identity with device
+transport. Future matching must report absent/ambiguous identity rather than
+infer the boot device from enumeration order. Native/physical USB and real
+high-speed TT/SuperSpeed hub qualification remain pending; earlier AMD KVM
+clock/SMP acceptance does not qualify the new USB stack.
 
 ## Focused validation
 
@@ -175,9 +217,25 @@ src/
 │   │   ├── iommu-intel.c
 │   │   └── iommu-intel.json
 │   ├── shared/
+│   │   ├── acpi/
+│   │   │   ├── acpi.c
+│   │   │   ├── association.c
+│   │   │   ├── association.h
+│   │   │   ├── module.ld
+│   │   │   ├── runtime.c
+│   │   │   ├── runtime.h
+│   │   │   └── vendor/
+│   │   │       ├── README.md
+│   │   │       └── uacpi/ (pinned upstream include/, source/, README.md, LICENSE)
+│   │   ├── acpi.h
+│   │   ├── acpi.json
+│   │   ├── acpi.md
 │   │   ├── apic-platform.h
 │   │   ├── apic-x86.c
-│   │   ├── apic.c
+│   │   ├── acpi-boot.c
+│   ├── acpi-fixture.py
+│   ├── acpi.c
+│   ├── apic.c
 │   │   ├── apic.h
 │   │   ├── apic.json
 │   │   ├── apic.md
@@ -191,6 +249,7 @@ src/
 │   │   ├── cpu-platform.h
 │   │   ├── cpu-topology.c
 │   │   ├── cpu-tsc.c
+│   │   ├── device.h
 │   │   ├── diagnostics.h
 │   │   ├── event.c
 │   │   ├── event.h
@@ -238,6 +297,9 @@ src/
 │   │   ├── pci.h
 │   │   ├── pci.json
 │   │   ├── pci.md
+│   │   ├── platform.c
+│   │   ├── platform.h
+│   │   ├── platform.json
 │   │   ├── portability.md
 │   │   ├── profiling.md
 │   │   ├── scheduler.c
@@ -268,7 +330,17 @@ src/
 │   │   ├── timer.md
 │   │   ├── tsc-validation.c
 │   │   ├── tsc-validation.h
+│   │   ├── usb-descriptors.c
+│   │   ├── usb-descriptors.h
+│   │   ├── usb-hub.c
+│   │   ├── usb-hub.h
+│   │   ├── usb-hub.json
+│   │   ├── usb-hub.md
 │   │   ├── usb-host.h
+│   │   ├── usb.c
+│   │   ├── usb.h
+│   │   ├── usb.json
+│   │   ├── usb.md
 │   │   ├── xhci-platform.h
 │   │   ├── xhci.c
 │   │   ├── xhci.h
@@ -307,6 +379,8 @@ src/
 │   ├── native-check.py
 │   ├── nvme-boot.c
 │   ├── pci.c
+│   ├── probe-hubs.c
+│   ├── probe-usb.c
 │   ├── probe-xhci.c
 │   ├── probe.c
 │   ├── probe.h
@@ -321,10 +395,15 @@ src/
 │   ├── timer.c
 │   ├── tsc_profile.py
 │   ├── tsc-validation.c
+│   ├── usb-hub.c
+│   ├── usb-boot.c
+│   ├── usb.c
 │   ├── xhci-boot.c
 │   ├── xhci.c
 │   └── xstate-host.c
 ├── tools/
+│   ├── check-acpi-image.py
+│   ├── check-module-pic.py
 │   ├── module-exports.py
 │   └── pack-logo.py
 ├── AGENTS.md
@@ -394,15 +473,29 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are clock boot-cost reporting, USB core/HID on xHCI,
-and process address spaces/teardown; see [roadmap](ROADMAP.md#next-priorities).
+Current next priorities are boot-medium storage access, partition/filesystem
+reading and loading driver modules from disk, followed by process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 
 [xHCI transport](kmodules/shared/xhci.md) is loaded/initialized by the kernel and
-publishes the owned `xhci.controllers` registry alongside 14 method surfaces.
+publishes the owned `xhci.controllers` registry alongside 17 method surfaces.
 Controller instances use PCI/DMA/IOMMU/IRQ/mem/clock/thread hub facilities. Transfers
 have wake-driven completion waiting; detach generations reject stale tokens.
 Controlled close/reopen supports restart after quiescence; module-image unloading
 and the driver manager remain future work. Isolated tests validate actual QEMU
 DMA/MSI-X transfers, cancellation and USB unplug/replug with one/four CPUs and
 both emulated IOMMUs. Native/physical xHCI acceptance remains pending.
+
+[USB core](kmodules/shared/usb.md) publishes `usb.devices` and seventeen surfaces.
+Normal boot starts root enumeration in preemptible BSP workers; workers sleep
+between xHCI change notifications. Interface-scoped ownership and core-owned I/O
+buffers keep future class drivers independent of xHCI DMA/context formats. HID
+and mass-storage class drivers are not included in this milestone.
+
+[USB hub class](kmodules/shared/usb-hub.md) supplies six surfaces and the owned
+`usb.hubs` registry. Normal boot starts its manager alongside USB core. External
+hub workers power/reset ports, enumerate nested devices and block on interrupt
+change bitmaps. Subtree disconnect revokes references before postorder slot
+cleanup. Isolated one/four-CPU tests cover child hotplug, pending grandchild I/O,
+upstream removal and reattachment, including both emulated IOMMUs. Native and
+physical hub/USB3 qualification remain pending; storage remains the next priority.

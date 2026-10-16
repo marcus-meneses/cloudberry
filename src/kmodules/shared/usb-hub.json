@@ -1,0 +1,29 @@
+{
+  "name": "usb-hub",
+  "exports": [
+    {
+      "name": "usb_hub.init",
+      "symbol": "usb_hub_surface_init"
+    },
+    {
+      "name": "usb_hub.start",
+      "symbol": "usb_hub_surface_start"
+    },
+    {
+      "name": "usb_hub.stop",
+      "symbol": "usb_hub_surface_stop"
+    },
+    {
+      "name": "usb_hub.info",
+      "symbol": "usb_hub_surface_info"
+    },
+    {
+      "name": "usb_hub.manager",
+      "symbol": "usb_hub_surface_manager"
+    },
+    {
+      "name": "usb_hub.worker",
+      "symbol": "usb_hub_surface_worker"
+    }
+  ]
+}

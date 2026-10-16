@@ -1,0 +1,13 @@
+{
+  "name": "platform",
+  "exports": [
+    {
+      "name": "platform.init",
+      "symbol": "platform_surface_init"
+    },
+    {
+      "name": "platform.device",
+      "symbol": "platform_surface_device"
+    }
+  ]
+}

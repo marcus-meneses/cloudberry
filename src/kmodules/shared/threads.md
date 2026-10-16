@@ -73,7 +73,9 @@ thread waits for a peer on each CPU, proving timer preemption without voluntary
 yields. Checks include stack canaries, callback progress alongside busy threads,
 block/wake, timed blocking on every CPU, wake-before-block credits, rejection of yield inside a critical section, stale IDs, concurrent
 page allocation and complete stack/payload teardown. Probes never enter candidate
-media. Native KVM/physical-machine execution remains unvalidated here.
+media. Later AMD-host four-CPU KVM acceptance validates guest x87/SSE/AVX
+preemption and x2APIC; see ../../tests/README.md. Native Intel CPU and physical
+execution remain unqualified.
 
 
 Private construction in create occurs outside the thread-list lock; a short

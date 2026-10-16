@@ -28,6 +28,22 @@
     {
       "name": "pci.release",
       "symbol": "pci_surface_release"
+    },
+    {
+      "name": "pci.device",
+      "symbol": "pci_surface_device"
+    },
+    {
+      "name": "pci.associate",
+      "symbol": "pci_surface_associate"
+    },
+    {
+      "name": "pci.firmware_read",
+      "symbol": "pci_surface_firmware_read"
+    },
+    {
+      "name": "pci.firmware_write",
+      "symbol": "pci_surface_firmware_write"
     }
   ]
 }

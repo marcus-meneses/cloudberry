@@ -42,7 +42,7 @@ static int room(size_t added) {
 static int prefix(const char *name,const char *start) {
     while(*start) {if(*name++!=*start++)return 0;}return 1;
 }
-static int add_surface(const char name[32], kernel_surface_call call, uint16_t major, uint16_t minor, int mediated) {
+static int add_surface(const char *name, kernel_surface_call call, uint16_t major, uint16_t minor, int mediated) {
     if (!valid_name(name) || !call || !major || !room(1) || kernel_surface_find(hub_writable, name)) return 0;
     size_t index = hub_writable->count;
     /* Short mutable mechanisms share one recursive CPU lock initially. Execution
@@ -75,7 +75,7 @@ static int add_surface(const char name[32], kernel_surface_call call, uint16_t m
         tables[i - 1 + sizeof(struct kernel_surface)] = tables[i - 1];
     struct kernel_surface *entry = (struct kernel_surface *)tables;
     *entry = (struct kernel_surface){ .call = call, .major = major, .minor = minor };
-    for (size_t i = 0; i < 32; ++i) entry->name[i] = name[i];
+    for (size_t i = 0; i < 31 && name[i]; ++i) entry->name[i] = name[i];
     ++hub_writable->count;
     hub_writable->tables_offset += sizeof(*entry);
     hub_writable->table_capacity = (HUB_BYTES - hub_writable->tables_offset) / sizeof(struct kernel_hub_table);
@@ -131,6 +131,37 @@ static struct kernel_surface_result map_mmio(MODULE_ARGS) {
     MODULE_UNUSED(); void *mapped=hub_pages?boot_mmio_map(hub_pages,a,b):NULL;
     if(mapped)kernel_cpu_flush();
     return module_result((uintptr_t)mapped,mapped!=NULL);
+}
+/* Firmware adapters remain small kernel mechanisms; AML policy is in acpi. */
+static struct kernel_surface_result firmware_map(MODULE_ARGS) {
+    MODULE_UNUSED();void *mapped=hub_pages?boot_firmware_map(hub_pages,a,b):NULL;
+    if(mapped)kernel_cpu_flush();
+    return module_result((uintptr_t)mapped,mapped!=NULL);
+}
+static int port_allowed(uintptr_t port,uintptr_t width) {
+    if((width!=1 && width!=2 && width!=4) || port>65536-width)return 0;
+    const unsigned ranges[][2]={{0x20,0x22},{0x40,0x44},{0x60,0x61},{0x64,0x65},{0x70,0x72},{0xa0,0xa2},{0xe9,0xea},{0xcf8,0xd00}};
+    for(size_t i=0;i<sizeof(ranges)/sizeof(ranges[0]);++i)if(port<ranges[i][1] && ranges[i][0]<port+width)return 0;
+    return 1;
+}
+static struct kernel_surface_result port_read(MODULE_ARGS) {
+    MODULE_UNUSED();if(!port_allowed(a,b))return module_result(0,0);uint32_t value=0;
+    if(b==1) {uint8_t v;__asm__ volatile("inb %1,%0":"=a"(v):"Nd"((uint16_t)a));value=v;}
+    else if(b==2) {uint16_t v;__asm__ volatile("inw %1,%0":"=a"(v):"Nd"((uint16_t)a));value=v;}
+    else __asm__ volatile("inl %1,%0":"=a"(value):"Nd"((uint16_t)a));
+    return module_result(value,1);
+}
+static struct kernel_surface_result port_write(MODULE_ARGS) {
+    MODULE_UNUSED();if(!port_allowed(a,b))return module_result(0,0);
+    if(b==1)__asm__ volatile("outb %0,%1"::"a"((uint8_t)c),"Nd"((uint16_t)a));
+    else if(b==2)__asm__ volatile("outw %0,%1"::"a"((uint16_t)c),"Nd"((uint16_t)a));
+    else __asm__ volatile("outl %0,%1"::"a"((uint32_t)c),"Nd"((uint16_t)a));
+    return module_result(1,1);
+}
+static struct kernel_surface_result log_text(MODULE_ARGS) {
+    MODULE_UNUSED();if(!a && b)return module_result(0,0);const char *s=(const void *)a;
+    for(size_t i=0;i<b;++i)__asm__ volatile("outb %0,$0xe9"::"a"(s[i]));
+    return module_result(b,1);
 }
 static struct kernel_surface_result reserve_memory(MODULE_ARGS) {
     MODULE_UNUSED();
@@ -199,6 +230,8 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     if(!add_surface(map_batch_name,map_batch,1,0,0))return NULL;
     const char batch_name[32]="memory.unmap_batch";
     if(!add_surface(batch_name,unmap_batch,1,0,0))return NULL;
+    if(!add_surface("hardware.firmware_map",firmware_map,1,0,0) || !add_surface("hardware.port_read",port_read,1,0,0) ||
+       !add_surface("hardware.port_write",port_write,1,0,0) || !add_surface("hardware.log",log_text,1,0,0))return NULL;
     const char cpu_name[32]="cpu.control";
     if(!add_surface(cpu_name,kernel_cpu_control,1,0,0)) return NULL;
     struct kernel_hub_table ledger = { .name = "memory.reservations", .address = (uintptr_t)&pages->reservations,
@@ -305,7 +338,7 @@ static bool startup_failure(const char *stage,const char *reason) {
 bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     const char *names[]={"mem.configure","mem.context","mem.init","mem.pages_init","scheduler.init",
-        "hwenum.enumerate","mmio.init","clock.init","apic.init","timer.init","event.init","smp.prepare","threads.init","smp.start","irq.init","pci.init","nvme.init","iommu.init","xhci.init"};
+        "hwenum.enumerate","mmio.init","clock.init","apic.init","timer.init","event.init","smp.prepare","threads.init","smp.start","irq.init","pci.init","nvme.init","iommu.init","xhci.init","acpi.init","platform.init","usb.init","usb_hub.init"};
     kernel_surface_call calls[sizeof(names)/sizeof(names[0])];
     for (size_t i=0;i<sizeof(names)/sizeof(names[0]);++i) {
         calls[i]=kernel_surface_find_version(hub,names[i],1,0);
@@ -344,7 +377,11 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("irq.init",calls[14]((uintptr_t)hub,heap,0,0,0,0));
     START("iommu.init",calls[17]((uintptr_t)hub,heap,0,0,0,0));
     START("pci.init",calls[15]((uintptr_t)hub,heap,0,0,0,0));
+    START("acpi.init",calls[19]((uintptr_t)hub,heap,rsdp_physical,0,0,0));
+    START("platform.init",calls[20]((uintptr_t)hub,heap,0,0,0,0));
     START("nvme.init",calls[16]((uintptr_t)hub,0,0,0,0,0));
     START("xhci.init",calls[18]((uintptr_t)hub,heap,0,0,0,0));
+    START("usb.init",calls[21]((uintptr_t)hub,heap,0,0,0,0));
+    START("usb_hub.init",calls[22]((uintptr_t)hub,heap,0,0,0,0));
     return true;
 }

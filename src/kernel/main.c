@@ -60,6 +60,12 @@ __attribute__((noreturn)) void kmain(void) {
     }
     debug("Cloudberry v2: PASS mem surface test\n");
 #endif
+#ifndef BOOT_MEM_TEST
+    kernel_surface_call usb_start=kernel_surface_find_version(kmodule_hub,"usb.start",1,0);
+    kernel_surface_call hub_start=kernel_surface_find_version(kmodule_hub,"usb_hub.start",1,0);
+    if(!hub_start || hub_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB hub startup failed\n");halt();}
+    if(!usb_start || usb_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB startup failed\n");halt();}
+#endif
     debug("Cloudberry v2: BOOT OK; framebuffer ready; event loop active\n");
     kernel_surface_call event_run=kernel_surface_find_version(kmodule_hub,"smp.run",1,0);
     if (event_run) event_run(64,0,0,0,0,0);

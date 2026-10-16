@@ -24,7 +24,8 @@ write configuration registers, enable interrupts or initialize devices.
 
 This is firmware/PCI discovery, not exhaustive child-bus discovery. USB endpoints,
 NVMe namespaces, SATA targets and AML-described platform devices require their
-respective bus drivers or an AML interpreter. Their controllers are discoverable
+respective bus drivers or the separate [ACPI runtime](acpi.md). ACPI/platform
+inventories now supplement this raw table without duplicating PCI ownership. Their controllers are discoverable
 now. Coverage bits report which supported discovery categories were available;
 missing optional MADT/MCFG tables do not pretend those categories were scanned.
 
