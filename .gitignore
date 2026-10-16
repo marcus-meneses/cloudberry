@@ -1,0 +1,14 @@
+.toolchain/
+bin/
+
+# Archived source and generated Python caches stay local.
+/.src_old/
+__pycache__/
+*.pyc
+
+# Local editor workspaces and developer credentials/settings.
+*.code-workspace
+.vscode/
+/.aws/
+/.codex/
+/.agents/
