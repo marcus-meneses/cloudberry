@@ -51,6 +51,18 @@ not claim or access the persistent disks. xHCI initialization publishes an empty
 owned registry; normal boot starts USB-core workers and the hub-class manager to claim
 controllers and enumerate root/downstream devices. HID/USB-storage class drivers and SATA remain future work.
 
+## Boot configuration
+
+[boot/cloudberry.cnf](boot/cloudberry.cnf) is plain newline-separated `key=value`
+text. Limine loads it into memory with the `cloudberry-config` tag; the core
+passes its address/size to the separate [config kmodule](kmodules/shared/config.md).
+The module validates a typed schema, copies values into owned storage and
+atomically publishes `config.<key>` descriptor references through the hub.
+`boot.show_inventory` controls hardware listing; driver location and timeout
+entries are metadata for future consumers. The partition GUID is optional until
+image preparation assigns one. Missing/duplicate files and invalid configuration
+fail startup with a diagnostic. No disk access, formatting or migration is added.
+
 ## Execution and ownership
 
 Main checks long mode, publishes the hub and delegates loading. The loader
@@ -144,8 +156,8 @@ validated against their prefix before configuration. Automatic failed-provider
 recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
-The production hub uses 62.06% of its 16 KiB extent, or 64.11% with the selected
-IOMMU backend; mediation uses 51.30%/53.13% of 12 KiB. Capacity is sufficient for
+The production hub uses 64.50% of its 16 KiB extent, or 66.55% with the selected
+IOMMU backend; mediation uses 52.08%/53.91% of 12 KiB. Capacity is sufficient for
 the immediate storage work. These figures measure registry/stub occupancy, not
 whole-kernel RAM use or a demonstrated throughput/latency bound.
 
@@ -190,6 +202,7 @@ src/
 ├── assets/
 │   └── cloudberry.png
 ├── boot/
+│   ├── cloudberry.cnf
 │   ├── limine.c
 │   ├── limine.conf
 │   ├── limine.h
@@ -245,6 +258,10 @@ src/
 │   │   ├── clock.h
 │   │   ├── clock.json
 │   │   ├── clock.md
+│   │   ├── config.c
+│   │   ├── config.h
+│   │   ├── config.json
+│   │   ├── config.md
 │   │   ├── cpu-ops.c
 │   │   ├── cpu-platform.h
 │   │   ├── cpu-topology.c
@@ -361,6 +378,7 @@ src/
 │   ├── clock.c
 │   ├── cpu-tsc.c
 │   ├── cpu-topology.c
+│   ├── config.c
 │   ├── events-boot.c
 │   ├── hwenum.c
 │   ├── inthandle-faults.py

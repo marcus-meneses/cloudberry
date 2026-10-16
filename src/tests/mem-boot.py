@@ -19,6 +19,8 @@ build = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv)>1 else root/'bin/te
 if not build.is_relative_to((root/'bin/tests').resolve()):
     raise SystemExit('Boot tests require an isolated build below bin/tests')
 missing_clock = '--missing-clock' in sys.argv[2:]
+config_error=next((arg.split('=',1)[1] for arg in sys.argv[2:] if arg.startswith('--config-error=')),None)
+if config_error not in (None,'missing','duplicate','invalid'): raise SystemExit('Unsupported config failure case')
 watchdog = '--watchdog' in sys.argv[2:]
 xhci_hotplug = '--xhci-hotplug' in sys.argv[2:]
 acpi_fixture = '--acpi-fixture' in sys.argv[2:]
@@ -40,7 +42,7 @@ if xhci_hotplug: suffix += '-xhci-hotplug'
 if acpi_fixture: suffix += '-acpi'
 if usb_hotplug: suffix += '-usb-hotplug'
 if usb_hubs: suffix += '-usb-hubs'
-test = build / ('tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
+test = build / ('tests/config-'+config_error if config_error else 'tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
 test.mkdir(parents=True, exist_ok=True)
 # A failed rerun must never leave an older successful report looking current.
 report_path=test/'report.json'
@@ -68,6 +70,14 @@ with (stage / 'boot/limine/limine.conf').open('a') as config:
 if missing_clock:
     config=stage/'boot/limine/limine.conf'
     config.write_text(config.read_text().replace('    module_path: boot():/boot/kmodules/clock.kmod\n    module_cmdline: clock\n',''))
+if config_error:
+    config=stage/'boot/limine/limine.conf'
+    entry='    module_path: boot():/boot/cloudberry.cnf\n    module_cmdline: cloudberry-config\n'
+    if config_error=='missing': config.write_text(config.read_text().replace(entry,''))
+    elif config_error=='duplicate': config.write_text(config.read_text()+entry)
+    else:
+        data=stage/'boot/cloudberry.cnf'
+        data.write_text(data.read_text().replace('version=1','version=2'))
 iso = test / 'test.iso' 
 subprocess.run(['xorriso', '-as', 'mkisofs', '-R', '-r', '-J', '--efi-boot',
     'boot/limine/limine-uefi-cd.bin', '-efi-boot-part', '--efi-boot-image',
@@ -139,6 +149,13 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 qmp_call('device_add', {'driver':'usb-kbd','id':'hub-child','bus':'xhci.0','port':'4.1'})
                 qmp_call('device_add', {'driver':'usb-hub','id':'nestedhub','bus':'xhci.0','port':'4.2'})
                 qmp_call('device_add', {'driver':'usb-mouse','id':'hub-grandchild','bus':'xhci.0','port':'4.2.1'}); hub_added=True
+            if config_error:
+                expected='Cloudberry startup: config.init failed' if config_error=='invalid' else 'Cloudberry startup: cloudberry.cnf missing or duplicate data module'
+                if expected in content:
+                    assert 'BOOT OK;' not in content and 'PASS mem surface test' not in content
+                    if config_error=='invalid': assert 'Cloudberry config error=0x00000006 line=0x0000000000000002' in content
+                    print('PASS: configuration startup rejection:',config_error)
+                    break
             if watchdog and 'inthandle: CPU halted' in content:
                 assert 'fatal lock acquisition timeout' in content and 'vector=0x0000000000000006' in content and 'rsp=0x' in content
                 print('PASS: failed lock owner triggers bounded watchdog, register dump and halt')
@@ -162,6 +179,7 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                     assert hub_child_removed and hub_child_added and hub_removed and hub_added
                     assert 'PASS USB hub class restart:' in content
                 if usb_hotplug: assert usb_removed and usb_added
+                assert 'PASS config: Limine text handoff, typed owned descriptors and atomic publication' in content
                 assert 'PASS xHCI:' in content
                 if xhci_hotplug: assert removed and added
                 assert 'PASS NVMe:' in content

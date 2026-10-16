@@ -49,12 +49,12 @@ Hub ABI2 stores only 48-byte method records (name, mediated entry, method versio
 and 64-byte table references, sharing the contiguous hub allocation dynamically. Argument definitions
 remain in headers. Registering exports moves the table-reference area within the
 hub, so clients must reacquire record pointers after registration; callable entry
-addresses and table backing addresses remain stable. Current production without an IOMMU backend has 197
-methods and ten table references, occupying 10,168 bytes (62.06%) of the four-page
-16 KiB hub. With ten table references, up to 326 methods fit. Mediation backing
+addresses and table backing addresses remain stable. Current production without an IOMMU backend has 200
+methods and fourteen table references, occupying 10,568 bytes (64.50%) of the four-page
+16 KiB hub. With fourteen table references, up to 321 methods fit. Mediation backing
 is sized from method capacity and occupies three pages (12 KiB); current stubs
-use 6,304 bytes (51.30%). An optional selected IOMMU backend adds seven methods:
-204 methods, 10,504 hub bytes (64.11%) and 6,528 stub bytes (53.13%). page_bytes describes the hub extent. Dynamic growth is not
+use 6,400 bytes (52.08%). An optional selected IOMMU backend adds seven methods:
+207 methods, 10,904 hub bytes (66.55%) and 6,624 stub bytes (53.91%). page_bytes describes the hub extent. Dynamic growth is not
 implemented. Capacity checks fail cleanly rather than overrunning this extent.
 
 Kmodules provide format2 named/versioned export manifests; the generic loader
@@ -165,3 +165,12 @@ active hub dynamically allocates port state (16 bytes per advertised port) and a
 Port arrays are freed on rebind and exited worker stacks are reaped. Interrupt
 bitmaps are bounded to 32 bytes by the USB descriptor's 255-port field. No USB
 class allocation occurs in the IRQ handler.
+
+Boot configuration adds four `config.<key>` descriptor references by default;
+the optional partition GUID adds a fifth when supplied (64 additional hub bytes).
+Each descriptor is 24 bytes and points into config-owned heap storage. The five
+schema slots occupy 280 bytes, plus copied strings and allocator metadata.
+Limine reports the source file's address/size; parsed pointers do not depend on
+that source buffer. Config initializes after the boot heap, before hardware/APs.
+`hub.publish_tables(refs,count)` validates a whole batch before publication under
+the CPU lock. See [config](../kmodules/shared/config.md) for types and lifetime.

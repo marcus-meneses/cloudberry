@@ -2,6 +2,7 @@
 #include "../kmodules/shared/mem.h"
 #include "../kmodules/shared/hwenum.h"
 #include "../kmodules/shared/inthandle.h"
+#include "../kmodules/shared/config.h"
 
 extern bool kernel_scheduler_test(const struct kernel_surfaces *);
 
@@ -92,8 +93,22 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     r = CALL(alloc, &heap, 4096 - 64, 0); /* Complete coalescing recovers whole arena. */
     if (r.status || !r.value) return test_failure(__LINE__);
     if (CALL(release, &heap, r.value, 0).status) return test_failure(__LINE__);
+    kernel_surface_call config_info=find(page,"config.info"),batch=find(page,"hub.publish_tables");struct config_info configured;
+    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=4)return test_failure(__LINE__);
+    const struct kernel_hub_table *config_version=kernel_hub_find_table(page,"config.version"),*directory=kernel_hub_find_table(page,"config.drivers.directory");
+    if(!config_version || !directory || kernel_hub_find_table(page,"config.drivers.partition_guid"))return test_failure(__LINE__);
+    const struct config_value *v=(const void *)config_version->address,*dir=(const void *)directory->address;
+    if(v->major!=1 || v->type!=CONFIG_UINT || v->bytes!=8 || *(const uint64_t *)v->data!=1 || dir->type!=CONFIG_STRING || !equal(dir->data,"/system/drivers"))return test_failure(__LINE__);
+    uint32_t expected_tables=10+configured.count;
+    struct kernel_hub_table transaction[2]={*config_version,*directory};
+    const char fresh[]="test.config.atomic";for(unsigned i=0;i<sizeof(fresh);++i)transaction[0].name[i]=fresh[i];
+    if(CALL(batch,transaction,2,0).status!=KERNEL_SURFACE_FAILED || kernel_hub_find_table(page,fresh) || page->table_count!=expected_tables)return test_failure(__LINE__);
+    transaction[1]=transaction[0];
+    if(CALL(batch,transaction,2,0).status!=KERNEL_SURFACE_FAILED || kernel_hub_find_table(page,fresh) || page->table_count!=expected_tables)return test_failure(__LINE__);
+    const char *config_pass="PASS config: Limine text handoff, typed owned descriptors and atomic publication\n";
+    while(*config_pass)__asm__ volatile("outb %0,$0xe9"::"a"(*config_pass++));
     const struct kernel_hub_table *hardware = kernel_hub_find_table(page, HWENUM_TABLE_NAME);
-    if (!hardware || page->table_count != 10 || hardware->entry_bytes != sizeof(struct hwenum_descriptor) ||
+    if (!hardware || page->table_count != expected_tables || hardware->entry_bytes != sizeof(struct hwenum_descriptor) ||
         hardware->entries_offset != sizeof(struct hwenum_table)) return test_failure(__LINE__);
     const struct hwenum_table *table = (const struct hwenum_table *)hardware->address;
     if (table->magic != HWENUM_TABLE_MAGIC || table->count != hardware->count || !table->count ||
@@ -115,14 +130,14 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
         }
     }
     if (!nvme || !sata || !xhci || !cpu || !memory) return test_failure(__LINE__);
-    if (CALL(publish, hardware, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 10) return test_failure(__LINE__);
+    if (CALL(publish, hardware, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != expected_tables) return test_failure(__LINE__);
     struct kernel_hub_table invalid = *hardware;
     invalid.name[0] = 'x'; invalid.entry_bytes = 0;
     if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED) return test_failure(__LINE__);
     invalid.entry_bytes = hardware->entry_bytes; invalid.count = UINT64_MAX;
     if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED) return test_failure(__LINE__);
     invalid.count = hardware->count; invalid.address = UINTPTR_MAX - 1;
-    if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != 10) return test_failure(__LINE__);
+    if (CALL(publish, &invalid, 0, 0).status != KERNEL_SURFACE_FAILED || page->table_count != expected_tables) return test_failure(__LINE__);
     unsigned char invalid_image[sizeof(struct kmodule_image)+sizeof(struct kmodule_export)]={0};
     struct kmodule_image *bad=(void *)invalid_image;
     bad->magic=KMODULE_MAGIC; bad->format=999; bad->header_bytes=sizeof(*bad);

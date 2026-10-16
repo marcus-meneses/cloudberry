@@ -9,6 +9,7 @@ arguments are defined in headers. Runtime module unload is not implemented.
 
 | Module | Responsibility and contract |
 | --- | --- |
+| [config](shared/config.md) | Strict boot-text schema, owned typed values and atomic config.<key> hub references |
 | [acpi/platform](shared/acpi.md) | AML namespace, stable firmware companions and non-PCI platform inventory; runtime SCI/driver policy deferred |
 | [usb](shared/usb.md) | Root/downstream enumeration, configuration validation, interface ownership and scoped synchronous I/O; HID/storage class drivers deferred |
 | [usb-hub](shared/usb-hub.md) | Hub discovery, owned port registry, power/reset, nested enumeration and interrupt-driven hotplug |
@@ -56,7 +57,7 @@ validation before TSC activation, retaining HPET health checks/fallback. Shared
 address-space mapping changes wait for remote invalidation before physical reuse.
 Owners must quiesce in-flight IRQ callbacks before freeing a binding's context.
 
-Focused test targets include test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
+Focused test targets include test-config, test-config-boot, test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
 test-scheduler, test-irq, test-acpi, test-acpi-boot, test-usb, test-usb-boot, test-usb-hub, test-usb-hub-boot, test-pci, test-tsc-validation and test-threads-smp. The latter uses one/four-CPU disposable TCG
 boots, including timer preemption on every CPU and remote cached mapping reuse.
 These boots also validate real NVMe MSI-X reads and lost-completion timeout/reset

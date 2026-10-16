@@ -28,6 +28,7 @@ THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
 IOMMU_MODULE := $(BUILD)/kmodules/iommu.kmod
 PCI_MODULE := $(BUILD)/kmodules/pci.kmod
 NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
+CONFIG_MODULE := $(BUILD)/kmodules/config.kmod
 USB_HUB_MODULE := $(BUILD)/kmodules/usb-hub.kmod
 USB_MODULE := $(BUILD)/kmodules/usb.kmod
 ACPI_MODULE := $(BUILD)/kmodules/acpi.kmod
@@ -100,7 +101,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) boot/limine.conf
+$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -113,9 +114,10 @@ $(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER
 	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
 	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
 	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(STAGE)/boot/kmodules/
+	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
+	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
 	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
@@ -650,3 +652,22 @@ test-usb-hub-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" USB_HUB_TEST=1 _test-usb-hub-boot
 _test-usb-hub-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --usb-hubs
+
+$(BUILD)/kmodules/config.elf: $(BUILD)/kmodules/config-pic.o $(BUILD)/kmodules/config.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-config
+test-config:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/config.c -o $(TEST_BUILD)/tests/src-config
+	$(TEST_BUILD)/tests/src-config
+
+.PHONY: test-config-boot _test-config-boot
+test-config-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-config-boot
+_test-config-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=missing
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=duplicate
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=invalid

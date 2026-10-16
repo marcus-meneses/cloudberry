@@ -455,3 +455,25 @@ all three manager/worker stacks are reclaimed on stop and restored without growt
 on restart. Host tests reject inconsistent second-read length, type, port count,
 characteristics and power fields, invalid prefixes and short responses, preserving
 the narrow QEMU legacy quirk. SuperSpeed's complete first read is checked too.
+
+## Boot configuration
+
+```sh
+make -C src test-config
+make -C src test-config-boot
+make -C src test-config-boot QEMU_CPUS=4 QEMU_IOMMU=intel QEMU_CPU=max,vendor=GenuineIntel
+```
+
+Host tests use production config code under UBSan: typed values/defaults,
+UTF-8/GUID/decimal/range validation, syntax, duplicate/unknown/missing fields,
+owned lifetime, allocation rollback and publication failure. The real boot probe
+checks config hub pointers and batch name-collision rollback. Isolated negative
+boots remove/duplicate the Limine data-module tag or corrupt the config version;
+all must fail before startup completion, with a line diagnostic for invalid text.
+
+Positive result/report pairs: `mem-boot-1cpu`, run
+`9202620014eb4e8c93aa4128aebd0259`; `mem-boot-4cpu-intelcpu-intel`, run
+`c8f1405484bd48888598829786ce9458`. Negative result/log directories are
+`config-missing`, `config-duplicate` and `config-invalid` under the same isolated
+tests directory. These fixtures never alter the candidate configuration or
+attach persistent development disks. See [config contract](../kmodules/shared/config.md).

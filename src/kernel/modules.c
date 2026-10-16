@@ -2,6 +2,7 @@
 #include "cpu.h"
 #include "../boot/limine.h"
 #include "../kmodules/shared/hwenum.h"
+#include "../kmodules/shared/config.h"
 #define HUB_BYTES KERNEL_HUB_BYTES
 #define MAX_METHODS KERNEL_METHOD_CAPACITY
 #define STUB_BYTES KERNEL_MEDIATION_STUB_BYTES
@@ -112,16 +113,24 @@ static struct kernel_surface_result dump_hub(MODULE_ARGS) {
     }
     return module_result(hub->count,1);
 }
+/* Validate the entire batch under mediation's CPU lock before publishing any
+ * reference. Existing callers retain the single-table ABI. */
+static struct kernel_surface_result publish_tables(MODULE_ARGS) {
+    MODULE_UNUSED();const struct kernel_hub_table *input=(const void *)a;
+    if(!hub_writable || !input || !b || b>hub_writable->table_capacity-hub_writable->table_count)return module_result(0,0);
+    for(size_t i=0;i<b;++i) {
+        const struct kernel_hub_table *t=&input[i];
+        if(!valid_name(t->name) || !t->address || !t->bytes || t->bytes>UINTPTR_MAX-t->address || !t->entry_bytes || t->entries_offset>t->bytes ||
+           t->count>(t->bytes-t->entries_offset)/t->entry_bytes || kernel_hub_find_table(hub_writable,t->name))return module_result(0,0);
+        for(size_t j=0;j<i;++j)if(kernel_hub_name_equal(t->name,input[j].name))return module_result(0,0);
+    }
+    struct kernel_hub_table *tables=(void *)((unsigned char *)hub_writable+hub_writable->tables_offset);
+    for(size_t i=0;i<b;++i)tables[hub_writable->table_count+i]=input[i];
+    hub_writable->table_count+=b;return module_result(b,1);
+}
 static struct kernel_surface_result publish_table(MODULE_ARGS) {
-    MODULE_UNUSED(); const struct kernel_hub_table *input = (const void *)a;
-    if (!hub_writable || !input || !valid_name(input->name) || !input->address || !input->bytes ||
-        input->bytes > UINTPTR_MAX - input->address || !input->entry_bytes || input->entries_offset > input->bytes ||
-        input->count > (input->bytes - input->entries_offset) / input->entry_bytes ||
-        kernel_hub_find_table(hub_writable, input->name) || hub_writable->table_count >= hub_writable->table_capacity)
-        return module_result(0, 0);
-    struct kernel_hub_table *tables = (void *)((unsigned char *)hub_writable + hub_writable->tables_offset);
-    tables[hub_writable->table_count++] = *input;
-    return module_result(input->address, 1);
+    MODULE_UNUSED();struct kernel_surface_result r=publish_tables(a,1,0,0,0,0);
+    return r.status?r:module_result(((const struct kernel_hub_table *)a)->address,1);
 }
 static struct kernel_surface_result physical_read(MODULE_ARGS) {
     MODULE_UNUSED(); int ok = hub_pages && boot_physical_read(hub_pages, a, (void *)b, c);
@@ -219,7 +228,7 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
         .physical_address = physical, .tables_offset = sizeof(*hub_writable),
         .table_entry_bytes = sizeof(struct kernel_hub_table) };
     const char publish_name[32] = "hub.publish_table", read_name[32] = "hardware.read", reserve_name[32] = "memory.reserve", map_name[32] = "hardware.map_mmio", dump_name[32] = "hub.dump";
-    if (!add_surface(publish_name, publish_table, 1, 0, 0) || !add_surface(read_name, physical_read, 1, 0, 0) ||
+    if (!add_surface("hub.publish_tables",publish_tables,1,0,0) || !add_surface(publish_name, publish_table, 1, 0, 0) || !add_surface(read_name, physical_read, 1, 0, 0) ||
         !add_surface(reserve_name, reserve_memory, 1, 1, 0) || !add_surface(map_name, map_mmio, 1, 0, 0) || !add_surface(dump_name, dump_hub, 1, 0, 0)) return NULL;
     const char release_name[32]="memory.release",map_owned_name[32]="memory.map_owned",unmap_owned_name[32]="memory.unmap_owned";
     if (!add_surface(release_name,release_memory,1,0,0) || !add_surface(map_owned_name,map_owned,1,0,0) ||
@@ -280,14 +289,15 @@ bool kernel_module_load(struct boot_pages *pages, const void *image, size_t byte
 }
 /* Boot supplies both variants; only selected images are executable mappings.
  * CPU vendor and ACPI IOMMU provider are independent selection dimensions. */
-static bool load_boot_image(struct boot_pages *pages,const char *tag,const char *contract) {
+static const struct module_file *boot_file(const char *tag) {
     const struct module_file *chosen=NULL;
-    for(uint64_t i=0;i<module_request.response->count;++i) {
-        const struct module_file *file=module_request.response->files[i];
-        if(file && file->cmdline && kernel_hub_name_equal(file->cmdline,tag)) {if(chosen)return false;chosen=file;}
-    }
-    if(!chosen || !kernel_module_load(pages,chosen->address,chosen->size,contract))return false;
-    return true;
+    for(uint64_t i=0;i<module_request.response->count;++i){const struct module_file *file=module_request.response->files[i];
+        if(file && file->cmdline && kernel_hub_name_equal(file->cmdline,tag)){if(chosen)return NULL;chosen=file;}
+    }return chosen;
+}
+static bool load_boot_image(struct boot_pages *pages,const char *tag,const char *contract) {
+    const struct module_file *chosen=boot_file(tag);
+    return chosen && kernel_module_load(pages,chosen->address,chosen->size,contract);
 }
 static bool load_variant(struct boot_pages *pages,const char *tag,const char *contract) {
     if(!load_boot_image(pages,tag,contract))return false;
@@ -313,7 +323,7 @@ bool kernel_modules_load(struct boot_pages *pages) {
     for(uint64_t i=0;i<module_request.response->count;++i) {
         const struct module_file *file=module_request.response->files[i];
         if(!file || !file->cmdline)return false;
-        if(kernel_hub_name_equal(file->cmdline,"inthandle") || kernel_hub_name_equal(file->cmdline,"splash") ||
+        if(kernel_hub_name_equal(file->cmdline,"cloudberry-config") || kernel_hub_name_equal(file->cmdline,"inthandle") || kernel_hub_name_equal(file->cmdline,"splash") ||
             kernel_hub_name_equal(file->cmdline,"cpu-intel") || kernel_hub_name_equal(file->cmdline,"cpu-amd") ||
             kernel_hub_name_equal(file->cmdline,"iommu-intel") || kernel_hub_name_equal(file->cmdline,"iommu-amd"))continue;
         if(!kernel_module_load(pages,file->address,file->size,file->cmdline)) {debug("Cloudberry module failed: ");debug(file->cmdline);debug("\n");return false;}
@@ -357,6 +367,17 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     uint64_t arena=boot_pages_reserve(pages,1,BOOT_RES_HEAP,heap);
     if (!arena) return startup_failure("memory.heap","exhausted");
     START("mem.init",calls[2](heap,(uintptr_t)boot_physical_pointer(pages,arena),4096,0,0,0));
+    const struct module_file *config_file=boot_file("cloudberry-config");
+    kernel_surface_call config_init=kernel_surface_find_version(hub,"config.init",1,0);
+    if(!config_file || !config_file->address || !config_file->size)return startup_failure("cloudberry.cnf","missing or duplicate data module");
+    if(!config_init)return startup_failure("config.init","missing");
+    struct kernel_surface_result configured=config_init((uintptr_t)hub,heap,(uintptr_t)config_file->address,config_file->size,0,0);
+    if(configured.status){
+        struct config_info detail={0};kernel_surface_call config_info=kernel_surface_find_version(hub,"config.info",1,0);
+        if(config_info)config_info((uintptr_t)&detail,0,0,0,0,0);
+        debug("Cloudberry config error=0x");debug_hex(configured.value,8);debug(" line=0x");debug_hex(detail.line,16);debug("\n");
+        return startup_failure("config.init","failed");
+    }
     START("mem.pages_init",calls[3]((uintptr_t)hub,heap,0,0,0,0));
     START("scheduler.init",calls[4]((uintptr_t)hub,heap,0,0,0,0));
     hardware_boot.rsdp_physical=rsdp_physical;hardware_boot.memory=pages->map;

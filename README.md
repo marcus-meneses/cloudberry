@@ -60,6 +60,7 @@ QEMU with PCIe, NVMe, AHCI SATA and xHCI USB devices.
 Implemented foundations include:
 
 - Independently loaded kernel modules with a versioned method/table hub.
+- Limine-loaded text configuration parsed into owned typed hub references.
 - Owned memory allocation, page mappings, guarded stacks and TLB coordination.
 - Preemptible kernel threads, SMP startup, deadline scheduling and deferred IRQs.
 - Calibrated clocks, cross-CPU TSC qualification and HPET fallback.

@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "modules.h"
+#include "../kmodules/shared/config.h"
 #include "../boot/limine.h"
 
 static struct boot_pages bootstrap_pages;
@@ -50,9 +51,12 @@ __attribute__((noreturn)) void kmain(void) {
     }
     kernel_surface_call hub_dump=kernel_surface_find_version(kmodule_hub,"hub.dump",1,0);
     if (!hub_dump || hub_dump(0,0,0,0,0,0).status) {debug("Cloudberry v2: hub dump failed\n");halt();}
-    kernel_surface_call hardware_dump=kernel_surface_find_version(kmodule_hub,"hwenum.dump",1,0);
-    if (!hardware_dump || hardware_dump(0,0,0,0,0,0).status) {
-        debug("Cloudberry v2: hardware inventory dump failed\n");halt();
+    const struct kernel_hub_table *config=kernel_hub_find_table(kmodule_hub,"config.boot.show_inventory");
+    const struct config_value *inventory=config?(const void *)config->address:NULL;
+    if(!inventory || inventory->major!=1 || inventory->type!=CONFIG_BOOL || inventory->bytes!=1 || !inventory->data){debug("Cloudberry v2: inventory configuration missing\n");halt();}
+    if(*(const uint8_t *)inventory->data) {
+        kernel_surface_call hardware_dump=kernel_surface_find_version(kmodule_hub,"hwenum.dump",1,0);
+        if(!hardware_dump || hardware_dump(0,0,0,0,0,0).status){debug("Cloudberry v2: hardware inventory dump failed\n");halt();}
     }
 #ifdef BOOT_MEM_TEST
     if (!kernel_mem_test(kmodule_hub, &bootstrap_pages)) {

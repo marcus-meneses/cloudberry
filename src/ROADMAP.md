@@ -120,6 +120,14 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     descriptors must match their validated prefix; malformed/short second reads
     fail before configuration. Failed-hub automatic recovery stays deferred.
 
+15. Boot configuration: Limine-loaded `boot/cloudberry.cnf` is identified as data;
+    the config kmodule owns strict schema parsing, copied typed values and
+    `config.<key>` references. Batch hub publication is atomic. Inventory visibility
+    is applied; driver directory/timeout are future-consumer metadata, with no
+    fabricated partition GUID. Host tests and isolated one/four-CPU TCG acceptance
+    validate ownership, failures and the handoff; missing/duplicate/invalid-file
+    boots fail explicitly. Runtime reconfiguration remains outside this milestone.
+
 ## Next priorities
 
 Review update: 2026-10-16. Hub lifecycle/descriptor closure is complete; retain

@@ -1,0 +1,7 @@
+{
+  "name": "config",
+  "exports": [
+    {"name": "config.init", "symbol": "config_surface_init"},
+    {"name": "config.info", "symbol": "config_surface_info"}
+  ]
+}
