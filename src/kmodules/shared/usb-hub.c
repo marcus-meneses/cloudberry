@@ -209,3 +209,9 @@ struct kernel_surface_result usb_hub_surface_info(MODULE_ARGS) {
     for(struct hub *hub=state.head;hub;hub=hub->next){info.running+=hub->running;info.failed+=hub->record.state==USB_HUB_FAILED;}
     *(struct usb_hub_info *)a=info;unlock(flags);return module_result(1,1);
 }
+
+struct kernel_surface_result usb_hub_surface_ready(MODULE_ARGS){
+    MODULE_UNUSED();if(!bsp())return module_result(0,0);uint64_t flags=lock();int ready=state.running,ok=1;
+    for(const struct usb_device *d=state.usb->first;d;d=d->next)if(d->state==USB_CONFIGURED && d->hub){struct hub *h=state.head;while(h && (h->record.device.id!=d->identity.id || h->record.device.generation!=d->identity.generation))h=h->next;if(!h || h->record.state!=USB_HUB_RUNNING)ready=0;if(h && h->record.state==USB_HUB_FAILED)ok=0;}
+    unlock(flags);return module_result(ready,ok);
+}

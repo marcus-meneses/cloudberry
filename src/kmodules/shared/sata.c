@@ -182,3 +182,14 @@ struct kernel_surface_result sata_surface_close(MODULE_ARGS){
     else {if(!close_controller(ctrl) || !free_dma(s,0) || CALL(state.release,ctrl->device.hardware_index,ctrl->owner,1).status){ctrl->busy=0;goto done;}forget_port(s);forget_controller(ctrl);ok=1;}
 done:state.management=0;return module_result(1,ok);
 }
+
+struct kernel_surface_result sata_surface_ports(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || !b || __atomic_exchange_n(&state.management,1,__ATOMIC_ACQUIRE))return module_result(0,0);
+    struct controller *ctrl=state.controllers;while(ctrl && ctrl->device.hardware_index!=a)ctrl=ctrl->next;
+    struct pci_device device;int temporary=!ctrl,ok=0;uint64_t owner=0;uintptr_t regs=0;uint32_t ports=0;
+    if(ctrl){if(__atomic_exchange_n(&ctrl->busy,1,__ATOMIC_ACQUIRE))goto done;device=ctrl->device;owner=ctrl->owner;regs=ctrl->regs;}
+    else {if(state.controller_serial>UINT64_MAX-OWNER)goto done;owner=OWNER+state.controller_serial++;if(CALL(state.claim,a,owner,&device).status)goto done;regs=device.bars[5].address;}
+    if(regs && device.bars[5].bytes>=0x180){uint32_t implemented=read32(regs,0xc);for(unsigned p=0;p<32;++p)if((implemented&(1u<<p)) && device.bars[5].bytes>=0x180+p*0x80 && (read32(regs,0x128+p*0x80)&0xf0f)==0x103)ports|=1u<<p;ok=1;}
+    if(temporary){if(CALL(state.release,a,owner,1).status)ok=0;}else ctrl->busy=0;
+done:state.management=0;if(ok)*(uint32_t *)b=ports;return module_result(ports,ok);
+}

@@ -38,19 +38,19 @@ static int entry_read(struct slice *s,uint64_t offset,void *out){
 }
 static int select_partition(struct slice *s,const void *guid){
     s->cached=UINT64_MAX;
-    struct gpt primary,backup;if(!header(s,1,&primary) || primary.alternate!=s->parent.blocks-1 || !header(s,primary.alternate,&backup) || backup.alternate!=1 || primary.first!=backup.first || primary.last!=backup.last || primary.count!=backup.count || primary.stride!=backup.stride || primary.crc!=backup.crc || !disk_equal(primary.guid,backup.guid,16) || !array_crc(s,&primary) || !array_crc(s,&backup))return 0;
+    struct gpt primary,backup;if(!header(s,1,&primary) || primary.alternate!=s->parent.blocks-1 || !header(s,primary.alternate,&backup) || backup.alternate!=1 || primary.first!=backup.first || primary.last!=backup.last || primary.count!=backup.count || primary.stride!=backup.stride || primary.crc!=backup.crc || !disk_equal(primary.guid,backup.guid,16) || !array_crc(s,&primary) || !array_crc(s,&backup))return -1;
     uint8_t entry[128],zero[16]={0};unsigned matched=0;uint64_t start=0,end=0;
     for(uint32_t i=0;i<primary.count;++i){uint64_t offset=primary.array*s->parent.block_bytes+(uint64_t)i*primary.stride;
-        if(!entry_read(s,offset,entry))return 0;
+        if(!entry_read(s,offset,entry))return -1;
         if(disk_equal(entry,zero,16))continue;
-        uint64_t a=disk_u64(entry+32),b=disk_u64(entry+40);if(a<primary.first || a>b || b>primary.last)return 0;
-        if(disk_equal(entry+16,guid,16)){if(++matched!=1)return 0;
+        uint64_t a=disk_u64(entry+32),b=disk_u64(entry+40);if(a<primary.first || a>b || b>primary.last)return -1;
+        if(disk_equal(entry+16,guid,16)){if(++matched!=1)return -1;
     start=a;end=b;}
     }
-    if(matched!=1)return 0;
-    for(uint32_t i=0;i<primary.count;++i){if(!entry_read(s,primary.array*s->parent.block_bytes+(uint64_t)i*primary.stride,entry))return 0;
+    if(!matched)return 0;
+    for(uint32_t i=0;i<primary.count;++i){if(!entry_read(s,primary.array*s->parent.block_bytes+(uint64_t)i*primary.stride,entry))return -1;
         if(disk_equal(entry,zero,16) || disk_equal(entry+16,guid,16))continue;
-        if(disk_u64(entry+32)<=end && disk_u64(entry+40)>=start)return 0;
+        if(disk_u64(entry+32)<=end && disk_u64(entry+40)>=start)return -1;
     }
     s->start=start;s->block.blocks=end-start+1;return 1;
 }
@@ -66,7 +66,7 @@ struct kernel_surface_result partition_surface_find(MODULE_ARGS){
     uint8_t zero[16]={0};if(disk_equal((void *)b,zero,16) || parent->control(parent->cookie,BLOCK_RETAIN,0,0,0,0).status)return module_result(0,0);
     struct kernel_surface_result r=CALL(state.alloc,state.heap,1,sizeof(struct slice));if(r.status){parent->control(parent->cookie,BLOCK_RELEASE,0,0,0,0);return module_result(0,0);
     }struct slice *s=(void *)r.value;block_copy(&s->parent,parent);block_copy(&s->block,parent);
-    if(!select_partition(s,(void *)b)){parent->control(parent->cookie,BLOCK_RELEASE,0,0,0,0);CALL(state.free,state.heap,s,0);return module_result(0,0);
+    int selected=select_partition(s,(void *)b);if(selected!=1){parent->control(parent->cookie,BLOCK_RELEASE,0,0,0,0);CALL(state.free,state.heap,s,0);return module_result(selected==0?PARTITION_NOT_FOUND:PARTITION_CORRUPT,0);
     }
     uint64_t flags=lock();if(state.serial==UINT64_MAX){unlock(flags);parent->control(parent->cookie,BLOCK_RELEASE,0,0,0,0);CALL(state.free,state.heap,s,0);return module_result(0,0);}
     s->block.minor=1;s->block.cookie=++state.serial;s->block.first_block+=s->start;s->block.read=kernel_surface_find_version(state.hub,"partition.read",1,0);s->block.control=kernel_surface_find_version(state.hub,"partition.control",1,0);if(block_writable(parent)){s->block.write=kernel_surface_find_version(state.hub,"partition.write",1,0);s->block.flush=kernel_surface_find_version(state.hub,"partition.flush",1,0);}
@@ -108,4 +108,12 @@ struct kernel_surface_result partition_surface_disconnect(MODULE_ARGS){
         if(!s){for(s=state.first;s;s=s->next)if(s->disconnected && (uintptr_t)s->block.root_read==a && s->block.root_cookie==b && s->busy)ok=0;unlock(flags);break;}uint64_t cookie=s->block.cookie;unlock(flags);
         if(partition_surface_close(cookie,0,0,0,0,0).status){ok=0;break;}++removed;
     }return module_result(removed,ok);
+}
+
+struct kernel_surface_result partition_surface_identity(MODULE_ARGS){
+    MODULE_UNUSED();const struct block_device *device=(void *)a;if(!foreground() || !block_valid(device) || !b || CALL(device->control,device->cookie,BLOCK_RETAIN,0).status)return module_result(0,0);
+    struct kernel_surface_result memory=CALL(state.alloc,state.heap,1,sizeof(struct slice));if(memory.status){CALL(device->control,device->cookie,BLOCK_RELEASE,0);return module_result(0,0);}struct slice *s=(void *)memory.value;block_copy(&s->parent,device);
+    struct gpt primary,backup;int ok=header(s,1,&primary) && primary.alternate==device->blocks-1 && header(s,primary.alternate,&backup) && backup.alternate==1 && primary.first==backup.first && primary.last==backup.last && primary.count==backup.count && primary.stride==backup.stride && primary.crc==backup.crc && disk_equal(primary.guid,backup.guid,16) && array_crc(s,&primary) && array_crc(s,&backup);
+    if(ok)disk_copy((void *)b,primary.guid,16);
+    CALL(state.free,state.heap,s,0);if(CALL(device->control,device->cookie,BLOCK_RELEASE,0).status)ok=0;return module_result(1,ok);
 }

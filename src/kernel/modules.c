@@ -1,4 +1,5 @@
 #include "modules.h"
+#include "../kmodules/shared/boot-origin.h"
 #include "cpu.h"
 #include "../boot/limine.h"
 #include "../kmodules/shared/hwenum.h"
@@ -285,6 +286,7 @@ static struct kernel_surface_result unmap_batch(MODULE_ARGS) {
     return module_result(ok,ok);
 }
 static struct kernel_surface_result framebuffer_map(MODULE_ARGS){MODULE_UNUSED();return module_result(1,boot_framebuffer_map(hub_pages,a,b));}
+static struct boot_origin origin;
 const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) {
     if (hub_writable) return NULL;
     uint64_t physical = boot_pages_reserve(pages, HUB_BYTES / BOOT_PAGE_SIZE, BOOT_RES_HUB, KERNEL_SURFACES_ADDRESS);
@@ -313,6 +315,13 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
        !add_surface("hardware.port_write",port_write,1,0,0) || !add_surface("hardware.log",log_text,1,0,0))return NULL;
     const char cpu_name[32]="cpu.control";
     if(!add_surface(cpu_name,kernel_cpu_control,1,0,0)) return NULL;
+    if(executable_file_request.response && executable_file_request.response->file){
+        const struct module_file *f=executable_file_request.response->file;origin=(struct boot_origin){.present=1,.media_type=f->media_type,.partition_index=f->partition_index,.mbr_disk_id=f->mbr_disk_id};
+        const unsigned char *disk=(const void *)&f->gpt_disk_uuid,*part=(const void *)&f->gpt_part_uuid,*fs=(const void *)&f->part_uuid;
+        for(unsigned i=0;i<16;++i){origin.disk_guid[i]=disk[i];origin.partition_guid[i]=part[i];origin.filesystem_uuid[i]=fs[i];}
+    }
+    struct kernel_hub_table provenance={.name="boot.origin",.address=(uintptr_t)&origin,.bytes=sizeof(origin),.count=1,.entry_bytes=sizeof(origin)};
+    if(publish_table((uintptr_t)&provenance,0,0,0,0,0).status)return NULL;
     struct kernel_hub_table ledger = { .name = "memory.reservations", .address = (uintptr_t)&pages->reservations,
         .bytes = sizeof(pages->reservations), .count = 1, .entry_bytes = sizeof(pages->reservations) };
     if (publish_table((uintptr_t)&ledger, 0, 0, 0, 0, 0).status) return NULL;
@@ -489,5 +498,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("partition.init",calls[24]((uintptr_t)hub,heap,0,0,0,0));
     START("ext4_fs.init",calls[25]((uintptr_t)hub,heap,0,0,0,0));
     START("sata.init",calls[26]((uintptr_t)hub,heap,0,0,0,0));
+    kernel_surface_call bootstrap=kernel_surface_find(hub,"bootstrap.init");if(!bootstrap)return startup_failure("bootstrap.init","missing");
+    START("bootstrap.init",bootstrap((uintptr_t)hub,heap,0,0,0,0));
     return true;
 }

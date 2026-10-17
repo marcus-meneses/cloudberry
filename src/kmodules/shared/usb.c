@@ -14,7 +14,7 @@ struct device {
     uint64_t token,pending,attempt_generation,io_thread,cleanup_waiter,hub_owner;unsigned hub_ports,hub_interface;unsigned char *buffer;
 };
 struct topology_waiter {struct topology_waiter *next;uint64_t thread;};
-struct usb_host {struct usb_host *next;uint64_t hardware,id,thread;uint32_t running,stop,failed;uint64_t topology_owner;struct topology_waiter *topology_waiters;};
+struct usb_host {struct usb_host *next;uint64_t hardware,id,thread;uint32_t running,stop,failed,scanned;uint64_t topology_owner;struct topology_waiter *topology_waiters;};
 static struct {
     const struct kernel_surfaces *hub;const struct hwenum_table *hw;uintptr_t heap;
     struct usb_table table;struct watcher *watchers;struct usb_host *hosts;struct device *devices;uint64_t serial,wakes;unsigned managing;
@@ -261,6 +261,7 @@ struct kernel_surface_result usb_surface_worker(MODULE_ARGS) {
         while(!host->stop) {
             if(CALL(state.info,host->id,&info,0).status || info.state!=XHCI_ONLINE || !topology_enter(host)){ok=0;break;}
             int scanned=host_scan(host,info.ports);topology_leave(host);if(!scanned){ok=0;break;}
+            if(!host->scanned){uint64_t f=lock();host->scanned=1;notify_changes();unlock(f);}
             if(host->stop)break;
             if(CALL(state.thread,THREAD_BLOCK,0,0).status){ok=0;break;}
             ++state.wakes;
@@ -361,7 +362,7 @@ struct kernel_surface_result usb_surface_start(MODULE_ARGS) {
         if(host->running){if(host->stop)return manage_end(0,0);++count;continue;}
         if(host->id)return manage_end(0,0); /* Uncertain old controller ownership is retained. */
         if(host->thread && CALL(state.thread,THREAD_REAP,host->thread,0).status)return manage_end(0,0);
-        host->thread=0;host->stop=host->failed=0;
+        host->thread=0;host->stop=host->failed=host->scanned=0;
         struct thread_request request={.abi=1,.cpu=0,.stack_bytes=32768,.entry=(uintptr_t)worker,.major=1};request.payload.arguments[0]=(uintptr_t)host;
         uint64_t flags=lock();host->running=1;unlock(flags);
         struct kernel_surface_result created=CALL(state.create,&request,0,0);
@@ -514,4 +515,11 @@ struct kernel_surface_result usb_surface_cancel(MODULE_ARGS) {
     unlock(flags);if(!ok)return failure();
     struct kernel_surface_result result=CALL(state.cancel,dev->host->id,dev->token,r->endpoint);
     flags=lock();dev->cancelling=0;if(dev->io_thread)CALL(state.thread,THREAD_WAKE,dev->io_thread,0);unlock(flags);return result;
+}
+
+struct kernel_surface_result usb_surface_ready(MODULE_ARGS){
+    MODULE_UNUSED();if(!bsp())return failure();uint64_t flags=lock();int ready=1,ok=1;
+    for(struct usb_host *h=state.hosts;h;h=h->next){if(h->failed)ok=0;if(!h->running || !h->scanned)ready=0;}
+    for(struct device *dev=state.devices;dev;dev=dev->next)if(dev->present && dev->record.state==USB_ENUMERATING)ready=0;
+    unlock(flags);return module_result(ready,ok);
 }

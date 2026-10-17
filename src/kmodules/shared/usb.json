@@ -68,6 +68,10 @@
     {
       "name": "usb.cancel",
       "symbol": "usb_surface_cancel"
+    },
+    {
+      "name": "usb.ready",
+      "symbol": "usb_surface_ready"
     }
   ]
 }

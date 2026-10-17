@@ -247,3 +247,15 @@ struct kernel_surface_result nvme_surface_close(MODULE_ARGS){
     else {struct kernel_surface_result closed=close_owned(s);if(!closed.status){forget_namespace(n);forget_controller(s);ok=1;}else __atomic_store_n(&s->busy,0,__ATOMIC_RELEASE);}
 done:__atomic_store_n(&state.management,0,__ATOMIC_RELEASE);return module_result(1,ok);
 }
+
+struct kernel_surface_result nvme_surface_next(MODULE_ARGS){
+    MODULE_UNUSED();if(!state.hub || !foreground() || b>=UINT32_MAX || !c)return module_result(0,0);
+    uint64_t flags=CALL(state.cpu,CPU_ENTER,0,0).value;
+    struct controller *s=state.controllers;while(s && s->info.hardware_index!=a)s=s->next;
+    if(!s || !s->info.online || s->info.failed || __atomic_exchange_n(&s->busy,1,__ATOMIC_ACQUIRE)){CALL(state.cpu,CPU_LEAVE,flags,0);return module_result(0,0);}
+    CALL(state.cpu,CPU_LEAVE,flags,0);
+    struct command cmd={.op=6,.nsid=b,.prp1=s->dma.physical+20480,.cdw={2}};int ok=admin(s,cmd);uint32_t next=ok?*(uint32_t *)(s->dma.address+20480):0;
+    if(!ok){s->info.failed=1;s->info.online=0;(void)disable(s);}if(ok && next && (next<=b || next==UINT32_MAX))ok=0;
+    if(ok)*(uint32_t *)c=next;
+    s->busy=0;return module_result(next,ok);
+}

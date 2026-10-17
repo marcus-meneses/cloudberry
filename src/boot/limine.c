@@ -37,3 +37,7 @@ static volatile uint64_t requests_end[] = {
 __attribute__((used,section(".limine_requests")))
 volatile struct limine_mp_request mp_request={{0xc7b1dd30df4c8b88,0x0a82e883a194f07b,
     0x95a67b819a1b857e,0xa0b61b723b6a73e0},0,NULL,BOOT_PREFER_X2APIC};
+
+/* Executable-file request, Limine protocol (0BSD); no file buffer is exported. */
+__attribute__((used,section(".limine_requests")))
+volatile struct executable_file_request executable_file_request={{0xc7b1dd30df4c8b88,0x0a82e883a194f07b,0xad97e90e83f1ed67,0x31eb5d1c5ff23b69},0,NULL};

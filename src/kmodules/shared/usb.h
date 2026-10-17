@@ -74,4 +74,5 @@ struct kernel_surface_result usb_surface_claim(MODULE_ARGS);
 struct kernel_surface_result usb_surface_release(MODULE_ARGS);
 struct kernel_surface_result usb_surface_control(MODULE_ARGS);
 struct kernel_surface_result usb_surface_transfer(MODULE_ARGS);
+struct kernel_surface_result usb_surface_ready(MODULE_ARGS);
 #endif

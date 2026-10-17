@@ -23,4 +23,7 @@ struct kernel_surface_result sata_surface_control(MODULE_ARGS);
 struct kernel_surface_result sata_surface_info(MODULE_ARGS);
 struct kernel_surface_result sata_surface_close(MODULE_ARGS);
 struct kernel_surface_result sata_surface_interrupt(MODULE_ARGS);
+/* ports(hardware_index,out uint32 mask): connected ATA port candidates; does
+ * not reset or start engines. Open still performs full capability checks. */
+struct kernel_surface_result sata_surface_ports(MODULE_ARGS);
 #endif

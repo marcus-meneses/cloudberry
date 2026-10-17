@@ -32,3 +32,8 @@ slice. New reads/writes/flushes/retains fail; existing calls drain before freein
 Unretained idle views close immediately. Externally retained dead views keep
 only their reference/lifetime chain; their final release closes them and releases
 the transport. Replacement media requires a new GUID selection and new cookie.
+
+`find` distinguishes a valid GPT with no matching GUID (`PARTITION_NOT_FOUND`)
+from corrupt/duplicate/overlapping selection (`PARTITION_CORRUPT`).
+`identity(block,out 16-byte GUID)` validates both headers/arrays and copies the
+GPT disk GUID, without creating a view or changing disk contents.

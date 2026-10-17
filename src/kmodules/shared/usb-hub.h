@@ -17,4 +17,5 @@ struct kernel_surface_result usb_hub_surface_stop(MODULE_ARGS);
 struct kernel_surface_result usb_hub_surface_info(MODULE_ARGS);
 struct kernel_surface_result usb_hub_surface_manager(MODULE_ARGS);
 struct kernel_surface_result usb_hub_surface_worker(MODULE_ARGS);
+struct kernel_surface_result usb_hub_surface_ready(MODULE_ARGS);
 #endif

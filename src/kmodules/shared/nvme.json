@@ -68,6 +68,10 @@
     {
       "name": "nvme.control",
       "symbol": "nvme_surface_control"
+    },
+    {
+      "name": "nvme.next",
+      "symbol": "nvme_surface_next"
     }
   ]
 }

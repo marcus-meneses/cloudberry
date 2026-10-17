@@ -30,4 +30,7 @@ struct kernel_surface_result nvme_surface_block_read(MODULE_ARGS);
 struct kernel_surface_result nvme_surface_write(MODULE_ARGS);
 struct kernel_surface_result nvme_surface_flush(MODULE_ARGS);
 struct kernel_surface_result nvme_surface_control(MODULE_ARGS);
+/* next(hardware_index,after_namespace_id,out uint32): zero means end; controller
+ * must already have an open namespace. Serialized admin enumeration, no reset. */
+struct kernel_surface_result nvme_surface_next(MODULE_ARGS);
 #endif

@@ -24,6 +24,10 @@
     {
       "name": "usb_hub.worker",
       "symbol": "usb_hub_surface_worker"
+    },
+    {
+      "name": "usb_hub.ready",
+      "symbol": "usb_hub_surface_ready"
     }
   ]
 }

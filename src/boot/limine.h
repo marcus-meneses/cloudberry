@@ -17,7 +17,11 @@ struct framebuffer_response {
     struct framebuffer **frames;
 };
 struct hhdm_response { uint64_t revision, offset; };
-struct module_file { uint64_t revision; void *address; uint64_t size; char *path, *cmdline; };
+struct limine_uuid {uint32_t a;uint16_t b,c;uint8_t d[8];};
+struct module_file {uint64_t revision;void *address;uint64_t size;char *path,*cmdline;uint32_t media_type,unused;uint8_t tftp_ipv4[4];uint32_t tftp_port,partition_index,mbr_disk_id;struct limine_uuid gpt_disk_uuid,gpt_part_uuid,part_uuid;};
+struct executable_file_response {uint64_t revision;struct module_file *file;};
+struct executable_file_request {uint64_t id[4],revision;struct executable_file_response *response;};
+extern volatile struct executable_file_request executable_file_request;
 struct module_response { uint64_t revision, count; struct module_file **files; };
 struct rsdp_response { uint64_t revision, address; };
 struct limine_framebuffer_request { uint64_t id[4],revision;struct framebuffer_response *response; };

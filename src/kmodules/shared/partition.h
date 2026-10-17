@@ -1,6 +1,7 @@
 #ifndef CLOUDBERRY_PARTITION_H
 #define CLOUDBERRY_PARTITION_H
 #include "block.h"
+enum partition_error {PARTITION_ARGUMENT=1,PARTITION_NOT_FOUND,PARTITION_CORRUPT};
 /* init(hub,heap); find(parent block,16-byte GPT unique GUID,out block,capacity) -> cookie.
  * Validates primary+backup header/entry CRCs and selected partition boundaries;
  * no match/duplicate/overlap/error fails. Retains parent until close(cookie).
@@ -16,4 +17,5 @@ struct kernel_surface_result partition_surface_flush(MODULE_ARGS);
 /* disconnect(root read surface,root cookie): invalidate then drain/abort without writes.
  * Retry busy cleanup; stale identities never reconnect. */
 struct kernel_surface_result partition_surface_disconnect(MODULE_ARGS);
+struct kernel_surface_result partition_surface_identity(MODULE_ARGS);
 #endif

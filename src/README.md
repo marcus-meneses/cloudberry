@@ -45,8 +45,8 @@ sink, not a serial driver.
 
 bin/cloudberry-nvme.img and bin/cloudberry-sata.img are blank sparse disks created
 once during build and retained by clean. Boot never formats or migrates them.
-The NVMe module is available through explicit kernel surfaces; normal boot does
-not claim or access the persistent disks. xHCI initialization publishes an empty
+Storage backends expose explicit kernel surfaces; normal bootstrap now scans
+supported disks read-only for the configured driver-volume GUID. xHCI initialization publishes an empty
 owned registry; normal boot starts USB-core workers and the hub-class manager to claim
 controllers and enumerate root/downstream devices. HID class drivers remain future work; USB storage and ext4 are boot-loaded modules, with explicit writable mounts.
 
@@ -62,9 +62,11 @@ per controller. Zero compatibility selectors fail when ambiguous. Feed either de
 exposed by `config.drivers.partition_guid`, then mount the bounded slice through
 `ext4_fs.mount`. No filesystem logic lives in the transport drivers.
 
-Normal startup initializes these modules without opening the persistent disks.
-Automatic boot-device correlation/duplicate-GUID handling is still pending;
-identifying a configured partition does not by itself prove boot provenance.
+Normal startup starts the [bootstrap coordinator](kmodules/shared/bootstrap.md),
+which scans supported devices for a unique configured GPT partition GUID and
+mounts it read-only. Blank disks are skipped; corrupt GPT, failed transports and
+duplicate matches fail selection. Copied Limine boot identity is correlated when
+available; identifying a configured partition does not itself prove boot provenance.
 Current modules stay in the Limine boot partition. The ext4 directory is reserved
 for explicitly selected future modules; disk loading is not implemented yet.
 
@@ -111,10 +113,12 @@ text. Limine loads it into memory with the `cloudberry-config` tag; the core
 passes its address/size to the separate [config kmodule](kmodules/shared/config.md).
 The module validates a typed schema, copies values into owned storage and
 atomically publishes `config.<key>` descriptor references through the hub.
-`boot.show_inventory` controls hardware listing. Driver selection remains
-caller-owned; USB storage applies the configured command timeout. The source
+`boot.show_inventory` controls hardware listing. Bootstrap selects the driver
+volume; future module selection remains explicit. USB storage applies the
+configured command timeout. The source
 configuration supplies the GPT identity of the appended ext4 driver partition; image preparation uses that exact GUID. Missing/duplicate files and invalid configuration
-fail startup with a diagnostic. No disk access, formatting or migration is added.
+fail startup with a diagnostic. Parsing itself performs no disk access; bootstrap
+selection adds readonly access, with no formatting or migration.
 
 ## Execution and ownership
 
@@ -203,7 +207,7 @@ follow process isolation and safe boundary transfer.
 | Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Shared address space; no process isolation, migration or forced thread cancellation |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
-| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; automatic boot-volume selection, parallel command queues and physical durability remain open |
+| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
 | Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; table withdrawal, disk loading, dependency-driven selection and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
@@ -245,8 +249,8 @@ slices and unreferenced BOT records. Retained dead slices reject I/O until their
 final release. Replacement devices require fresh cookies and an explicit mount,
 which replays the journal. See [USB storage](kmodules/shared/usb-storage.md),
 [GPT partitions](kmodules/shared/partition.md) and [ext4](kmodules/shared/ext4-fs.md).
-All remain boot-loaded; production initialization selects/mounts no filesystem and
-performs no formatting or migration. Test fixtures never enter the candidate image.
+All remain boot-loaded; production selects the configured unique driver volume read-only and performs
+no formatting or migration. Test fixtures never enter the candidate image.
 
 ## Focused validation
 
@@ -347,6 +351,11 @@ src/
 │   │   ├── apic.json
 │   │   ├── apic.md
 │   │   ├── block-util.h
+│   │   ├── boot-origin.h
+│   │   ├── bootstrap.c
+│   │   ├── bootstrap.h
+│   │   ├── bootstrap.json
+│   │   ├── bootstrap.md
 │   │   ├── block.h
 │   │   ├── clock-platform.h
 │   │   ├── clock-x86.c
@@ -490,6 +499,7 @@ src/
 │   ├── apic.c
 │   ├── backend-contracts.py
 │   ├── block-boot.c
+│   ├── bootstrap-boot.c
 │   ├── block-boot.py
 │   ├── boot-image.py
 │   ├── clock-boot.c
@@ -620,8 +630,8 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are bootstrap boot-volume selection, loading selected
-future modules from disk and process isolation; see [roadmap](ROADMAP.md#next-priorities).
+Current next priorities are loading selected future modules from disk and
+process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 
 [xHCI transport](kmodules/shared/xhci.md) is loaded/initialized by the kernel and

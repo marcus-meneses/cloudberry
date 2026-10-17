@@ -213,22 +213,24 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     acceptance covers writable removal/reinsertion and nested-hub subtree loss
     with stale-reference rejection, automatic cleanup and a fresh explicit mount.
 
+24. Closed: the boot-loaded bootstrap coordinator waits for initial USB/hub
+    discovery and scans supported NVMe namespaces, connected AHCI ports and USB
+    BOT LUN0 interfaces. A unique configured GUID mounts read-only; duplicate,
+    corrupt GPT, transport failure and topology changes fail selection. Other
+    instances close; uncertain cleanup retains reachable ownership. Copied Limine
+    executable metadata is published as boot.origin; GPT disk correlation reports
+    match/different/unknown separately from configured-volume selection. No boot
+    formatting, migrations, journal replay or writes. Four-CPU USB/NVMe/SATA,
+    duplicate-GUID and multi-controller/multi-namespace guest acceptance pass.
+    USB multi-LUN multiplexing/UAS and unsupported hardware remain explicit limits.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
 Multi-instance storage and USB storage-disconnection cleanup are implemented.
-Bootstrap storage selection comes next, before disk-loaded future modules.
+Bootstrap storage selection is implemented; selected future disk modules come next.
 
-1. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
-   now provide the common block read/write/flush contract alongside USB BOT.
-   USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
-   GUID across available devices without silently accepting duplicates or assuming
-   enumeration order. Retain transport identity; correlate available Limine identity
-   where usable and report unknown/ambiguous origin explicitly. No boot formatting
-   or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
-   and writes are implemented; optimize barrier batching only after preserving
-   commit/checkpoint ordering and repeating crash validation.
-2. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
+1. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
    modules, including all existing kmodules, remain Limine-loaded from the boot
    partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot

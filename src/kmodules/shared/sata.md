@@ -71,3 +71,8 @@ Remaining limits: no ATAPI, NCQ, hotplug,
 Readiness/flush deadlines need hardware qualification. MSI and MSI-X are device
 capabilities, not CPU-vendor alternatives. Reference:
 [AHCI 1.3.1 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/serial-ata-ahci-spec-rev1-3-1.pdf).
+
+`ports(hardware_index,out uint32 mask)` snapshots connected port candidates
+without resetting the HBA or starting engines. First open still performs full
+ATA/DMA/flush qualification. Bootstrap uses this instead of blindly opening all
+32 hardware port numbers.

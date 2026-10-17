@@ -87,3 +87,7 @@ controller timeout poisons all its namespaces; other controllers remain usable.
 IRQ callback contexts and PCI owner IDs are controller-specific and never reused.
 `BLOCK_MULTI=1` on `test-block-boot` validates two controllers and two namespaces
 on the first, including sibling-preserving close/reopen and controller failure.
+
+`next(hardware_index,after_namespace_id,out uint32)` enumerates the next active
+namespace through the already-owned controller admin queue. Zero means end.
+No namespace/controller reset or queue replacement occurs.

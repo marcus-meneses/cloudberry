@@ -35,6 +35,7 @@ NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
 USB_STORAGE_MODULE := $(BUILD)/kmodules/usb-storage.kmod
 PARTITION_MODULE := $(BUILD)/kmodules/partition.kmod
 EXT4_FS_MODULE := $(BUILD)/kmodules/ext4-fs.kmod
+BOOTSTRAP_MODULE := $(BUILD)/kmodules/bootstrap.kmod
 CONFIG_MODULE := $(BUILD)/kmodules/config.kmod
 USB_HUB_MODULE := $(BUILD)/kmodules/usb-hub.kmod
 USB_MODULE := $(BUILD)/kmodules/usb.kmod
@@ -110,7 +111,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
+$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -123,7 +124,7 @@ $(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER
 	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
 	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
 	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
+	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
 	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
@@ -807,3 +808,22 @@ test-hub-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-hub-boot
 _test-hub-boot: $(ISO) $(BUILD)/tests/src-hub-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=nvme --hub-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+
+$(BUILD)/kmodules/bootstrap.elf: $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/src-bootstrap-main.o: kernel/main.c
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_BOOTSTRAP_TEST -c $< -o $@
+$(BUILD)/tests/src-bootstrap-test.o: tests/bootstrap-boot.c kmodules/shared/bootstrap.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-bootstrap-kernel.elf: $(BUILD)/tests/src-bootstrap-main.o $(BUILD)/tests/src-bootstrap-test.o $(COMMON_OBJECTS) boot/linker.ld FORCE
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+.PHONY: test-bootstrap-boot _test-bootstrap-boot
+test-bootstrap-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-bootstrap-boot
+_test-bootstrap-boot: $(ISO) $(BUILD)/tests/src-bootstrap-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --bootstrap --backend=$(BOOTSTRAP_BACKEND) $(if $(filter 1,$(BLOCK_MULTI)),--multi,) $(if $(filter 1,$(BOOTSTRAP_DUPLICATE)),--duplicate,) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+BOOTSTRAP_BACKEND ?= usb

@@ -36,6 +36,10 @@
     {
       "name": "partition.disconnect",
       "symbol": "partition_surface_disconnect"
+    },
+    {
+      "name": "partition.identity",
+      "symbol": "partition_surface_identity"
     }
   ]
 }

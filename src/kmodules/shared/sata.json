@@ -56,6 +56,10 @@
     {
       "name": "sata.interrupt",
       "symbol": "sata_surface_interrupt"
+    },
+    {
+      "name": "sata.ports",
+      "symbol": "sata_surface_ports"
     }
   ]
 }
