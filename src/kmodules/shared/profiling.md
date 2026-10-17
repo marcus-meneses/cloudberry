@@ -16,6 +16,21 @@ explicit critical section with no mediated method tag. max_hold_domain identifie
 the lock. Hub entries are immutable once published, and later growth preserves their indexes, so this attribution is
 stable for the boot. Counts include instrumentation overhead.
 
+Recursive entries into an already held domain with IF clear start no new sample
+and perform no timestamp/HPET reads. The outer hold still covers their execution.
+An IF-enabled lock entry reuses its initial ordered TSC/HPET pair to start IRQ-off
+tracking; acquisition and release retain independent hold/wait measurements.
+HPET watchdogs, acknowledgement ordering and IRQ-enabled contention waits remain
+unchanged. HPET maxima are still collected on every outer acquisition: this is
+not sampled or disabled instrumentation.
+
+The isolated address-space benchmark separately brackets batches of 16 ordered
+CPU reads, the old double-CPUID sequence, clock calls, ordinary locks, recursive
+locks and IF-enabled locks with direct HPET reads. It records 64 interleaved
+samples per case, including an empty HPET bracket. Raw batch times and signed
+paired per-operation estimates are retained; no automatic correction is applied
+to address-space timings. See [profiling method](../../tests/address-space-profiling.md).
+
 Durations are ordered local TSC ticks, not nanoseconds or guest CPU execution
 cycles. They include vCPU host descheduling and other elapsed delays. Do not
 compare raw timestamps between CPUs, infer CPU utilization from them, or convert

@@ -293,11 +293,31 @@ work; no independent application syscall interface has been introduced.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 
-Native address-space collection is available through scripts/bench-spaces-kvm.sh:
-compile once, run one/four-CPU KVM cases, retain per-boot raw reports and compare
-against the frozen TCG summary with source/clock/paging identity checks. Host-only
-comparison/orchestration checks pass; actual KVM timing awaits the user-host run.
-No scheduling/invalidation optimization is justified solely by TCG measurements.
+Current performance sequence (keep this order):
+
+1. Reduce timestamp/lock instrumentation overhead without weakening ordering or
+   watchdogs. Implemented capability-selected AMD LFENCE/RDTSC/LFENCE or
+   MFENCE/RDTSCP/CPUID, conservative fallback and AP agreement; recursive locks
+   avoid unused HPET reads and IF-enabled entry reuses timing. Independent HPET
+   attribution probes measure raw timestamps, clock calls and lock variants.
+   Nine user-host KVM boots passed; AMD selected guaranteed serializing LFENCE.
+   Four-CPU empty clock brackets fell from about 64 us to 35 us. Outer lock/HPET
+   instrumentation still costs about 34 us; it remains enabled and measurable.
+2. Establish a fresh KVM baseline. The original user-host one/four-CPU batch
+   passed with TSC; its four-CPU empty clock bracket was about 64 us. Updated
+   scripts/bench-spaces-kvm.sh preserves it and supports repeated native-to-native
+   comparisons alongside the historical TCG comparison, with source/clock/host
+   identity checks. Fresh baseline accepted: 20261017T165114.408723Z, three boots
+   per configuration, unchanged host and stable TSC throughout. Raw timestamps
+   are about 35 ns, sparse population about 74 ms and dense 512-page teardown
+   about 25 ms on four CPUs. The agent still has no /dev/kvm.
+3. Optimize sparse population and dense/sparse teardown using the cleaner native
+   evidence. Active: avoid allocation searches restarting at the lowest address;
+   retain teardown walk progress and amortize lock overhead over bounded disposal
+   batches. Preserve ownership, inactive-root checks, sanitization, watchdogs and
+   acknowledged invalidation. Do not attribute instrumentation overhead to CR3.
+
+See tests/address-space-profiling.md for collection commands and interpretation.
 
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
 qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI

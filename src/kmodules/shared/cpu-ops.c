@@ -2,7 +2,7 @@
 struct cpu_leaf cpu_cpuid(uint32_t leaf,uint32_t subleaf) {
     struct cpu_leaf r;__asm__ volatile("cpuid":"=a"(r.a),"=b"(r.b),"=c"(r.c),"=d"(r.d):"a"(leaf),"c"(subleaf):"memory");return r;
 }
-struct kernel_surface_result cpu_surface_init(MODULE_ARGS) {MODULE_UNUSED();return module_result(cpu_backend_id(),1);}
+struct kernel_surface_result cpu_surface_init(MODULE_ARGS) {MODULE_UNUSED();if(!cpu_backend_init())return module_result(0,0);return module_result(cpu_backend_id(),1);}
 struct kernel_surface_result cpu_surface_id(MODULE_ARGS) {MODULE_UNUSED();return module_result(cpu_backend_id(),1);}
 struct kernel_surface_result cpu_surface_ticks(MODULE_ARGS) {MODULE_UNUSED();return module_result(cpu_backend_ticks(),1);}
 struct kernel_surface_result cpu_surface_fence(MODULE_ARGS) {

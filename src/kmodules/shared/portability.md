@@ -30,8 +30,11 @@ valid emulator configuration. Hardware firmware parsers reject unsupported layou
 
 CPU identification prefers valid CPUID 1F/B topology leaves, then AMD's gated
 8000001E extended APIC ID, then the eight-bit legacy ID. AMD timestamp reads use
-CPUID serialization around RDTSC instead of assuming dispatch-serializing LFENCE
-or touching an optional DE_CFG MSR. Intel uses its documented LFENCE ordering.
+capability-selected ordering: LFENCE/RDTSC/LFENCE when CPUID 0x80000021 EAX[2]
+guarantees dispatch serialization; otherwise MFENCE/RDTSCP/CPUID when RDTSCP is
+advertised, with CPUID/RDTSC/CPUID as the conservative fallback. The selected
+mode is immutable and validated at AP attachment. No optional DE_CFG MSR is
+modified. Intel uses its documented LFENCE ordering.
 All x2APIC wake/shootdown notifications fence prior stores before WRMSR; the common
 fence uses MFENCE plus CPUID, valid for both vendors. These methods allocate
 nothing and take no kernel locks. CPU attach validates IDs on each processor.

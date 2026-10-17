@@ -1,6 +1,6 @@
 """Fail-closed acceptance reporting for missing, corrupted and noisy samples."""
 import unittest
-from space_report import parse_spaces, distribution, SHAPES, SWITCH
+from space_report import parse_spaces, distribution, SHAPES, SWITCH, INSTRUMENTATION
 
 
 def fixture():
@@ -10,6 +10,9 @@ def fixture():
             'MEASURE spaces fault_events 80']
     def row(key, count, value):
         rows.append('MEASURE spaces '+key+(' '+str(value))*count)
+    rows.append('MEASURE spaces instrumentation 2 256 16 64')
+    for key in INSTRUMENTATION:
+        row(key, 64, 10 if key==INSTRUMENTATION[0] else 170)
     for worker in range(16):
         rows.append(f'MEASURE spaces worker 0 {worker+1} 101')
         for key in SWITCH:
@@ -60,6 +63,14 @@ class Reports(unittest.TestCase):
         result = distribution(raw)
         self.assertEqual((result['min'], result['median'], result['p95'], result['max']), (1, 4, 7, 7))
         self.assertEqual(raw, [7, 1, 5, 3])
+
+    def test_independent_instrumentation_and_incomplete_rejection(self):
+        report = parse_spaces(fixture(), 1)['instrumentation']
+        self.assertEqual(report['timestamp_ordering'], 'lfence')
+        self.assertEqual(report['estimated_ns_per_operation']['instrument_ticks_16_ns']['median'], 10)
+        self.assertEqual(parse_spaces(fixture().replace('instrumentation 2 256', 'instrumentation 2 0'), 1)['instrumentation']['timestamp_ordering'], 'cpuid')
+        with self.assertRaises(ValueError):
+            parse_spaces(fixture().replace('MEASURE spaces instrument_clock_16_ns', 'MISSING instrument_clock_16_ns'), 1)
 
 
 if __name__ == '__main__':

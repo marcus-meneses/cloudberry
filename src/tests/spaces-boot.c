@@ -6,6 +6,8 @@
 #include "probe.h"
 #include "space-fault.h"
 #include "../kmodules/shared/clock.h"
+#include "../kmodules/shared/mmio.h"
+#include "../kmodules/shared/cpu-platform.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 static void print(const char *p){while(*p)__asm__ volatile("outb %0,$0xe9"::"a"(*p++));}
 static void number(uint64_t value){char d[24];unsigned n=0;do{d[n++]='0'+value%10;value/=10;}while(value);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(d[--n]));}
@@ -84,6 +86,48 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     return true;
 }
 
+/* Independent reference: these brackets read the already mapped HPET directly,
+ * avoiding clock.now_ns and the locks whose overhead is being measured. Keep
+ * raw elapsed totals (16 operations), including the HPET bracket and all noise. */
+static uint64_t profile_hpet(volatile uint64_t *counter){__asm__ volatile("":::"memory");uint64_t value=*counter;__asm__ volatile("":::"memory");return value;}
+static bool instrumentation_profile(const struct kernel_surfaces *hub,uint64_t period){
+    const struct kernel_hub_table *ref=kernel_hub_find_table(hub,MMIO_TABLE_NAME);CHECK(ref && ref->bytes>=sizeof(struct mmio_table));
+    const struct mmio_table *table=(const void *)ref->address;volatile uint64_t *counter=NULL;
+    CHECK(table->magic==MMIO_TABLE_MAGIC && table->major==1 && table->entry_bytes==sizeof(struct mmio_region) && table->count<=(ref->bytes-sizeof(*table))/sizeof(struct mmio_region));
+    /* Match clock's first usable mapped HPET, rather than pairing a second
+     * counter with the first counter's period on a multi-HPET platform. */
+    for(uint64_t i=0;i<table->count;++i)if(table->entries[i].kind==MMIO_HPET && (table->entries[i].flags&MMIO_MAPPED) && table->entries[i].virtual_address && table->entries[i].bytes>=0xf8){
+        uint64_t caps=*(volatile uint64_t *)table->entries[i].virtual_address;
+        if((caps&(1u<<13)) && (caps>>32)==period){counter=(void *)(table->entries[i].virtual_address+0xf0);break;}
+    }
+    CHECK(counter && period && period<=100000000);
+    kernel_surface_call tick=kernel_surface_find(hub,"cpu.ticks"),clock=kernel_surface_find(hub,"clock.now_ns"),info=kernel_surface_find(hub,"cpu.tsc");
+    struct cpu_tsc_info cpu;CHECK(tick && clock && info && !CALL(info,&cpu,0,0).status);
+    uint64_t mode[]={cpu.vendor,cpu.flags,16,64};samples("instrumentation",mode,4);
+    const char *names[]={"instrument_hpet_bracket_ns","instrument_ticks_16_ns","instrument_cpuid_ticks_16_ns","instrument_clock_16_ns","instrument_lock_16_ns","instrument_nested_lock_16_ns","instrument_irq_lock_16_ns"};
+    uint64_t elapsed[7][64];
+    for(unsigned sample=0;sample<64;++sample)for(unsigned kind=0;kind<7;++kind){
+        uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");CHECK(flags&512);
+        uint64_t held=kind==5?kernel_cpu_enter():0;
+        if(kind==6)__asm__ volatile("sti":::"memory");
+        uint64_t begin=profile_hpet(counter);
+        for(unsigned i=0;i<(kind?16u:0u);++i){
+            if(kind==1){CHECK(!CALL(tick,0,0,0).status);}
+            else if(kind==2){
+                uint32_t a,b,c,d;__asm__ volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(0),"c"(0):"memory");
+                __asm__ volatile("rdtsc":"=a"(a),"=d"(d)::"memory");
+                __asm__ volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(0),"c"(0):"memory");
+            }else if(kind==3){CHECK(!CALL(clock,0,0,0).status);}
+            else {uint64_t lock=kernel_cpu_enter();kernel_cpu_leave(lock);}
+        }
+        uint64_t end=profile_hpet(counter);if(kind==6)__asm__ volatile("cli":::"memory");
+        if(kind==5)kernel_cpu_leave(held);
+        __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");
+        CHECK(end>=begin && end-begin<=UINT64_MAX/period);elapsed[kind][sample]=(end-begin)*period/1000000;
+    }
+    for(unsigned i=0;i<7;++i)samples(names[i],elapsed[i],64);
+    print("PASS instrumentation profiling: independent HPET brackets, ordered ticks, conservative CPUID control and recursive/IRQ-enabled locks\n");return true;
+}
 static uint64_t owned_count(struct boot_pages *pages){uint64_t n=0;for(struct boot_reservation_chunk *c=pages->reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i){unsigned kind=c->entries[i].kind;if(kind==BOOT_RES_SPACE_TABLE || kind==BOOT_RES_PAGES || kind==BOOT_RES_STACK)++n;}return n;}
 static uint64_t private_tables(struct boot_pages *pages){uint64_t n=0;for(struct boot_reservation_chunk *c=pages->reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i)n+=c->entries[i].kind==BOOT_RES_SPACE_TABLE;return n;}
 static bool teardown_profile(const struct kernel_surfaces *hub,struct boot_pages *pages){
@@ -118,6 +162,7 @@ bool kernel_spaces_test(const struct kernel_surfaces *hub,struct boot_pages *pag
     CHECK(!CALL(kernel_surface_find(hub,"event.step"),1,0,0).status);
     struct clock_info initial,final;kernel_surface_call clock_info=kernel_surface_find(hub,"clock.info");CHECK(clock_info && !CALL(clock_info,&initial,0,0).status);
     uint64_t source_begin[]={initial.source,initial.flags,initial.hpet_period_fs,initial.tsc_hz};samples("clock_begin",source_begin,4);uint64_t cr4;__asm__ volatile("mov %%cr4,%0":"=r"(cr4));uint64_t root_mode[]={!!(cr4&128),!!(cr4&(1u<<17))};samples("root_mode",root_mode,2);
+    CHECK(instrumentation_profile(hub,initial.hpet_period_fs));
     uint64_t baseline=owned_count(pages);
     for(unsigned i=0;i<8;++i){CHECK(cycle(hub,pages));CHECK(owned_count(pages)==baseline);}
     uint64_t faults=0;for(uint64_t i=0;i<cpus->count;++i){CHECK(!slots[i].armed);faults+=slots[i].seen;}

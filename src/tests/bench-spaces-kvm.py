@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
-from space_compare import CASES, compare, guest_fingerprint, markdown, validate_native
+from space_compare import CASES, compare, guest_fingerprint, markdown, validate_native, load_native_reference
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,6 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runs', type=int, default=1, help='independent boots per configuration (default: 1)')
     parser.add_argument('--jobs', type=int, default=min(4, os.cpu_count() or 1))
+    parser.add_argument('--reference-session', type=Path, help='accepted previous KVM session (default: latest passed session, if available)')
     args = parser.parse_args()
     if args.runs < 1 or args.jobs < 1:
         parser.error('--runs and --jobs must be positive')
@@ -67,6 +68,12 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError('Another KVM benchmark is already using this build directory')
+        reference_path = args.reference_session
+        if reference_path is None and (output_root/'latest.json').exists():
+            previous = json.loads((output_root/'latest.json').read_text())
+            if previous.get('status') == 'passed':
+                reference_path = ROOT/previous['session']
+        native_reference = load_native_reference(reference_path) if reference_path else None
         session = output_root/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         session.mkdir()
         build = ROOT/'bin/tests/kvm-spaces-build'
@@ -80,7 +87,11 @@ def main():
         reports = {}
         failed = None
         try:
-            write_json(session/'host.json', host_info())
+            host = host_info()
+            write_json(session/'host.json', host)
+            if native_reference:
+                write_json(session/'native-reference.json', native_reference)
+                summary['reference_session'] = str(reference_path)
             write_json(session/'tcg-baseline.json', baseline)
             write_json(session/'session.json', summary)
             print('Building isolated benchmark once; existing artifacts are reused.', flush=True)
@@ -120,6 +131,13 @@ def main():
             result = compare(baseline, reports, fingerprint)
             write_json(session/'comparison.json', result)
             (session/'comparison.md').write_text(markdown(result))
+            if native_reference:
+                native = compare(native_reference, reports, fingerprint, reference_kind='previous_kvm')
+                native['reference_session'] = str(reference_path)
+                # A new binary is expected; machine/execution changes need separate scrutiny.
+                native['host_warnings'] = [f'Host {field} differs from reference.' for field in ('cpu','kernel','qemu','affinity_cpus','compiler') if host.get(field) != native_reference['host'].get(field)]
+                write_json(session/'native-comparison.json', native)
+                (session/'native-comparison.md').write_text(markdown(native)+'\n'+'\n'.join(native['host_warnings'])+'\n')
             summary['status'] = 'passed'
         except BaseException as error:
             failed = error
@@ -139,6 +157,8 @@ def main():
             print('FAILED:', failed, file=sys.stderr)
             return 1
         print('Comparison:', (session/'comparison.md').relative_to(ROOT))
+        if native_reference:
+            print('Before/after KVM:', (session/'native-comparison.md').relative_to(ROOT))
         print('Done. Reply "done" so the saved reports can be inspected.')
         return 0
 
@@ -146,6 +166,6 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

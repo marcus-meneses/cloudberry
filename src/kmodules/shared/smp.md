@@ -45,7 +45,9 @@ later instability invalidates use of the old proof. Migration remains disabled.
 
 The thin kernel CPU mechanism owns GS:0 identity, recursive critical sections,
 IPI delivery and TLB acknowledgement mailboxes. CPUID is used to validate CPU
-identity during attachment, not on every kernel call. GS is reserved to the
+identity during attachment, not on every kernel call for identity lookup.
+Timestamp backends may still execute CPUID for ordering when required by the
+advertised capabilities; [clock](clock.md) describes their selection. GS is reserved to the
 kernel; no swapgs/userland context exists yet. Short foreground mutations use
 a global lock and a separate clock lock with local IRQs disabled, always global
 before clock. This establishes correctness but

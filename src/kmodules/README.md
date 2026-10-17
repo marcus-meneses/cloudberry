@@ -69,7 +69,7 @@ owned private roots and restore the kernel dispatcher root on suspension; ring 3
 and application interfaces remain deferred.
 Owners must quiesce in-flight IRQ callbacks before freeing a binding's context.
 
-Focused test targets include test-hub, test-hub-boot, test-block-boot, test-config, test-config-boot, test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
+Focused test targets include test-hub, test-hub-boot, test-block-boot, test-config, test-config-boot, test-cpu-tsc, test-cpu-ordering, test-clock, test-timer, test-apic, test-pages,
 test-scheduler, test-irq, test-acpi, test-acpi-boot, test-usb, test-usb-boot, test-usb-hub, test-usb-hub-boot, test-pci, test-tsc-validation and test-threads-smp. The latter uses one/four-CPU disposable TCG
 boots, including timer preemption on every CPU and remote cached mapping reuse.
 These boots also validate real NVMe MSI-X reads and lost-completion timeout/reset

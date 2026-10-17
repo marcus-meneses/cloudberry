@@ -494,6 +494,7 @@ _test-lock-watchdog: $(ISO) $(BUILD)/tests/src-lock-watchdog.elf $(BUILD)/kmodul
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=2 --watchdog
 
 # Boot alternatives share frontend signatures, but have independent code/state.
+$(BUILD)/kmodules/cpu-ops-pic.o $(BUILD)/kmodules/cpu-tsc-pic.o $(BUILD)/kmodules/cpu-topology-pic.o: kmodules/shared/cpu-platform.h
 CPU_BACKENDS = $(BUILD)/kmodules/cpu-intel.kmod $(BUILD)/kmodules/cpu-amd.kmod
 IOMMU_BACKENDS = $(BUILD)/kmodules/iommu-intel.kmod $(BUILD)/kmodules/iommu-amd.kmod
 BACKENDS = $(CPU_BACKENDS) $(IOMMU_BACKENDS)
@@ -530,7 +531,13 @@ $(ISO): $(BACKENDS) $(BUILD)/kmodules/xstate.kmod
 $(BUILD)/kmodules/xstate.elf: $(BUILD)/kmodules/xstate-pic.o $(BUILD)/kmodules/xstate.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
-.PHONY: test-portability test-cpu-topology test-cpu-tsc _test-portability
+.PHONY: test-portability test-cpu-topology test-cpu-tsc test-cpu-ordering _test-portability
+test-cpu-ordering:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -DTEST_CPU_ORDERING tests/cpu-tsc.c kmodules/shared/cpu-tsc.c kmodules/shared/cpu-topology.c kmodules/amd/cpu-amd.c -o $(BUILD)/tests/src-cpu-ordering
+	$(BUILD)/tests/src-cpu-ordering l
+	$(BUILD)/tests/src-cpu-ordering r
+	$(BUILD)/tests/src-cpu-ordering c
 test-cpu-tsc:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/cpu-tsc.c kmodules/shared/cpu-tsc.c -o $(BUILD)/tests/src-cpu-tsc

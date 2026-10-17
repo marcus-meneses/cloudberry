@@ -12,6 +12,8 @@ From the project root, run:
 ./scripts/bench-spaces-kvm.sh
 # Optional independent repetitions; the default already samples extensively:
 ./scripts/bench-spaces-kvm.sh --runs 3
+# Explicit before/after reference, including after a failed intervening run:
+./scripts/bench-spaces-kvm.sh --runs 3 --reference-session bin/tests/kvm-spaces/20261017T152711.432088Z
 ```
 
 The script checks `/dev/kvm` before building, then compiles once into the reusable
@@ -30,6 +32,16 @@ and their counts/minimum/median/p95/maximum. Native raw samples and per-boot med
 remain available. Ratios describe elapsed TCG/KVM measurements, not code speedups.
 Clock-source/paging differences and changed guest sources are explicitly flagged;
 clock changes during measurement or across repetitions prevent a pooled result.
+
+When a previous accepted session is available through latest.json (or explicitly
+selected with --reference-session), native-reference.json snapshots its pooled
+raw evidence and host identity. native-comparison.json/.md then compare the new
+KVM runs against that KVM reference. Failed/incomplete references, mixed clock/
+paging modes within repetitions and reused run identities are rejected. Host
+CPU/microcode, kernel, QEMU, compiler and affinity differences are reported.
+Changed guest sources are expected for an optimization but still flagged. This
+comparison is separate from comparison.json/.md, which retain the historical
+TCG comparison. Neither reference supplies build or guest configuration.
 
 `bin/tests/kvm-spaces/latest.json` points to the latest session and its status.
 A small adjacent `.tar.gz` contains reports/logs and the reference summary, never
@@ -63,7 +75,7 @@ per-worker CPU/space/owner identities, counts, minimum/median/nearest-rank p95/
 maximum, clock metadata and paired estimates. All outliers and negative paired
 differences remain visible. The parser rejects malformed/truncated samples,
 missing fault acceptance, incomplete workers and unexpected table geometry;
-seven host checks exercise those failure paths and preservation of noisy data.
+Host checks exercise those failure paths, instrumentation metadata and preservation of noisy data.
 Reports are analysis artifacts, never compiler or guest configuration inputs.
 
 ## What the numbers mean
@@ -93,6 +105,67 @@ recorded separately. Every trial restores owned reservations to baseline. Cycle
 maxima include other operations such as stack construction/reaping; they do not
 attribute time solely to protection or root selection. Raw test fault guards are
 outside managed IRQ-off instrumentation. No reported maximum is a latency bound.
+
+## Independent instrumentation attribution
+
+The BSP also collects 64 interleaved direct-HPET brackets for an empty control
+and batches of 16 operations: mediated cpu.ticks, the original inlined double-
+CPUID timestamp sequence, mediated clock.now_ns, IF-disabled ordinary locks,
+recursive locks under an already held domain, and IF-enabled ordinary locks.
+The last case deliberately allows interrupts; the others preserve IF clear
+inside each bracket and restore the incoming state afterward. The recursive
+case excludes its containing acquisition. None changes watchdog configuration.
+
+instrumentation records CPU vendor/capabilities and selected timestamp ordering.
+instrument_* distributions retain raw elapsed batch nanoseconds, including HPET
+read overhead. instrumentation.estimated_ns_per_operation preserves signed
+(batch minus paired empty bracket)/16 estimates. Outliers remain visible; these
+estimates are not subtracted from other benchmark measurements. The CPUID control
+is inlined whereas cpu.ticks includes mediation: their difference alone is not
+an isolated instruction-speed measurement. On TCG, emulated instruction costs
+also cannot predict the native cost of VM exits.
+
+## Native observations and follow-up: 2026-10-17
+
+User-host KVM session 20261017T152711.432088Z passed all three configurations on
+Ryzen 5 5500U, with shared TSC selected throughout. Four-CPU empty clock brackets
+were approximately 64 us, root round trips 152–154 us, sparse population 79 ms and
+dense 512-page teardown 36 ms. The expensive clock control prevents interpreting
+the entire root round trip as CR3 cost. Code inspection identified double-CPUID
+AMD timestamp reads and repeated lock-instrumentation HPET reads as candidates.
+These are attribution leads, not measured fractions of the total.
+
+Implemented: capability-selected AMD timestamps (guaranteed serializing LFENCE,
+otherwise MFENCE/RDTSCP/CPUID, then the original conservative fallback), AP mode
+agreement, removal of unused recursive-lock HPET reads, and reuse of entry timing
+for managed IRQ-off tracking. Outer HPET maxima, clock regression/health fallback,
+IPI fences and wait watchdogs remain enabled. Independent attribution probes and
+native-to-native comparisons are available. Isolated guest/host correctness is
+checked locally. That implementation introduced no allocator, invalidation or
+reaper change.
+
+Fresh native baseline accepted: session 20261017T165114.408723Z, three boots per
+configuration (nine total), identical host metadata, matching guest source and
+stable TSC throughout. AMD selected LFENCE ordering. Pooled four-CPU clock brackets
+are 34.76/34.97 us (AMD-Vi/VT-d), dense 512-page teardown 25.17/25.14 ms and sparse
+population 73.85/73.58 ms. Compared with the original native batch, these are
+approximately 45%, 30% and 6% reductions respectively; the original batch had
+one boot per case, so repeatability evidence is stronger for the new baseline.
+Independent probes estimate about 35 ns per mediated raw timestamp, 1.58 us for
+the old inlined double-CPUID sequence, 34 us for an ordinary IF-disabled lock and
+46 us for an IF-enabled lock. Recursive acquisition costs are near the HPET-bracket
+noise floor. All raw samples, per-boot distributions and native comparisons remain
+in the session archive. No blanket overhead subtraction is applied. This evidence
+motivates allocation-search and bounded teardown improvements next. The agent
+environment still has no /dev/kvm.
+
+Focused local acceptance: AMD RDTSCP four-CPU run
+7bdedaf162144d50a7caeca271c632d4; AMD double-CPUID fallback one-CPU run
+b1c4787248294dba9bcab8b6675453ae; Intel LFENCE four-CPU run
+81284ccb35ce4efabc7ae4e2b7d6fcf6. These use TCG, with copied reports under
+bin/tests/clock-overhead-validation. The deliberate stuck-owner watchdog also
+passes. Capability/AP-mode host checks and eight report/ten comparison checks
+pass. These results establish guest correctness, not native performance gains.
 
 ## Observations: 2026-10-17
 

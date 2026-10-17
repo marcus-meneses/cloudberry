@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-from space_compare import CASES, compare, guest_fingerprint, markdown, validate_native
+from space_compare import CASES, compare, guest_fingerprint, markdown, validate_native, load_native_reference
 from space_report import distribution
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +39,26 @@ class Comparison(unittest.TestCase):
         self.assertEqual(metric['kvm']['samples'], [100, 200, 100, 200])
         self.assertEqual(metric['tcg_over_kvm_median'], metric['tcg']['median']/150)
         self.assertIn('TCG/KVM', markdown(result))
+
+    def test_native_reference_comparison_and_stale_rejection(self):
+        inputs = reports()
+        baseline = copy.deepcopy(BASELINE)
+        baseline['cases']['1cpu-none']['run_ids'] = ['old-run']
+        result = compare(baseline, inputs, 'new-source', reference_kind='previous_kvm')
+        metric = result['cases']['1cpu-none']['metrics']['root_roundtrip_ns']
+        self.assertEqual(metric['previous_kvm_over_kvm_median'], metric['previous_kvm']['median']/150)
+        self.assertIn('Previous KVM/KVM', markdown(result))
+        baseline['cases']['1cpu-none']['run_ids'] = ['1cpu-none']
+        with self.assertRaises(ValueError):
+            compare(baseline, inputs, 'new-source', reference_kind='previous_kvm')
+
+    def test_native_reference_must_be_complete_and_passed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root/'session.json').write_text(json.dumps(dict(status='failed')))
+            with self.assertRaises(ValueError):load_native_reference(root)
+            (root/'session.json').write_text(json.dumps(dict(status='passed',runs=1,guest_source_sha256='test')))
+            with self.assertRaises(ValueError):load_native_reference(root)
 
     def test_refuse_tcg_as_native(self):
         report = reports()['1cpu-none'][0];report['accelerator'] = 'tcg'
@@ -95,7 +115,9 @@ class Comparison(unittest.TestCase):
         module = importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary);self.prepare_root(root)
+            boot_number = 0
             def logged(command, path):
+                nonlocal boot_number
                 path.write_text('synthetic command log')
                 build = root/'bin/tests/kvm-spaces-build'
                 if command[0] == 'make':
@@ -105,15 +127,22 @@ class Comparison(unittest.TestCase):
                     cpus = int(next(v.split('=')[1] for v in command if v.startswith('--cpus=')))
                     iommu = next(v.split('=')[1] for v in command if v.startswith('--iommu='))
                     key = f'{cpus}cpu-{iommu}';live = build/'tests'/('spaces-'+key);live.mkdir(parents=True, exist_ok=True)
-                    (live/'report.json').write_text(json.dumps(reports()[key][0]))
+                    boot_number += 1
+                    report = reports()[key][0];report['run_id'] += str(boot_number)
+                    (live/'report.json').write_text(json.dumps(report))
                     (live/'boot.log').write_text('synthetic acceptance')
             with patch.object(module, 'ROOT', root), patch('sys.argv', ['bench']), patch.object(module.subprocess, 'run'), patch.object(module, 'host_info', return_value={'synthetic':True}), patch.object(module, 'logged', side_effect=logged), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(module.main(), 0)
+                # A second invocation automatically snapshots the accepted prior
+                # session and emits a distinct native-to-native comparison.
                 self.assertEqual(module.main(), 0)
             latest = json.loads((root/'bin/tests/kvm-spaces/latest.json').read_text())
             self.assertEqual(latest['status'], 'passed')
             with tarfile.open(root/latest['archive']) as archive:
                 members = archive.getnames()
                 self.assertTrue(any(v.endswith('/comparison.json') for v in members))
+                self.assertTrue(any(v.endswith('/native-comparison.json') for v in members))
+                self.assertTrue(any(v.endswith('/native-reference.json') for v in members))
                 self.assertEqual(sum(v.endswith('/report.json') for v in members), 3)
                 self.assertFalse(any(v.endswith(('.img', '.iso', '.kmod', '.elf')) for v in members))
 

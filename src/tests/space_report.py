@@ -6,6 +6,10 @@ import statistics
 SWITCH = ('switch_clock_bracket_ns', 'same_root_pair_ns',
           'root_roundtrip_ns', 'yield_roundtrip_ns')
 SHAPES = ('dense_32', 'dense_512', 'sparse_128')
+INSTRUMENTATION = ('instrument_hpet_bracket_ns', 'instrument_ticks_16_ns',
+                   'instrument_cpuid_ticks_16_ns', 'instrument_clock_16_ns',
+                   'instrument_lock_16_ns', 'instrument_nested_lock_16_ns',
+                   'instrument_irq_lock_16_ns')
 
 
 def distribution(values):
@@ -56,6 +60,12 @@ def parse_spaces(text, cpus):
         if groups[key][0] not in (1, 2):
             raise ValueError('missing clock source')
     require('root_mode', 2)
+    require('instrumentation', 4)
+    vendor, flags, batch, samples = groups['instrumentation']
+    if vendor not in (1, 2) or batch != 16 or samples != 64:
+        raise ValueError('invalid instrumentation metadata')
+    for key in INSTRUMENTATION:
+        require(key, samples)
     if groups['root_mode'][0] not in (0, 1) or groups['root_mode'][1] != 0:
         raise ValueError('unexpected paging mode')
     if groups.get('cycles') != [8] or groups.get('fault_events') != [count * 5]:
@@ -79,6 +89,10 @@ def parse_spaces(text, cpus):
                 pge=bool(groups['root_mode'][0]), pcid=False,
                 cycles=8, fault_events=count*5, workers=workers,
                 private_table_pages={shape: groups[f'{shape}_table_pages'] for shape in SHAPES},
+                instrumentation=dict(vendor=vendor, cpu_tsc_flags=flags,
+                                     timestamp_ordering='lfence' if vendor == 1 or flags & 256 else 'rdtscp-cpuid' if flags & 128 else 'cpuid',
+                                     operations_per_sample=batch, samples=samples,
+                                     estimated_ns_per_operation={key: distribution([(a-b)/batch for a,b in zip(groups[key],groups[INSTRUMENTATION[0]])]) for key in INSTRUMENTATION[1:]}),
                 distributions=raw, derived=derived,
                 notes=['All raw samples retained; p95 uses nearest rank.',
                        'Nanoseconds are guest-clock elapsed time, including virtualization and waits.',

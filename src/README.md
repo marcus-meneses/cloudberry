@@ -183,7 +183,8 @@ failures retain HPET; per-CPU regression checks and an HPET health guard restore
 fallback on later instability. Migration remains disabled. CMOS/NMI policy stays owned by inthandle. The [memory map](maps/startup.md)
 describes reservations, mapping references, release/reuse and cross-CPU TLB
 invalidation. Heap backing, page tables and original boot allocations remain
-reserved. No per-process page tables or user isolation exists yet.
+reserved. Owned private page tables are available to kernel threads; user-mode
+process isolation and application execution remain future work.
 
 A successful boot prints module/table names and addresses, hardware descriptors,
 BOOT OK, then "managed BSP event stack active". The candidate creates scheduler and IRQ deferred workers, a USB bus worker per

@@ -46,7 +46,13 @@ If HPET is absent, unsuitable or stalls during initial calibration, invariant
 TSC may instead use a complete CPUID leaf 0x15 ratio/crystal frequency. It is
 marked enumerated, not HPET-calibrated. An ordinary CPU core-frequency value
 is not substituted for a TSC frequency. Timestamps use ordered reads from the selected CPU backend: Intel uses
-LFENCE/RDTSC/LFENCE; AMD conservatively uses CPUID/RDTSC/CPUID.
+LFENCE/RDTSC/LFENCE. AMD selects that sequence only when CPUID
+0x80000021 EAX[2] guarantees always-serializing LFENCE; otherwise RDTSCP-capable
+CPUs use MFENCE/RDTSCP followed by CPUID. The latter drains prior stores and
+orders preceding execution, while trailing CPUID orders subsequent execution.
+Without either capability, CPUID/RDTSC/CPUID remains the fallback. Selection is
+immutable after cpu.init and each AP must confirm the same mode. No optional
+DE_CFG MSR is modified. IPI memory fencing remains a separate surface.
 
 Recalibration reanchors the selected counter without resetting elapsed time.
 Old/new conversions use one shared counter observation: HPET is bracketed by
@@ -129,6 +135,11 @@ and shared-clock activation (2026-10-15). Test fixtures never enter the producti
 Hardware references: [Intel HPET specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/software-developers-hpet-spec-1-0a.pdf),
 [ACPI FADT](https://uefi.org/htmlspecs/ACPI_Spec_6_4_html/05_ACPI_Software_Programming_Model/ACPI_Software_Programming_Model.html),
 [Intel software developer manuals](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html).
+AMD ordering references: [AMD64 system programming manual](https://docs.amd.com/api/khub/documents/sD1_QL~h4Afq2_tvzxqqSQ/content)
+(CPUID 0x80000021 LFenceAlwaysSerializing) and
+[AMD timestamp guidance](https://www.amd.com/content/dam/amd/en/documents/archived-tech-docs/software-optimization-guides/40546.pdf)
+(RDTSCP preceding-execution ordering); the Intel instruction reference also
+documents MFENCE before RDTSCP when prior stores must be globally visible.
 
 ## CPU discovery and rejection diagnostics
 

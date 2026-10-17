@@ -58,5 +58,9 @@ This compiles the isolated benchmark once and runs one/four-CPU KVM measurements
 without attaching persistent disks. It writes raw reports, a TCG comparison and
 a small report archive under `bin/tests/kvm-spaces/`. `latest.json` identifies the
 last session. Use `--runs 3` for independent repetitions or `--jobs 2` to reduce
-build parallelism. KVM must already be accessible to your user; the script never
+build parallelism. It automatically compares against the last passed KVM session
+when available; `--reference-session PATH` explicitly selects an accepted earlier
+session. `native-comparison.md/.json` contains before/after KVM measurements;
+`comparison.md/.json` retains the TCG comparison. Raw HPET-based instrumentation
+measurements are in each report. KVM must already be accessible to your user; the script never
 uses sudo or falls back to TCG. See the [method and output details](../src/tests/address-space-profiling.md).

@@ -106,12 +106,18 @@ uint64_t kernel_cpu_enter_tag(uint64_t method) {return kernel_cpu_enter_domain(0
 uint64_t kernel_cpu_enter_domain(unsigned domain,uint64_t method) {
     uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");
     struct cpu_record *cpu=current();if(domain>1 || (domain==0 && cpu->lock_depth[1] && !cpu->lock_depth[0]))panic("Cloudberry: fatal lock-order inversion\n");
-    uint32_t owner=cpu->index+1;uint64_t begin=cpu->lock_depth[domain]?0:ticks();
+    uint32_t owner=cpu->index+1;uint64_t begin=(cpu->lock_depth[domain] && !(flags&512))?0:ticks();
+    /* A recursive entry owns this domain already, starts no wait/hold sample,
+     * and cannot have IF set. Its enclosing acquisition retains instrumentation
+     * and watchdog coverage; do not issue unused HPET MMIO reads here. */
+    if(cpu->lock_depth[domain] && !(flags&512)) {
+        ++cpu->lock_depth[domain];__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);return flags;
+    }
     uint64_t started_hpet=watchdog_now();unsigned spins=0;int contended=0;
     /* IRQ delivery is safe while waiting, but switching into a dispatcher which
      * needs this same lock would simply move the IRQ-disabled wait there. */
     int waiting_guard=(flags&512)!=0;if(waiting_guard)__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
-    irq_begin(cpu,flags);
+    if(flags&512) {cpu->irq_begin=begin;cpu->irq_hpet=started_hpet;}
     if(__atomic_load_n(&lock_owner[domain],__ATOMIC_RELAXED)!=owner) {
         for(;;) {uint32_t empty=0;if(__atomic_compare_exchange_n(&lock_owner[domain],&empty,owner,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)) break;
             contended=1;flush_local(cpu);

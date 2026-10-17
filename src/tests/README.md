@@ -68,6 +68,12 @@ active versus inactive protection changes, yield elapsed time, and ten teardown
 trials per dense/sparse geometry. Raw samples, median/p95/max, worker identity,
 clock and PGE/PCID metadata are saved in `report.json.address_spaces`; missing or
 malformed groups fail acceptance. See [method and dated measurements](address-space-profiling.md).
+Independent HPET probes also measure 64 batches of timestamp, clock and ordinary/
+recursive/IF-enabled lock calls. Reports expose the selected AMD/Intel timestamp
+ordering and retain raw overhead measurements. The KVM collection script supports
+`--runs 3` and `--reference-session PATH`, or automatically uses the last passed
+session for a separate native-comparison.md/.json. Host checks for timestamp
+selection/AP agreement are available through `test-cpu-tsc test-cpu-ordering`.
 User-mode execution and a handler invocation boundary are not tested or supplied.
 
 Runtime module initialization and startup now both reject discovery, captured
