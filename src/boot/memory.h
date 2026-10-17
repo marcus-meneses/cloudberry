@@ -26,7 +26,7 @@ struct boot_reservation_table {
 #define BOOT_RESERVATION_MAGIC UINT64_C(0x3156534552424343)
 struct boot_pages {
     const struct boot_memory_map *map;
-    uint64_t hhdm,kernel_root;
+    uint64_t hhdm,kernel_root,search_hint;
     struct boot_reservation_table reservations;
     struct boot_reservation_chunk *last;
 };

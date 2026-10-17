@@ -2,7 +2,7 @@
 #include "cpu.h"
 #include "../boot/spaces.h"
 #include "../kmodules/shared/mem-spaces.h"
-struct space {struct space *next;struct mem_space_info info;unsigned disposing;};
+struct space {struct space *next;struct mem_space_info info;struct boot_space_reaper reaper;unsigned disposing;};
 static struct boot_pages *pages;
 static uintptr_t heap;
 static kernel_surface_call allocate,release;
@@ -78,7 +78,7 @@ struct kernel_surface_result kernel_spaces_destroy(MODULE_ARGS){
     if(!s || s->info.active || s->info.leases || s->disposing){kernel_cpu_leave(flags);return module_result(0,0);}
     s->info.state=MEM_SPACE_DESTROYING;s->disposing=1;kernel_cpu_leave(flags);
     unsigned result;
-    do{flags=kernel_cpu_enter();result=boot_space_reap(pages,s->info.root,b);kernel_cpu_leave(flags);}while(result==1);
+    do{flags=kernel_cpu_enter();result=boot_space_reap(pages,s->info.root,b,&s->reaper);kernel_cpu_leave(flags);}while(result==1);
     flags=kernel_cpu_enter();if(result==2){struct space **at=&head;while(*at!=s)at=&(*at)->next;*at=s->next;}else s->disposing=0;
     kernel_cpu_leave(flags);if(result==2)release(heap,(uintptr_t)s,0,0,0,0);return module_result(result==2,result==2);
 }

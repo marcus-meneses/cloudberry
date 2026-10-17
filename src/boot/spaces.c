@@ -73,17 +73,36 @@ bool boot_space_query(struct boot_pages *p,uint64_t root,uintptr_t va,uint64_t *
     uint64_t *entry=leaf(p,root,va,0,0);if(!entry || !(*entry&P) || !(*entry&U))return false;
     *physical=*entry&ADDR;*flags=((*entry&W)?BOOT_USER_WRITE:0)|((*entry&NX)?0:BOOT_USER_EXEC);return true;
 }
-/* Returns after a single mutation. No data/table memory is reused while an
- * active root could retain translations; the kernel enforces inactivity. */
-static unsigned reap(struct boot_pages *p,uint64_t root,uintptr_t owner,unsigned level){
-    uint64_t *table=pointer(p,root);unsigned count=level==4?256:512;
-    for(unsigned i=0;i<count;++i)if(table[i]&P){
-        if(level==1){struct boot_reservation *r=data(p,table[i]&ADDR,owner);if(!r || !r->mappings)return 0;--r->mappings;table[i]=0;return 1;}
-        if((table[i]&PS) || !owned_table(p,table[i]&ADDR,owner))return 0;
-        unsigned result=reap(p,table[i]&ADDR,owner,level-1);if(result==2){table[i]=0;return 1;}return result;
+/* Continue the depth-first traversal instead of rescanning every cleared
+ * prefix after a lock drop. Only DESTROYING/inactive roots may use this path;
+ * the kernel retains the continuation and excludes concurrent mutation. */
+unsigned boot_space_reap(struct boot_pages *p,uint64_t root,uintptr_t owner,struct boot_space_reaper *walk){
+    if(!p || !walk || !owned_table(p,root,owner))return 0;
+    if(!walk->state){*walk=(struct boot_space_reaper){.tables={root},.owner=owner,.state=1};}
+    if(walk->state!=1 || walk->tables[0]!=root || walk->owner!=owner || walk->depth>3)return 0;
+    unsigned mutations=0,scans=0;
+    while(mutations<BOOT_SPACE_REAP_BATCH && scans<BOOT_SPACE_REAP_SCAN){
+        unsigned depth=walk->depth,count=depth?512:256,index=walk->next[depth];
+        uint64_t *table=pointer(p,walk->tables[depth]);
+        if(index==count){
+            if(!boot_pages_release(p,walk->tables[depth],1,BOOT_RES_SPACE_TABLE,owner))return 0;
+            ++mutations;
+            if(!depth){walk->state=2;return 2;}
+            --walk->depth;uint64_t *parent=pointer(p,walk->tables[depth-1]);
+            parent[walk->next[depth-1]++]=0;continue;
+        }
+        if(index>count)return 0;
+        ++scans;
+        if(!(table[index]&P)){++walk->next[depth];continue;}
+        if(depth==3){
+            struct boot_reservation *r=data(p,table[index]&ADDR,owner);
+            if(!(table[index]&U) || !r || !r->mappings)return 0;
+            --r->mappings;table[index]=0;++walk->next[depth];++mutations;
+        }else{
+            uint64_t child=table[index]&ADDR;
+            if((table[index]&PS) || !owned_table(p,child,owner))return 0;
+            walk->tables[depth+1]=child;walk->next[depth+1]=0;++walk->depth;
+        }
     }
-    return boot_pages_release(p,root,1,BOOT_RES_SPACE_TABLE,owner)?2:0;
-}
-unsigned boot_space_reap(struct boot_pages *p,uint64_t root,uintptr_t owner){
-    return p && owned_table(p,root,owner)?reap(p,root,owner,4):0;
+    return 1;
 }

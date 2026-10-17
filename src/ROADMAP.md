@@ -312,10 +312,16 @@ Current performance sequence (keep this order):
    are about 35 ns, sparse population about 74 ms and dense 512-page teardown
    about 25 ms on four CPUs. The agent still has no /dev/kvm.
 3. Optimize sparse population and dense/sparse teardown using the cleaner native
-   evidence. Active: avoid allocation searches restarting at the lowest address;
-   retain teardown walk progress and amortize lock overhead over bounded disposal
-   batches. Preserve ownership, inactive-root checks, sanitization, watchdogs and
-   acknowledged invalidation. Do not attribute instrumentation overhead to CR3.
+   evidence. Implemented advisory next-fit physical search with exhaustive
+   fallback and sanitized-hole reuse; private teardown cursors retain progress
+   and amortize lock overhead over batches of at most 16 removals/4096 entry
+   examinations. Ownership, inactive-root checks, sanitization, watchdogs and
+   acknowledged invalidation remain enforced. Host and isolated guest checks pass.
+   Final four-CPU TCG sparse population is 3.47 ms versus 266.10 ms previously;
+   dense/sparse teardown is 1.57/5.29 ms versus 12.10/7.23 ms. Batching increases
+   individual sparse holds (median maximum about 314 us; largest observed IRQ-off
+   span 329 us). Native throughput/latency confirmation remains pending; compare
+   the next repeated KVM batch against 20261017T165114.408723Z before more tuning.
 
 See tests/address-space-profiling.md for collection commands and interpretation.
 

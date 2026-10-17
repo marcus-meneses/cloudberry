@@ -44,6 +44,13 @@ chunk, so consumers must not retain pointers to individual ledger entries.
 The original Limine map remains unchanged. Reusable gaps become available to
 both boot and managed allocations.
 
+Physical claims use a next-fit search hint after the last claim, falling back to
+the full usable-memory map before reporting exhaustion. Freed lower addresses
+reset the hint only after sanitization and ledger removal. The hint is not a
+second ownership index, capacity reservation or promise of lowest-address
+allocation; the ledger remains authoritative. Virtual stack gaps still use
+their independent first-fit policy.
+
 Allocation rollback needs no new allocation and releases every acquired frame
 and mapping. Failed requests do not modify output descriptors. If an unexpected
 backend cleanup failure occurs, the failed result carries a retained cleanup ID

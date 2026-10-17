@@ -10,11 +10,12 @@ _Static_assert(sizeof(struct boot_reservation_chunk) <= BOOT_PAGE_SIZE, "reserva
 void *boot_physical_pointer(const struct boot_pages *pages, uint64_t physical) {
     return (void *)(uintptr_t)(pages->hhdm + physical);
 }
-static uint64_t find_gap(struct boot_pages *pages, uint64_t bytes) {
+static uint64_t find_gap_from(struct boot_pages *pages, uint64_t bytes,uint64_t hint) {
     for (uint64_t i = 0; i < pages->map->count; ++i) {
         const struct boot_memory_entry *entry = pages->map->entries[i];
         if (!entry || entry->type != 0 || entry->base > UINT64_MAX - entry->length) continue;
         uint64_t start = entry->base < BOOT_PAGE_SIZE ? BOOT_PAGE_SIZE : entry->base;
+        if(start<hint)start=hint;
         if (start > UINT64_MAX - 4095) continue;
         start = (start + 4095) & ~UINT64_C(4095);
         uint64_t end = entry->base + entry->length;
@@ -33,6 +34,13 @@ static uint64_t find_gap(struct boot_pages *pages, uint64_t bytes) {
     }
     return 0;
 }
+static uint64_t find_gap(struct boot_pages *pages,uint64_t bytes) {
+    /* Continue after the previous claim rather than rediscovering the same
+     * occupied prefix for every page-table allocation. The hint is advisory:
+     * wrap over the complete map before reporting exhaustion. */
+    uint64_t physical=find_gap_from(pages,bytes,pages->search_hint);
+    return physical || !pages->search_hint?physical:find_gap_from(pages,bytes,0);
+}
 static void clear_pages(struct boot_pages *pages, uint64_t physical, size_t bytes) {
     unsigned char *p = boot_physical_pointer(pages, physical);
     for (size_t i = 0; i < bytes; ++i) p[i] = 0;
@@ -40,6 +48,7 @@ static void clear_pages(struct boot_pages *pages, uint64_t physical, size_t byte
 static void record(struct boot_pages *pages, uint64_t physical, uint64_t bytes, uint32_t kind, uintptr_t owner) {
     pages->last->entries[pages->last->count++] = (struct boot_reservation){physical, bytes, kind, 0, owner};
     ++pages->reservations.count;
+    pages->search_hint=physical+bytes;
 }
 bool boot_pages_init(struct boot_pages *pages, const struct boot_memory_map *map, uint64_t hhdm) {
     if (!pages || !map || !map->entries || !map->count) return false;
@@ -91,7 +100,11 @@ bool boot_pages_finish(struct boot_pages *pages,uint64_t physical,size_t count,u
     for(struct boot_reservation_chunk *chunk=pages->reservations.first;chunk;chunk=chunk->next)
         for(size_t i=0;i<chunk->count;++i) {struct boot_reservation *r=&chunk->entries[i];
             if(r->base==physical && r->bytes==count*BOOT_PAGE_SIZE && r->kind==BOOT_RES_SCRUB && r->owner==owner && !r->mappings) {
-                chunk->entries[i]=chunk->entries[--chunk->count];--pages->reservations.count;return true;
+                chunk->entries[i]=chunk->entries[--chunk->count];--pages->reservations.count;
+                /* Reconsider a freed low hole only after sanitization and
+                 * final removal from the ledger, never while SCRUB owns it. */
+                if(physical<pages->search_hint)pages->search_hint=physical;
+                return true;
             }
         }
     return false;

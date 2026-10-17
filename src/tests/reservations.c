@@ -12,6 +12,10 @@ int main(void) {
     assert(boot_pages_init(&pages,&map,(uintptr_t)storage-0x1000));
     assert(boot_pages_reserve(&pages,3,BOOT_RES_MODULE,123)==0x2000);
     assert(boot_pages_reserve(&pages,2,BOOT_RES_HEAP,456)==0x100000);
+    assert(boot_pages_reserve(&pages,1,BOOT_RES_OTHER,0)==0x102000);
+    /* The continuation is only a search hint: exhaustion above it must still
+     * discover smaller holes in an earlier memory-map entry. */
+    pages.search_hint=0x300000;
     assert(boot_pages_reserve(&pages,1,BOOT_RES_OTHER,0)==0x5000);
     size_t before=pages.reservations.count;
     assert(!boot_pages_reserve(&pages,SIZE_MAX,BOOT_RES_OTHER,0));

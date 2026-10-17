@@ -1,8 +1,9 @@
 # Address-space profiling
 
-The isolated address-space test measures the existing implementation. All probes,
-fault fixups, measurement loops and report processing are test-only. Production
-root switching, scheduling, TLB policy and allocation are unchanged.
+The isolated address-space test measures the production implementation. All probes,
+fault fixups, measurement loops and report processing are test-only. The dated
+follow-up sections describe production timestamp, allocation and teardown changes;
+root-switch, scheduling and TLB-invalidation policy are unchanged by this work.
 
 ## KVM collection and automatic comparison
 
@@ -158,6 +159,41 @@ noise floor. All raw samples, per-boot distributions and native comparisons rema
 in the session archive. No blanket overhead subtraction is applied. This evidence
 motivates allocation-search and bounded teardown improvements next. The agent
 environment still has no /dev/kvm.
+
+## Allocation and teardown follow-up
+
+The fresh KVM baseline separates cheap ordered timestamps from costly lock/HPET
+instrumentation. Sparse population also creates 131 table pages and exposed an
+allocation search that repeatedly rediscovered the occupied prefix. Physical
+claims now use an advisory next-fit hint, with a complete-map fallback before
+failure and lower-hole reconsideration after sanitization/removal. The reservation
+ledger remains authoritative; this adds no capacity limit or second ownership map.
+
+Teardown now owns a depth-first continuation per DESTROYING space. Locked batches
+remove at most 16 leaves/tables and examine at most 4096 entries; lock drops no
+longer restart traversal or require one acquisition for every leaf. Inactive-root,
+owner/reference checks, table sanitization and all active-root TLB policy remain
+unchanged. Failures retain the walk position for retry. These are work bounds,
+not elapsed-time guarantees: ledger searches and host pauses still contribute.
+
+Focused host checks cover allocation wrap/reuse/non-overlap, guarded stacks,
+ownership/OOM, dense/sparse continuation, wrong-owner rejection, retained failure
+position and the removal cap. Initial isolated one/four-CPU AMD/Intel TCG boots
+passed with a 512-entry scan cap. Raising that cap to 4096 retains the removal cap
+and passes the final four-CPU AMD-Vi boot, run
+5d467738312a4d9cb1ad352221b38afe. Reports are under
+bin/tests/space-optimization/acceptance; final source identity is saved beside
+the final AMD report. No candidate image or persistent disk was used.
+
+On the final four-CPU TCG run, sparse population changed from 266.10 to 3.47 ms,
+dense 512-page teardown from 12.10 to 1.57 ms, and sparse teardown from 7.23 to
+5.29 ms, compared with the prior copied AMD RDTSCP-path run. These are diagnostic
+emulated observations, not native speedup claims. Batching trades fewer lock
+acquisitions for longer individual holds: sparse teardown's median managed
+maximum hold rose from about 59 to 314 us; the largest observed managed IRQ-off
+span over its ten trials was 329 us. Native throughput and latency acceptance
+remain pending. Rerun bench-spaces-kvm.sh --runs 3 to compare against the preserved
+20261017T165114.408723Z baseline before further tuning.
 
 Focused local acceptance: AMD RDTSCP four-CPU run
 7bdedaf162144d50a7caeca271c632d4; AMD double-CPUID fallback one-CPU run

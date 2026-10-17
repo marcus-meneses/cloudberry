@@ -5,7 +5,30 @@
 static _Alignas(4096) unsigned char memory[16*1024*1024];
 static struct boot_pages pages;
 static size_t table_count(void){size_t n=0;for(struct boot_reservation_chunk *c=pages.reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i)if(c->entries[i].kind==BOOT_RES_SPACE_TABLE)++n;return n;}
-static void destroy(uint64_t root,uintptr_t owner){unsigned result,n=0;do{result=boot_space_reap(&pages,root,owner);assert(++n<5000);}while(result==1);assert(result==2);}
+static size_t references(void){size_t n=0;for(struct boot_reservation_chunk *c=pages.reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i)n+=c->entries[i].mappings;return n;}
+static unsigned step(uint64_t root,uintptr_t owner,struct boot_space_reaper *walk){
+    size_t before=table_count()+references();unsigned result=boot_space_reap(&pages,root,owner,walk);
+    size_t after=table_count()+references();assert(after<=before && before-after<=BOOT_SPACE_REAP_BATCH);return result;
+}
+static void destroy(uint64_t root,uintptr_t owner){struct boot_space_reaper walk={0};unsigned result,n=0;do{result=step(root,owner,&walk);assert(++n<5000);}while(result==1);assert(result==2);}
+static void continuation_tests(void){
+    uint64_t root=boot_space_create(&pages,42),data=boot_pages_reserve(&pages,512,BOOT_RES_PAGES,42);assert(root && data);
+    for(unsigned i=0;i<512;++i)assert(boot_space_map(&pages,root,42,UINT64_C(0x400000)+(uint64_t)i*4096,data+(uint64_t)i*4096,0));
+    struct boot_space_reaper walk={0};assert(step(root,42,&walk)==1 && references()==512-BOOT_SPACE_REAP_BATCH);
+    struct boot_space_reaper before=walk;
+    assert(!step(root,43,&walk) && !memcmp(&before,&walk,sizeof(walk)));
+    /* Failure must retain its position, not skip a malformed entry on retry. */
+    uint64_t *leaf=boot_physical_pointer(&pages,walk.tables[walk.depth]);unsigned index=walk.next[walk.depth];uint64_t saved=leaf[index];
+    leaf[index]&=~UINT64_C(4);assert(!step(root,42,&walk) && !memcmp(&before,&walk,sizeof(walk)));leaf[index]=saved;
+    unsigned calls=1,result;do{result=step(root,42,&walk);assert(++calls<100);}while(result==1);
+    assert(result==2 && !table_count() && !references() && boot_pages_release(&pages,data,512,BOOT_RES_PAGES,42));
+    /* Sparse high slots cross every hierarchy boundary and force scan-only
+     * continuations. Shared upper-half tables must remain untouched. */
+    root=boot_space_create(&pages,42);data=boot_pages_reserve(&pages,16,BOOT_RES_PAGES,42);assert(root && data);
+    for(unsigned i=0;i<15;++i)assert(boot_space_map(&pages,root,42,((uint64_t)i<<39)+UINT64_C(0x7ff000),data+(uint64_t)i*4096,0));
+    assert(boot_space_map(&pages,root,42,BOOT_USER_LIMIT-4096,data+15*4096,0));destroy(root,42);
+    assert(!table_count() && !references() && boot_pages_release(&pages,data,16,BOOT_RES_PAGES,42));
+}
 int main(void){
     struct boot_memory_entry region={4096,sizeof(memory),0};struct boot_memory_entry *entries[]={&region};struct boot_memory_map map={0,1,entries};
     assert(boot_pages_init(&pages,&map,(uintptr_t)memory-4096));
@@ -39,6 +62,7 @@ int main(void){
     assert(!boot_pages_release(&pages,frame,2,BOOT_RES_PAGES,42));destroy(c,42);
     assert(boot_pages_release(&pages,frame,2,BOOT_RES_PAGES,42));
     destroy(a,42);destroy(b,43);assert(!table_count());assert(boot_pages_release(&pages,other,1,BOOT_RES_PAGES,43));
+    continuation_tests();
     /* Exhaustion after the root is allocated: partial intermediate tables stay
      * reachable until bounded inactive-root disposal; no data pin is leaked. */
     a=boot_space_create(&pages,42);frame=boot_pages_reserve(&pages,1,BOOT_RES_PAGES,42);assert(a && frame);

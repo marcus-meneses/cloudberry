@@ -63,8 +63,12 @@ while contending for the CPU lock; watchdog failure remains fatal.
 Destroy drops mapping references and frees private page tables; it does not free
 user data allocations. Their owner must release them separately after references
 have drained. Empty intermediate tables, including partial construction after
-OOM, remain reachable until destroy. Disposal releases the lock between individual
-leaf/table removals. Kernel metadata heap backing and shared tables remain owned
+OOM, remain reachable until destroy. Disposal owns a private depth-first cursor
+that survives lock drops and retryable failures. Each locked batch removes at
+most 16 leaves/tables and examines at most 4096 entries, then restores IRQ delivery
+and permits rescheduling. The next batch resumes at the saved position rather
+than rescanning cleared prefixes. No mutation/activation is allowed throughout
+DESTROYING. Kernel metadata heap backing and shared tables remain owned
 until reboot, as with the existing allocator.
 
 ## Thread integration
@@ -82,6 +86,8 @@ Threads remain kernel-mode and pinned to their selected CPU.
 `make -C src test-spaces` covers private roots, shared future kernel mappings,
 ownership, canonical bounds, W^X, aliases/references, permission changes, teardown
 and partial table-construction OOM using the production page-table code.
+Dense/sparse continuation checks also verify the batch-removal cap, failure
+position retention, wrong-owner rejection and traversal across high-level slots.
 `test-spaces-boot QEMU_CPUS=4 QEMU_IOMMU=amd|intel` uses isolated media and
 kernel-only probes: same user VA with distinct backing, real CR3 switches,
 timer preemption, yield/block/resume, remote active-root permission invalidation,
