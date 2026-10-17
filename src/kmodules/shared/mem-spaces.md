@@ -22,7 +22,8 @@ bootstrap fills absent upper slots with empty shared PDPTs (at most 1 MiB once,
 not per process). Later kernel mappings work even in formerly empty slots.
 Kernel mappers always edit the captured master root rather than the current CR3.
 
-An empty space commits one 4 KiB root and a 64-byte registry record, plus allocator
+An empty space commits one 4 KiB root and a heap registry record containing its
+identity, reference counts and private teardown continuation, plus allocator
 metadata. A first user page normally needs three further 4 KiB table pages, plus
 its separately allocated data page. More tables grow on demand; no fixed process
 or mapping count is imposed. Existing shared kernel tables remain boot-owned.

@@ -280,6 +280,10 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
 
 ## Next priorities
 
+Documentation review: bootstrap's automatic read-only volume selection,
+Limine-origin correlation, selected runtime module loading/retirement and private
+space metadata descriptions now agree with their production implementations.
+
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
 Multi-instance storage and USB storage-disconnection cleanup are implemented.
 Bootstrap storage selection and selected future disk-module loading are implemented.

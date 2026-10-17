@@ -80,7 +80,11 @@ initialization owns controller masks/enable and spurious delivery; timer owns
 its vector/calibration and one-shots. Event binds scheduler/timer dependencies.
 No writable/executable leaf mapping is created, though HHDM writable aliases
 remain; this is not protection against malicious kernel code. Mapping failures
-halt boot; loading/unloading modules at runtime is not implemented.
+halt boot. Explicitly selected future format3 modules can load from the read-only
+ext4 driver volume at runtime, with hidden init/start, versioned dependency leases
+and cooperative retirement. All existing modules remain Limine-loaded. Executable
+mapping reclamation and published-table withdrawal remain future work; retired
+images are retained rather than reused unsafely. See [module loading](../kmodules/shared/module-load.md).
 
 Calls use the System V x86-64 ABI: six word arguments in RDI/RSI/RDX/RCX/R8/R9,
 value in RAX and status in RDX (0 success, 1 failure). They use the caller stack.

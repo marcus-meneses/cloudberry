@@ -238,11 +238,12 @@ image unmapping. Published-table owners remain pinned until table-reader lifetim
 tracking exists. These mechanisms do not establish a throughput/latency bound.
 
 Current QEMU boot media is a read-only USB mass-storage ISO. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
-driver partition by its configured GUID. Production init claims no storage interface
-or mounted filesystem automatically; explicit callers own selection and lifecycle.
-The kernel does not currently correlate Limine boot-volume identity with device
-transport. Future matching must report absent/ambiguous identity rather than
-infer the boot device from enumeration order. Native/physical USB and real
+driver partition by its configured GUID. Normal startup runs the bootstrap
+coordinator, which claims supported transports as needed and mounts the unique
+configured driver volume read-only. Other mounts remain explicit caller-owned
+operations. Copied Limine metadata reports boot-origin match/different/unknown
+separately from driver-volume selection; missing identity is never inferred from
+enumeration order. Native/physical USB and real
 high-speed TT/SuperSpeed hub qualification remain pending; earlier AMD KVM
 clock/SMP acceptance does not qualify the new USB stack.
 
