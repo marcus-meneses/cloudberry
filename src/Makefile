@@ -244,7 +244,7 @@ $(BUILD)/kmodules/probe.exports.S: tests/probe.json tools/module-exports.py
 	@mkdir -p $(@D)
 	python3 tools/module-exports.py $< $@
 
-$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-spaces-pic.o $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe-storage-pic.o $(BUILD)/kmodules/probe-block-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/space-fault-pic.o $(BUILD)/kmodules/space-fault-entry.o $(BUILD)/kmodules/probe-spaces-pic.o $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe-storage-pic.o $(BUILD)/kmodules/probe-block-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
 .PHONY: test-reservations
@@ -884,3 +884,10 @@ test-spaces-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-spaces-boot
 _test-spaces-boot: $(ISO) $(BUILD)/tests/src-spaces-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --spaces-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+
+$(BUILD)/kmodules/space-fault-pic.o: tests/space-fault.c tests/space-fault.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/space-fault-entry.o: tests/space-fault-entry.S
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@

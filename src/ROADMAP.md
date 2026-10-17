@@ -257,6 +257,15 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     translations and lease-gated destruction. All execution remains kernel-mode;
     this is not completed user-process isolation.
 
+28. Closed: eight isolated address-space cycles exercise exact read-only write,
+    NX fetch and unmapped-read hardware faults, including active remote-CPU
+    revocation. Test-only CPU-local gates match CR2/CR3/RIP/error and restore the
+    original IDT entry per operation. CPU1 receives IPIs while deferring root
+    switches, so context reloads cannot conceal stale translations. Owned page,
+    table and stack reservations return to baseline each cycle. Production fault
+    handling remains unchanged; ring-3 supervisor protection awaits user-mode
+    acceptance. Four-CPU AMD-Vi and Intel VT-d guest acceptance pass.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.

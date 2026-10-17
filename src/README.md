@@ -543,6 +543,9 @@ src/
 │   ├── mem-boot.c
 │   ├── mem-boot.py
 │   ├── spaces.c
+│   ├── space-fault.c
+│   ├── space-fault.h
+│   ├── space-fault-entry.S
 │   ├── spaces-boot.c
 │   ├── mem-pages-boot.c
 │   ├── mem-pages.c

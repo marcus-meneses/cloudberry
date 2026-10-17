@@ -50,6 +50,12 @@ memory with UBSan, including partial-construction OOM. `test-spaces-boot
 QEMU_CPUS=4 QEMU_IOMMU=amd` (or intel) uses kernel-only probes and disposable media
 to exercise same-VA private mappings, CR3 selection across timer/yield/block/exit,
 active remote TLB invalidation, owner checks, leases, teardown and stale IDs.
+Eight cycles check exact hardware #PFs for read-only writes (error 3), NX fetches
+(error 17) and unmapped reads (error 0), including revocation while CPU1 cannot
+switch roots but can receive IPIs. The original CPU-local IDT gate is restored
+after each probe; unexpected faults halt. The fault code/assembly is linked only
+into the isolated probe module, never production inthandle. Each cycle checks
+that owned page/table/stack reservations return to baseline.
 Reports live under `bin/tests/isolated/tests/spaces-<N>cpu-<iommu>/`.
 User-mode execution and a handler invocation boundary are not tested or supplied.
 

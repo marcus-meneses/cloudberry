@@ -85,6 +85,13 @@ and partial table-construction OOM using the production page-table code.
 `test-spaces-boot QEMU_CPUS=4 QEMU_IOMMU=amd|intel` uses isolated media and
 kernel-only probes: same user VA with distinct backing, real CR3 switches,
 timer preemption, yield/block/resume, remote active-root permission invalidation,
-lease-gated destruction, reaping and stale IDs. No probe enters candidate images.
+lease-gated destruction, reaping and stale IDs. Eight full cycles also attempt
+real read-only writes, NX execution and reads after unmapping; exact #PF error,
+CR2, CR3 and instruction/fixup addresses must match. The test-only CPU-local
+page-fault gate is restored after each guarded operation. CPU1 keeps IRQ/IPI
+handling enabled but defers thread switching during revocation, preventing a
+context-switch flush from hiding stale translations. Each cycle returns owned
+page/table/stack reservations to its baseline. No probe enters candidate images,
+and production exception dispatch is unchanged.
 Ring-3 fault containment and the eventual handler invocation boundary remain
 separate acceptance milestones.

@@ -9,5 +9,5 @@ struct kernel_surfaces;
 struct probe_xhci {const struct kernel_surfaces *hub;uint64_t hardware_index,id,done,errors,transfers,interrupts,events,hotplug;};
 struct probe_usb_wait {const struct kernel_surfaces *hub;uint64_t id,generation,done,state,status;unsigned char bytes[8];};
 struct probe_usb {const struct kernel_surfaces *hub;uint64_t devices,done,errors,hotplug,write;};
-struct probe_space {uint64_t root,address,expected,next,phase,command,errors;};
+struct probe_space {uint64_t root,address,expected,next,phase,command,errors,hold_preemption;};
 #endif

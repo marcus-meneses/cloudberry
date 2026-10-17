@@ -80,6 +80,10 @@
     {
       "name": "probe.space",
       "symbol": "probe_space_call"
+    },
+    {
+      "name": "probe.space_fault_config",
+      "symbol": "probe_space_fault_config"
     }
   ]
 }
