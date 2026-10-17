@@ -1,14 +1,17 @@
 #include "process.h"
+#include "../../interfaces/system.h"
 #include "process-elf.h"
 #include "threads.h"
 #include "inthandle.h"
 #include "mem-pages.h"
 #include "mem-spaces.h"
 #include "../../kernel/cpu.h"
-struct page {struct page *next;struct mem_pages frame;uint64_t address;uint32_t flags;};
-struct process {struct process *next;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
+struct page {struct page *next;struct mem_pages frame;uint64_t address;uint32_t flags,mapped;};
+struct allocation {struct allocation *next;uint64_t address,bytes;};
+struct process {struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct process *head;
     kernel_surface_call alloc,free,pages_alloc,pages_free,stack_alloc,stack_free,space_create,space_destroy,space_map,create,control,entry_stack,stat,read,cpu;} state;
+struct kernel_surface_result process_surface_check(MODULE_ARGS);
 extern uint64_t process_enter(uintptr_t,uintptr_t,uint64_t,uint64_t *) __attribute__((visibility("hidden")));
 extern void process_return(void) __attribute__((visibility("hidden")));
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
@@ -24,14 +27,14 @@ static int add_page(struct process *p,uint64_t address,uint32_t flags,const void
     page->address=address;page->flags=flags;
     const unsigned char *s=source;unsigned char *d=(void *)page->frame.address;for(size_t i=0;i<bytes;++i)d[i]=s[i];
     struct kernel_surface_result r=state.space_map(p->info.address_space,p->info.id,address,page->frame.physical,flags,0);
-    page->next=p->pages;p->pages=page;return !r.status;
+    page->mapped=!r.status;uint64_t flags_saved=lock();page->next=p->pages;p->pages=page;unlock(flags_saved);return !r.status;
 }
 static int cleanup(struct process *p){
     if(p->info.address_space && CALL(state.space_destroy,p->info.address_space,p->info.id,0).status)return 0;
     p->info.address_space=0;
     while(p->pages){struct page *page=p->pages;if(CALL(state.pages_free,page->frame.id,p->info.id,0).status)return 0;p->pages=page->next;release(page);}
     if(p->trap.id && CALL(state.stack_free,p->trap.id,p->info.id,0).status)return 0;
-    p->trap.id=0;return 1;
+    p->trap.id=0;while(p->allocations){struct allocation *record=p->allocations;p->allocations=record->next;release(record);}return 1;
 }
 static int elf_load(struct process *p,const unsigned char *image,size_t bytes,uint64_t stack_bytes){
     if(!process_elf_valid(image,bytes))return 0;
@@ -44,7 +47,7 @@ static int elf_load(struct process *p,const unsigned char *image,size_t bytes,ui
     }
     uint64_t top=MEM_USER_LIMIT-65536,rounded=(stack_bytes+4095)&~UINT64_C(4095);
     for(uint64_t off=0;off<rounded;off+=4096)if(!add_page(p,top-rounded+off,MEM_SPACE_WRITE,NULL,0))return 0;
-    p->entry=h->entry;p->sp=top-8;return 1;
+    p->entry=h->entry;p->sp=top-8;p->stack_bottom=top-rounded;return 1;
 }
 struct kernel_surface_result process_surface_init(MODULE_ARGS){
     MODULE_UNUSED();if(state.hub)return module_result(1,state.hub==(const void *)a && state.heap==b);
@@ -91,6 +94,8 @@ struct kernel_surface_result process_surface_run(MODULE_ARGS){
     if(CALL(state.entry_stack,p->trap.top,0,0).status)__asm__ volatile("ud2");
     process_enter(p->entry,p->sp,p->argument,&p->saved_rsp);
     CALL(state.entry_stack,0,0,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");
+    kernel_surface_call io_exit=kernel_surface_find(state.hub,"io.exit");if(io_exit)CALL(io_exit,p->info.id,0,0);
+    kernel_surface_call exit=kernel_surface_find(state.hub,"handles.exit");if(exit)CALL(exit,p->info.id,0,0);
     return module_result(p->info.exit_code,1);
 }
 static void terminate(struct process *p,struct inthandle_frame *f,uint64_t code){
@@ -100,7 +105,15 @@ struct kernel_surface_result process_surface_gate(MODULE_ARGS){
     MODULE_UNUSED();struct inthandle_frame *frame=(void *)a;if(!frame || frame->vector!=128 || (frame->cs&3)!=3)return module_result(0,0);
     uint64_t flags=lock();struct process *p=current();if(!p || !p->saved_rsp){unlock(flags);return module_result(0,0);}
     if(!frame->rax){p->info.state=PROCESS_EXITED;terminate(p,frame,frame->rdi);}
-    else frame->rax=1; /* resource mediation is added through this same gate */
+    else if(frame->rax==1){
+        unlock(flags);struct cb_system_gate gate;struct kernel_surface_result checked=process_surface_check(p->info.id,frame->rdi,sizeof(gate),1,0,0);
+        if(checked.status || process_surface_copy(p->info.id,frame->rdi,(uintptr_t)&gate,sizeof(gate),0,0).status){frame->rax=CB_BAD_REQUEST;return module_result(1,1);}
+        kernel_surface_call mediate=kernel_surface_find(state.hub,"handles.gate");
+        __asm__ volatile("sti":::"memory");struct kernel_surface_result r=mediate?CALL(mediate,p->info.id,&gate,0):module_result(CB_UNAVAILABLE,1);__asm__ volatile("cli":::"memory");
+        gate.status=r.status?CB_RESOURCE_FAILURE:r.value;
+        if(process_surface_copy(p->info.id,frame->rdi,(uintptr_t)&gate,sizeof(gate),1,0).status)frame->rax=CB_BAD_REQUEST;else frame->rax=gate.status;
+        return module_result(1,1);
+    }else frame->rax=CB_BAD_REQUEST;
     unlock(flags);return module_result(1,1);
 }
 struct kernel_surface_result process_surface_fault(MODULE_ARGS){
@@ -118,6 +131,8 @@ struct kernel_surface_result process_surface_reap(MODULE_ARGS){
     if(p->info.thread){struct thread_info t;if(CALL(state.control,THREAD_INFO,p->info.thread,&t).status || t.state!=THREAD_EXITED){unlock(flags);return module_result(0,0);}}
     uint32_t previous=p->info.state;p->info.state=PROCESS_REAPING;unlock(flags);
     if(p->info.thread && CALL(state.control,THREAD_REAP,p->info.thread,0).status){flags=lock();p->info.state=previous;unlock(flags);return module_result(0,0);}p->info.thread=0;
+    kernel_surface_call io_exit=kernel_surface_find(state.hub,"io.exit");if(io_exit && CALL(io_exit,p->info.id,0,0).status){flags=lock();p->info.state=previous;unlock(flags);return module_result(0,0);}
+    kernel_surface_call handles_exit=kernel_surface_find(state.hub,"handles.exit");if(handles_exit)CALL(handles_exit,p->info.id,0,0);
     if(!cleanup(p)){flags=lock();p->info.state=previous;unlock(flags);return module_result(0,0);}
     flags=lock();struct process **at=&state.head;while(*at!=p)at=&(*at)->next;*at=p->next;unlock(flags);release(p);return module_result(1,1);
 }
@@ -128,8 +143,44 @@ struct kernel_surface_result process_surface_copy(MODULE_ARGS){
     /* Validate the full range before writing any prefix. Process mappings remain
      * stable under this lock; later handle allocation/release uses the same lock. */
     for(uint64_t off=0;off<d;){struct page *page=p->pages;uint64_t address=(b+off)&~UINT64_C(4095);while(page && page->address!=address)page=page->next;
-        if(!page || (e && !(page->flags&MEM_SPACE_WRITE))){unlock(flags);return module_result(0,0);}uint64_t n=4096-((b+off)&4095);off+=n<d-off?n:d-off;}
+        if(!page || !page->mapped || (e && !(page->flags&MEM_SPACE_WRITE))){unlock(flags);return module_result(0,0);}uint64_t n=4096-((b+off)&4095);off+=n<d-off?n:d-off;}
     for(uint64_t off=0;off<d;){struct page *page=p->pages;while(page->address!=((b+off)&~UINT64_C(4095)))page=page->next;uint64_t n=4096-((b+off)&4095);if(n>d-off)n=d-off;
         unsigned char *user=(void *)(page->frame.address+((b+off)&4095)),*kernel=(void *)(c+off);for(uint64_t i=0;i<n;++i)if(e)user[i]=kernel[i];else kernel[i]=user[i];off+=n;}
     unlock(flags);return module_result(d,1);
+}
+
+struct kernel_surface_result process_surface_check(MODULE_ARGS){
+    MODULE_UNUSED();if((b<4096 && c) || b>=MEM_USER_LIMIT || c>MEM_USER_LIMIT-b || d>1 || c>16384)return module_result(0,0);
+    uint64_t flags=lock();struct process *p=find(a);int ok=p && (p->info.state==PROCESS_RUNNING || p->info.state==PROCESS_READY);
+    for(uint64_t off=0;ok && off<c;){struct page *page=p->pages;uint64_t va=(b+off)&~UINT64_C(4095);while(page && page->address!=va)page=page->next;
+        if(!page || !page->mapped || (d && !(page->flags&MEM_SPACE_WRITE))){ok=0;break;}uint64_t n=4096-((b+off)&4095);off+=n<c-off?n:c-off;}
+    unlock(flags);return module_result(ok,ok);
+}
+/* Owner-thread foreground memory primitives; arbitrary user addresses never
+ * select another owner's backing. Calls commit pages with short metadata locks. */
+struct kernel_surface_result process_surface_memory_free(MODULE_ARGS){
+    MODULE_UNUSED();if(!b)return module_result(1,1);uint64_t flags=lock();struct process *p=find(a);
+    if(!p || current()!=p || p->info.state!=PROCESS_RUNNING){unlock(flags);return module_result(0,0);}
+    struct allocation **at=&p->allocations;while(*at && (*at)->address!=b)at=&(*at)->next;
+    if(!*at){unlock(flags);return module_result(0,0);}struct allocation *record=*at;unlock(flags);
+    kernel_surface_call unmap=kernel_surface_find(state.hub,"mem.space_unmap");
+    for(uint64_t off=0;off<record->bytes;off+=4096){uint64_t va=b+off;flags=lock();struct page **link=&p->pages;while(*link && (*link)->address!=va)link=&(*link)->next;struct page *page=*link;unlock(flags);if(!page)continue;
+        if(page->mapped && CALL(unmap,p->info.address_space,a,va).status)return module_result(0,0);
+        flags=lock();link=&p->pages;while(*link!=page)link=&(*link)->next;*link=page->next;unlock(flags);
+        if(CALL(state.pages_free,page->frame.id,a,0).status)__asm__ volatile("ud2");
+        release(page);
+    }
+    flags=lock();at=&p->allocations;while(*at!=record)at=&(*at)->next;*at=record->next;p->memory_next=b;unlock(flags);release(record);return module_result(1,1);
+}
+struct kernel_surface_result process_surface_memory_alloc(MODULE_ARGS){
+    MODULE_UNUSED();if(!b)return module_result(0,1);if(b>UINT64_MAX-4095)return module_result(0,0);uint64_t bytes=(b+4095)&~UINT64_C(4095);
+    uint64_t flags=lock();struct process *p=find(a);if(!p || current()!=p || p->info.state!=PROCESS_RUNNING){unlock(flags);return module_result(0,0);}unlock(flags);
+    uint64_t start=p->memory_next?p->memory_next:UINT64_C(0x100000000),address=start,limit=p->stack_bottom-4096;int found=0;
+    for(unsigned pass=0;pass<2 && !found;++pass){uint64_t end=pass?start:limit;if(pass)address=UINT64_C(0x100000000);
+        while(address<end && bytes<=end-address){uint64_t next=address;flags=lock();for(struct page *page=p->pages;page;page=page->next)if(page->address>=address && page->address-address<bytes && page->address+4096>next)next=page->address+4096;unlock(flags);if(next==address){found=1;break;}address=next;}}
+    if(!found)return module_result(0,0);
+    struct allocation *record=allocate(sizeof(*record));if(!record)return module_result(0,0);
+    record->address=address;record->bytes=0;flags=lock();record->next=p->allocations;p->allocations=record;unlock(flags);
+    for(uint64_t off=0;off<bytes;off+=4096){record->bytes=off+4096;if(!add_page(p,address+off,MEM_SPACE_WRITE,NULL,0)){(void)process_surface_memory_free(a,address,0,0,0,0);return module_result(0,0);}}
+    p->memory_next=address+bytes;return module_result(address,1);
 }

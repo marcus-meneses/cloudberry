@@ -15,15 +15,17 @@ Private lower-half address spaces can be attached to kernel threads through
 request ABI2, with ownership, leases, context-switch root selection and targeted
 TLB invalidation. [Protected processes](kmodules/shared/process.md) now load static
 ELF executables from ext4, enter ring 3 and contain user faults. Application
-handle transport and handler execution follow. See [mem spaces](kmodules/shared/mem-spaces.md).
+handle transport now uses copied, manifest-authorized capability calls; the first
+keyboard handler is the next application milestone. See [mem spaces](kmodules/shared/mem-spaces.md).
 The [application handle contract](interfaces/README.md) now defines the C boundary
 and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
-publishing `/@keyboard`. Headers are compile-tested in C/C++20; application
-handle runtime, handler loading and USB HID implementation are subsequent work.
+publishing `/@keyboard`. Headers are compile-tested in C/C++20; the [C system library and handle broker](kmodules/shared/handles.md) implement initial boot-policy authorization and isolated request/reply.
+Keyboard handler loading and HID decoding follow.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
-Application-facing handles/handlers and HID class drivers remain pending; the protected native executable foundation is implemented. The xHCI transport supplies root/downstream
+Application handles now provide process-local acquisition, filtered reflection,
+self-owned memory and scoped I/O. Privileged HID decoding remains the next handler milestone. The xHCI transport supplies root/downstream
 slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe and AHCI are kernel-only block backends. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
@@ -273,7 +275,7 @@ no formatting or migration. Test fixtures never enter the candidate image.
 ```sh
 make -C src test-portability
 make -C src test-threads-state test-threads-smp
-make -C src test-process-elf test-process-boot
+make -C src test-process-elf test-manifest test-handles test-process-boot
 make -C src BUILD=../bin/tests/isolated test-clock test-tsc-validation test-irq test-timer test-apic test-pages
 make -C src test-inthandle-faults
 make -C src test-ext4-write test-ext4-runtime
@@ -332,6 +334,9 @@ src/
 ├── interfaces/
 │   ├── README.md
 │   ├── handle.h
+│   ├── io.h
+│   ├── memory.h
+│   ├── system.h
 │   └── keyboard.h
 ├── kmodules/
 │   ├── amd/
@@ -413,6 +418,15 @@ src/
 │   │   ├── ext4-fs.json
 │   │   ├── ext4-fs.md
 │   │   ├── hwenum-module.c
+│   │   ├── handles.c
+│   │   ├── handles.h
+│   │   ├── handles.json
+│   │   ├── handles.md
+│   │   ├── io.c
+│   │   ├── io.h
+│   │   ├── io.json
+│   │   ├── io.md
+│   │   ├── manifest.h
 │   │   ├── hwenum.c
 │   │   ├── hwenum.h
 │   │   ├── hwenum.json
@@ -533,9 +547,14 @@ src/
 ├── maps/
 │   └── startup.md
 ├── sdk/
-│   └── application.ld
+│   ├── application.ld
+│   ├── system.c
+│   └── system.h
 ├── tests/
 │   ├── apps/
+│   │   ├── handles-client.json
+│   │   ├── handles-server.json
+│   │   ├── handles.c
 │   │   └── process.c
 │   ├── README.md
 │   ├── acpi-boot.c
@@ -592,6 +611,8 @@ src/
 │   ├── native-check.py
 │   ├── nvme-boot.c
 │   ├── pci.c
+│   ├── handles.c
+│   ├── manifest.c
 │   ├── process-boot.c
 │   ├── process-elf.c
 │   ├── probe-process.c

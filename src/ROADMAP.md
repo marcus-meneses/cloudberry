@@ -297,10 +297,13 @@ scoped OS I/O and memory handles and has no direct application access to the hub
 Protected process milestone implemented: static ext4 ELF loading, ring-3 entry,
 CPU-local kernel entry stacks/GS transitions, preemption, user fault containment
 and explicit quiescent cleanup. Isolated one/four-CPU boots and malformed-ELF
-UBSan checks pass; native user-mode acceptance remains open. Next: copied/admitted handle transport,
-kernel I/O mediation for USB HID, then
-keyboard publication and an isolated authorized client. Manifest enforcement and actual keyboard HID execution remain future
-work; this contract milestone does not claim they are implemented.
+UBSan checks pass; native user-mode acceptance remains open. Copied/admitted handle transport and the C system library are now implemented,
+with immutable boot JSON grants, owner-local tokens, filtered reflection, retained
+results, blocked request/reply and scoped memory/I/O managers. UBSan grammar/broker
+checks and isolated one/four-CPU user-process tests pass, including cross-CPU
+provider/client delivery and scoped clock access. Next:
+keyboard publication and an isolated authorized client. Boot manifests are enforced; installed-app authorization and actual keyboard
+HID execution remain separate work.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 

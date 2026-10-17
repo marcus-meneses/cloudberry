@@ -1,0 +1,37 @@
+{
+  "name": "handles",
+  "exports": [
+    {
+      "name": "handles.init",
+      "symbol": "handles_surface_init"
+    },
+    {
+      "name": "handles.admit",
+      "symbol": "handles_surface_admit"
+    },
+    {
+      "name": "handles.gate",
+      "symbol": "handles_surface_gate"
+    },
+    {
+      "name": "handles.exit",
+      "symbol": "handles_surface_exit"
+    },
+    {
+      "name": "handles.available",
+      "symbol": "handles_surface_available"
+    },
+    {
+      "name": "handles.channel",
+      "symbol": "handles_surface_channel"
+    },
+    {
+      "name": "handles.post",
+      "symbol": "handles_surface_post"
+    },
+    {
+      "name": "handles.unsubscribe",
+      "symbol": "handles_surface_unsubscribe"
+    }
+  ]
+}

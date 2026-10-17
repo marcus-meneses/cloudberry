@@ -34,7 +34,7 @@ struct cb_reply_header {
     cb_status_t status;uint32_t outcome;
     uint64_t provider_epoch,result_bytes,error_bytes;
 };
-enum {CB_CALL_PROVIDER_DELIVERY=1};
+enum {CB_CALL_PROVIDER_DELIVERY=1,CB_CALL_SYSTEM_EVENT=2};
 /* receive() only: kernel-owned admission context (UTF-8 JSON) precedes the
  * original payload. invoke() rejects this provider-only flag/context from clients.
  * call.version.bytes is sizeof(cb_delivery_header), not sizeof(cb_call_header). */
@@ -85,7 +85,7 @@ static inline int cb_frame_fits(uint64_t header,uint64_t first,uint64_t second,u
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Future system-library entry points. No implementation/linkable SDK exists yet.
+/* C system-library entry points, implemented in sdk/system.c.
  * The library marshals these local pointers; the kernel authenticates the caller.
  * call/reply buffers include the headers above; reply_bytes reports required size. */
 cb_status_t cb_system_get_handle(const char *name,uint64_t name_bytes,const struct cb_interface_id *interface_id,uint16_t major,uint16_t minimum_minor,cb_handle_t *out);

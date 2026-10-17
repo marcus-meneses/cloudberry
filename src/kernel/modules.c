@@ -502,6 +502,8 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("threads.init",calls[12]((uintptr_t)hub,heap,mp_request.response->cpu_count,0,0,0));
     kernel_surface_call process=kernel_surface_find(hub,"process.init");if(!process)return startup_failure("process.init","missing");
     START("process.init",process((uintptr_t)hub,heap,0,0,0,0));
+    kernel_surface_call handles=kernel_surface_find(hub,"handles.init");if(!handles)return startup_failure("handles.init","missing");
+    START("handles.init",handles((uintptr_t)hub,heap,0,0,0,0));
     START("event.init",calls[10]((uintptr_t)hub,0,0,0,0,0));
     START("smp.start",calls[13](0,0,0,0,0,0));
     START("irq.init",calls[14]((uintptr_t)hub,heap,0,0,0,0));
@@ -519,6 +521,8 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("sata.init",calls[26]((uintptr_t)hub,heap,0,0,0,0));
     kernel_surface_call bootstrap=kernel_surface_find(hub,"bootstrap.init");if(!bootstrap)return startup_failure("bootstrap.init","missing");
     START("bootstrap.init",bootstrap((uintptr_t)hub,heap,0,0,0,0));
+    kernel_surface_call io=kernel_surface_find(hub,"io.init");if(!io)return startup_failure("io.init","missing");
+    START("io.init",io((uintptr_t)hub,heap,0,0,0,0));
     return true;
 }
 

@@ -19,7 +19,7 @@ try:
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
-        shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');(fixture/'invalid.elf').write_bytes(b'not an ELF')
+        shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
     if args.disk_modules:
         config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
         for name in ('future','future-fail'):shutil.copy2(build/f'kmodules/{name}.kmod',fixture/f'{name}.kmod')

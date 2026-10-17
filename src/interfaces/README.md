@@ -1,9 +1,11 @@
 # Application-facing handle boundary, revision 1
 
-This is a contract milestone. The headers specify the C ABI and compile-time
-interfaces; system-library function declarations have no runtime implementation
-yet. The kernel now supports initial protected static ELF processes; these records
-do not expose the kmodule hub, and their handle runtime is the next milestone.
+The headers define the public C ABI. Initial protected processes, copied handle
+mediation, boot-policy JSON authorization and the C system library are implemented;
+see [handles](../kmodules/shared/handles.md). These interfaces never expose the
+kmodule hub. Sections below describe the complete target contract; vows, installed
+application identity, interactive approval, automatic safe rebind and C++ wrappers
+are not implemented by the initial boot-provider milestone.
 
 ## Identity, discovery and reflection
 
@@ -149,9 +151,9 @@ process using an OS I/O handle and its own memory handle, not a ring-0 kmodule
 given the public hub. The existing format3 `.kmod`/`.driver` loader loads trusted
 kmodules; it cannot silently substitute for a handler executable loader.
 
-Initial ring-3 entry/return, fault containment, owned process lifetime and static
-ext4 ELF loading are implemented in process. The copying/admission gate follows. Bridge only the scoped USB HID facilities
-needed by this provider through kernel I/O mediation. Then publish `/@keyboard`
+Initial ring-3 entry/return, fault containment, owned process lifetime, static
+ext4 ELF loading and the copying/admission gate are implemented. Scoped USB HID facilities
+are bridged through /@io for the keyboard provider. Next publish `/@keyboard`
 and verify a second isolated client can acquire only its manifest-authorized
 read/state operations. No general app installer, graphical interface, arbitrary
 device manager, networking or module image unloading is required for this step.

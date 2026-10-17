@@ -28,6 +28,8 @@ MEM_MODULE := $(BUILD)/kmodules/mem.kmod
 HWENUM_MODULE := $(BUILD)/kmodules/hwenum.kmod
 INTHANDLE_MODULE := $(BUILD)/kmodules/inthandle.kmod
 EVENT_MODULE := $(BUILD)/kmodules/event.kmod
+IO_MODULE := $(BUILD)/kmodules/io.kmod
+HANDLES_MODULE := $(BUILD)/kmodules/handles.kmod
 PROCESS_MODULE := $(BUILD)/kmodules/process.kmod
 THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
 IOMMU_MODULE := $(BUILD)/kmodules/iommu.kmod
@@ -113,7 +115,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
+$(ISO): $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -126,7 +128,7 @@ $(ISO): $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_M
 	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
 	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
 	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(PROCESS_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
+	cp $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
 	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
@@ -940,7 +942,7 @@ $(BUILD)/tests/src-process-kernel.elf: $(BUILD)/tests/src-process-main.o $(BUILD
 .PHONY: test-process-boot _test-process-boot
 test-process-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-process-boot
-_test-process-boot: $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
+_test-process-boot: $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --process-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
 .PHONY: test-process-elf
@@ -948,3 +950,23 @@ test-process-elf:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/process-elf.c -o $(BUILD)/tests/process-elf
 	$(BUILD)/tests/process-elf
+
+$(BUILD)/kmodules/handles.elf: $(BUILD)/kmodules/handles-pic.o $(BUILD)/kmodules/handles.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/tests/apps/handles-probe.elf: tests/apps/handles.c sdk/system.c sdk/system.h interfaces/system.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/handles.c sdk/system.c -o $@
+.PHONY: test-manifest
+test-manifest:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/manifest.c -o $(BUILD)/tests/manifest
+	$(BUILD)/tests/manifest
+
+$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+.PHONY: test-handles
+test-handles:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
+	$(BUILD)/tests/handles

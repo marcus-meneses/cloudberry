@@ -18,8 +18,9 @@ remain preemptible outside existing critical sections. CPL3 synchronous faults
 terminate only the current process and record vector/CR2/RIP. Kernel faults,
 NMI, double fault and machine check retain their fatal handling.
 
-The DPL3 vector 128 gate currently accepts lifecycle exit (RAX=0, RDI=status).
-This is the bootstrap for the copied handle gate, not a resource syscall family.
+The DPL3 vector 128 gate accepts lifecycle exit (RAX=0, RDI=status) and copied
+handle mediation (RAX=1, RDI=local gate descriptor). Resource operations pass
+through capabilities rather than independent resource syscall families.
 A fault/exit returns through the normal interrupt unwind into the process's
 retained kernel continuation. The enclosing thread must actually reach EXITED
 before reap can free either kernel stack or the private address space.
@@ -34,8 +35,8 @@ mapped or callable from ring 3. No user pointer survives a copied request.
 
 The initial process loader is not an installer or a signature verifier. Only
 trusted bootstrap/kernel policy may admit an executable; arbitrary apps cannot
-load or assign permissions to another process. Resource manifests/handle grants
-are the next milestone. Process exit can retain its result and memory until its
+load or assign permissions to another process. Resource manifests/handle grants now come from the separate handles module
+and trusted boot admission. Process exit can retain its result and memory until its
 kernel owner explicitly reaps it. If a failed load cannot finish rollback, it
 returns failure with a cleanup-only process ID for retry through reap; that
 record cannot be started. Normal load failures return failure with zero.
@@ -50,3 +51,9 @@ Local acceptance (TCG): one-CPU/no-IOMMU run `c4c028b695ed409a848b6700b11e4037` 
 four-CPU/VT-d run `1d3609b7d8d24e84ac89c2c8f9ece5f9` pass. The final four-CPU
 probe also verifies NT-flag sanitization across the user gate. Pure ELF decoder
 checks pass under UBSan. Native KVM/physical user-entry acceptance remains open.
+
+`process.check` validates at most a 16 KiB message range without copying.
+`memory_alloc` and `memory_free` are trusted owner-thread mechanisms behind the
+self-scoped memory handle; they grow owned user pages and reuse released virtual
+holes. Process exit also initiates scoped I/O cleanup and releases broker policy;
+reap waits for retained kernel I/O workers before freeing process backing.

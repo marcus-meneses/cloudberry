@@ -1,0 +1,21 @@
+{
+  "name": "io",
+  "exports": [
+    {
+      "name": "io.init",
+      "symbol": "io_surface_init"
+    },
+    {
+      "name": "io.invoke",
+      "symbol": "io_surface_invoke"
+    },
+    {
+      "name": "io.worker",
+      "symbol": "io_surface_worker"
+    },
+    {
+      "name": "io.exit",
+      "symbol": "io_surface_exit"
+    }
+  ]
+}

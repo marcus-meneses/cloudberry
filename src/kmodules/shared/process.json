@@ -40,6 +40,18 @@
     {
       "name": "process.copy",
       "symbol": "process_surface_copy"
+    },
+    {
+      "name": "process.check",
+      "symbol": "process_surface_check"
+    },
+    {
+      "name": "process.memory_alloc",
+      "symbol": "process_surface_memory_alloc"
+    },
+    {
+      "name": "process.memory_free",
+      "symbol": "process_surface_memory_free"
     }
   ]
 }
