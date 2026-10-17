@@ -353,6 +353,12 @@ Follow-up requested after that acceptance:
    now use nonblocking dispatch rather than event-loop idle, with an explicit
    remote-only completion regression. The incomplete session is not accepted;
    native reruns against 20261017T202426.499405Z remain required.
+   Session 20261017T212856.886469Z subsequently completes three single-CPU and
+   two four-CPU AMD-Vi correctness boots, but its second SMP boot falls back to
+   HPET and the comparator rejects mixed-clock timings. The runtime health check
+   now brackets its HPET reference to avoid treating vCPU pauses as drift; genuine
+   drift/regression still falls back. Reports now retain the TSC rejection reason.
+   Native confirmation remains pending; the old log cannot establish its reason.
 3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
    contract under interfaces, plus handlers/keyboard's loading/authorization plan.
    /@keyboard is the first handler milestone; C++ object layouts stay out of the

@@ -85,8 +85,13 @@ the shared last timestamp clamps small cross-CPU differences monotonically.
 An AP initially just below the BSP activation anchor clamps to the base time
 rather than underflowing an unsigned elapsed calculation.
 An HPET health comparison runs after 100 ms of TSC progress or 64 timestamp
-reads and falls back if divergence exceeds 1 ms. Failure to read the reference
-returns failure. No recurring idle timer or thread migration is introduced.
+reads. The HPET reference instant is bracketed with ordered local TSC reads;
+only divergence beyond that interval by more than 1 ms triggers drift fallback.
+A vCPU pause between the counter reads widens uncertainty rather than appearing
+as drift. The interval uses raw converted timestamps, before the shared monotonic
+clamp. Regression during the bracket still triggers immediate HPET fallback and
+invalidates profiling; the trailing reading becomes this CPU's previous counter.
+Failure to read the reference returns failure. No recurring idle timer or thread migration is introduced.
 Explicit recalibration selects HPET again and revokes the old calibration proof.
 A counter marked unstable cannot be reenabled using a stale proof this boot.
 

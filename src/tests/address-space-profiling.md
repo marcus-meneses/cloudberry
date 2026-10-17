@@ -310,6 +310,37 @@ an explicitly accepted reference rather than the failed session:
 ./scripts/bench-spaces-kvm.sh --runs 3 --reference-session bin/tests/kvm-spaces/20261017T202426.499405Z
 ```
 
+## Native clock-source transition follow-up: 2026-10-17
+
+Session `20261017T212856.886469Z` passes all three single-CPU correctness runs and
+two four-CPU AMD-Vi correctness runs. In the second four-CPU run, clock source
+changes from TSC to HPET during cycle 2 (the third cycle); all eight cycles,
+120 expected faults and teardown checks still pass. The comparator rejects the
+mixed-source timings, so the batch stops before completing the nine-run series.
+This is not an accepted performance baseline. The original test wait timeout did
+not recur in either completed SMP boot.
+
+The old runtime health check compared TSC with a later HPET sample as though
+both were simultaneous. A deterministic simulated vCPU pause reproduces a false
+fallback in that implementation. The corrected check brackets HPET with ordered
+TSC reads, retaining the 1 ms divergence threshold outside the whole interval.
+Regression, genuine leading/lagging TSC drift and profiling quarantine continue
+to select HPET. The historical log lacks a fallback reason, so the precise trigger
+in that boot cannot be established retrospectively. Future reports preserve
+`clock_reason` from `clock.tsc_status`, and comparison failures include the source
+transition, reason and run ID. Historical reports without that field still load.
+No mixed-source measurements are silently accepted or automatically retried.
+
+Host tests cover 10 ms pauses on either side of the reference instant, genuine
+drift in both directions, regression inside the bracket, and the previous clock
+and profiling fallback cases. The pause-before test fails with the uncorrected
+clock implementation and passes with this change. All 13 clock modes, ten
+reporter checks and eleven comparison checks pass. Isolated four-CPU AMD-Vi/TCG
+run `2758a4300c8640209f676aeefbe20138` passes eight cycles, 120 expected faults,
+owned-reservation restoration and image checks, with the new reason recorded.
+TCG verifies fallback mechanics; native confirmation of this correction still
+requires the explicit accepted reference command above.
+
 ## Observations: 2026-10-17
 
 These acceptance runs used Q35, 512 MiB, `-cpu max`, TCG and the indicated emulated

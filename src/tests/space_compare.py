@@ -31,7 +31,8 @@ def validate_native(report, cpus, iommu):
     if data.get('cycles') != 8 or data.get('fault_events') != (80 if cpus == 1 else 120):
         raise ValueError('incomplete native fault acceptance')
     if not data.get('clock_source_stable'):
-        raise ValueError('guest clock source changed during measurement; inspect the log')
+        raise ValueError(f"guest clock source changed during measurement: {data.get('clock_begin')} -> {data.get('clock_end')}; "
+                         f"TSC reason={data.get('clock_reason', 'unrecorded')}; run={report['run_id']}; inspect the log")
     for stats in data.get('distributions', {}).values():
         samples = stats.get('samples', [])
         if not samples or stats.get('count') != len(samples) or any(not isinstance(x, int) or x < 0 for x in samples):

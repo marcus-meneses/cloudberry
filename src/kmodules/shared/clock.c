@@ -39,10 +39,10 @@ static int hpet_ticks(uint64_t *out) {
 static int hpet_ns(uint64_t ticks,uint64_t *out) {return scale(ticks,state.info.hpet_period_fs,1000000,out);}
 static int now(uint64_t *out) {
     if (!state.initialized) return 0;
-    uint64_t ticks,elapsed=0;
+    uint64_t ticks,elapsed=0,*previous=NULL;
     if (state.info.source==CLOCK_TSC) {
         ticks=clock_cpu_ticks();
-        uint64_t *previous=&state.last_tsc;
+        previous=&state.last_tsc;
         if(state.smp_tsc) {size_t cpu=CALL(state.cpu_control,CPU_CURRENT,0,0).value;if(cpu>=state.cpu_count)return 0;previous=&state.cpu_last[cpu];}
         int profile_fault=state.cpu_control && CALL(state.cpu_control,CPU_PROFILE_CLOCK,UINT64_MAX,0).value;
         if (profile_fault || ticks<*previous || (state.smp_tsc && *previous && ticks==*previous)) {
@@ -63,11 +63,25 @@ static int now(uint64_t *out) {
     uint64_t value=state.base_ns+elapsed;
     if (value<state.last_ns) value=state.last_ns;
     if(state.smp_tsc && state.info.source==CLOCK_TSC && (value-state.health_ns>=100000000 || ++state.health_reads>=64)) {
+        /* HPET is sampled after ticks. A vCPU pause or MMIO exit between
+         * reads is measurement uncertainty, not clock drift. Bound its instant
+         * with ordered TSC reads and compare against the whole interval, using
+         * raw converted time rather than the shared monotonic clamp. */
         uint64_t reference,reference_elapsed;
         if(!hpet_ticks(&reference) || reference<state.hpet_anchor || !hpet_ns(reference-state.hpet_anchor,&reference_elapsed) || reference_elapsed>UINT64_MAX-state.base_ns)return 0;
+        uint64_t last=clock_cpu_ticks(),upper_elapsed=0;
         reference=state.base_ns+reference_elapsed;
-        uint64_t difference=reference>value?reference-value:value-reference;
-        if(difference>1000000) {profiling_clock(0);state.tsc_reason=TSC_REASON_DRIFT;state.info.flags|=CLOCK_TSC_UNSTABLE;state.info.source=CLOCK_HPET;value=reference<state.last_ns?state.last_ns:reference;}
+        uint32_t reason=TSC_REASON_NONE;
+        if(last<ticks)reason=TSC_REASON_REGRESSION;
+        else {
+            *previous=last;
+            if(last>=state.tsc_anchor && !scale(last-state.tsc_anchor,1000000000,state.info.tsc_hz,&upper_elapsed))return 0;
+            if(upper_elapsed>UINT64_MAX-state.base_ns)return 0;
+            uint64_t lower=state.base_ns+elapsed,upper=state.base_ns+upper_elapsed;
+            uint64_t difference=reference<lower?lower-reference:reference>upper?reference-upper:0;
+            if(difference>1000000)reason=TSC_REASON_DRIFT;
+        }
+        if(reason) {profiling_clock(0);state.tsc_reason=reason;state.info.flags|=CLOCK_TSC_UNSTABLE;state.info.source=CLOCK_HPET;value=reference<state.last_ns?state.last_ns:reference;}
         state.health_ns=value;state.health_reads=0;
     }
     state.last_ns=value;*out=value;return 1;

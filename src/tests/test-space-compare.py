@@ -71,7 +71,8 @@ class Comparison(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_native(report, 1, 'none')
         report = reports()['1cpu-none'][0];report['address_spaces']['clock_source_stable'] = False
-        with self.assertRaises(ValueError):
+        report['address_spaces']['clock_reason'] = 13
+        with self.assertRaisesRegex(ValueError, 'TSC reason=13; run='):
             validate_native(report, 1, 'none')
 
     def test_duplicate_missing_and_missing_metric(self):

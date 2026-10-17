@@ -80,6 +80,7 @@ def parse_spaces(text, cpus):
         require(key, 4)
         if groups[key][0] not in (1, 2):
             raise ValueError('missing clock source')
+    if 'clock_reason' in groups:require('clock_reason', 1)
     require('root_mode', 2)
     require('instrumentation', 4)
     vendor, flags, batch, samples = groups['instrumentation']
@@ -106,6 +107,7 @@ def parse_spaces(text, cpus):
         derived['remote_minus_inactive_protect_ns'] = distribution(
             [a-b for a, b in zip(groups[protection], groups['inactive_protect_ns'])])
     return dict(clock_begin=groups['clock_begin'], clock_end=groups['clock_end'],
+                clock_reason=groups.get('clock_reason', [None])[0],
                 clock_source_stable=groups['clock_begin'][0] == groups['clock_end'][0],
                 pge=bool(groups['root_mode'][0]), pcid=False,
                 cycles=8, fault_events=count*5, workers=workers,

@@ -316,7 +316,7 @@ test-clock:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
 	    tests/clock.c kmodules/shared/clock.c -o $(BUILD)/tests/src-clock
-	@for mode in tsc hpet enumerated stalled-enumerated no-rtc no-century shared-tsc shared-tsc-drift shared-tsc-profile-fault; do $(BUILD)/tests/src-clock $$mode || exit $$?; done
+	@for mode in tsc hpet enumerated stalled-enumerated no-rtc no-century shared-tsc shared-tsc-drift shared-tsc-profile-fault shared-tsc-pause-before shared-tsc-pause-after shared-tsc-lag shared-tsc-bracket-regression; do $(BUILD)/tests/src-clock $$mode || exit $$?; done
 
 test-clock-boot: test-mem-boot
 

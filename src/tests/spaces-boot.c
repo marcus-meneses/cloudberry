@@ -225,6 +225,8 @@ bool kernel_spaces_test(const struct kernel_surfaces *hub,struct boot_pages *pag
     samples("fault_events",&faults,1);uint64_t cycles=8;samples("cycles",&cycles,1);
     CHECK(teardown_profile(hub,pages) && !CALL(clock_info,&final,0,0).status);
     uint64_t source_end[]={final.source,final.flags,final.hpet_period_fs,final.tsc_hz};samples("clock_end",source_end,4);
+    struct tsc_diagnostics diagnostic;kernel_surface_call status=kernel_surface_find(hub,"clock.tsc_status");CHECK(status && !CALL(status,&diagnostic,0,0).status);
+    uint64_t reason=diagnostic.reason;samples("clock_reason",&reason,1);
     print("PASS address-space profiling: paired root controls, active/inactive protection, scheduling and 30 dense/sparse teardown trials\n");
     print("PASS address spaces: 8 cycles; exact RO/NX/unmapped faults, restored CPU-local gates, active SMP revocation, reuse, preemption and zero owned-page/table/stack leaks\n");return true;
 }

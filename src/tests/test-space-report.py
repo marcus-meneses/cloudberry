@@ -42,6 +42,12 @@ class Reports(unittest.TestCase):
         self.assertEqual(report['derived']['estimated_extra_ns_per_root'], -5)
         self.assertTrue(all(v == -10 for v in report['derived']['paired_root_roundtrip_extra_ns']['samples']))
 
+    def test_optional_clock_reason_retained_and_validated(self):
+        self.assertIsNone(parse_spaces(fixture(),1)['clock_reason'])
+        text=fixture()+'\nMEASURE spaces clock_reason 13'
+        self.assertEqual(parse_spaces(text,1)['clock_reason'],13)
+        with self.assertRaises(ValueError):parse_spaces(text+'\nMEASURE spaces clock_reason 8',1)
+
     def test_truncated_worker_rejected(self):
         text = fixture().replace('MEASURE spaces yield_roundtrip_ns', 'INCOMPLETE spaces yield_roundtrip_ns', 1)
         with self.assertRaises(ValueError):
