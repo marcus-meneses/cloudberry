@@ -2,9 +2,9 @@
 
 `mem.space_*` provides trusted kernel address-space facilities, backed by the
 kernel's page-table/CPU mechanisms. These surfaces are not application handles,
-syscalls, a process manager or a userland ABI. Handler/handle architecture remains
-pending discussion. There is no ring-3 execution, executable loader, user-copy
-boundary, demand paging, swap, COW, PCID or migration in this milestone.
+syscalls, a process manager or a userland ABI. The process module now supplies ring-3/static ELF lifetime and checked owned-page
+copying on top of these mechanisms. Application handles remain separate. There
+is no demand paging, swap, COW, PCID or migration in this milestone.
 
 ## Layout and ownership
 

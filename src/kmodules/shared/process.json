@@ -1,0 +1,45 @@
+{
+  "name": "process",
+  "exports": [
+    {
+      "name": "process.init",
+      "symbol": "process_surface_init"
+    },
+    {
+      "name": "process.load",
+      "symbol": "process_surface_load"
+    },
+    {
+      "name": "process.start",
+      "symbol": "process_surface_start"
+    },
+    {
+      "name": "process.run",
+      "symbol": "process_surface_run"
+    },
+    {
+      "name": "process.gate",
+      "symbol": "process_surface_gate"
+    },
+    {
+      "name": "process.fault",
+      "symbol": "process_surface_fault"
+    },
+    {
+      "name": "process.info",
+      "symbol": "process_surface_info"
+    },
+    {
+      "name": "process.reap",
+      "symbol": "process_surface_reap"
+    },
+    {
+      "name": "process.current",
+      "symbol": "process_surface_current"
+    },
+    {
+      "name": "process.copy",
+      "symbol": "process_surface_copy"
+    }
+  ]
+}

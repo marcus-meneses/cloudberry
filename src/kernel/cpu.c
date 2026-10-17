@@ -23,6 +23,9 @@ static int attach(struct cpu_record *cpu) {
     __asm__ volatile("mov %%cr0,%0;mov %%cr4,%1":"=r"(cr0),"=r"(cr4));
     __asm__ volatile("rdmsr":"=a"(lo),"=d"(hi):"c"(0xc0000080u));(void)hi;
     if((cr4&((1u<<12)|(1u<<17))) || !(lo&(1u<<11)))return 0;
+    /* User GS writes must not bypass the SWAPGS-owned CPU anchor. */
+    cr4&=~(UINT64_C(1)<<16);__asm__ volatile("mov %0,%%cr4"::"r"(cr4):"memory");
+    __asm__ volatile("wrmsr"::"c"(0xc0000102u),"a"(0),"d"(0):"memory");
     cr0|=UINT64_C(1)<<16;__asm__ volatile("mov %0,%%cr0"::"r"(cr0):"memory");
     cpu->self=at;
     __asm__ volatile("wrmsr"::"c"(0xc0000101u),"a"((uint32_t)at),"d"((uint32_t)(at>>32)):"memory");return 1;

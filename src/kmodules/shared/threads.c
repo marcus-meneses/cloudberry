@@ -3,15 +3,16 @@
 #include "mem-pages.h"
 #include "timer.h"
 #include "../../kernel/cpu.h"
-struct context {uintptr_t rsp,xstate;uint64_t space,owner;};
+struct context {uintptr_t rsp,xstate;uint64_t space,owner;uintptr_t entry_stack;};
 struct thread {struct thread *next;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;kernel_surface_call entry;uintptr_t args[6];};
 struct local {struct context dispatcher;struct thread *current;uint64_t dispatching;struct thread_timing timing;};
-static struct {const struct kernel_surfaces *hub;uintptr_t heap;size_t count;uint64_t serial;struct thread *head,*tail;struct local *cpus;struct xstate_info xstate;kernel_surface_call fp_init,fp_save,fp_restore,aligned,cpu,alloc,free,stack_alloc,stack_free,arm,now,space_pin,space_switch;} state;
+static struct {const struct kernel_surfaces *hub;uintptr_t heap;size_t count;uint64_t serial;struct thread *head,*tail;struct local *cpus;struct xstate_info xstate;kernel_surface_call fp_init,fp_save,fp_restore,aligned,cpu,alloc,free,stack_alloc,stack_free,arm,now,space_pin,space_switch,user_stack;} state;
 extern void threads_switch(struct context *,const struct context *) __attribute__((visibility("hidden")));
 static struct kernel_surface_result call(kernel_surface_call fn,uintptr_t a,uintptr_t b,uintptr_t c) {return fn(a,b,c,0,0,0);}
 static void switch_context(struct context *from,const struct context *to) {
     if(call(state.fp_save,from->xstate,state.xstate.bytes,0).status || call(state.fp_restore,to->xstate,state.xstate.bytes,0).status)__asm__ volatile("ud2");
     if(from->space!=to->space && call(state.space_switch,to->space,to->owner,0).status)__asm__ volatile("ud2");
+    if(call(state.user_stack,to->entry_stack,0,0).status)__asm__ volatile("ud2");
     threads_switch(from,to);
 }
 static size_t current_cpu(void) {return call(state.cpu,CPU_CURRENT,0,0).value;}
@@ -42,6 +43,8 @@ struct kernel_surface_result threads_surface_init(MODULE_ARGS) {
     const struct kernel_surfaces *hub=(const void *)a;if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b || !c || c>SIZE_MAX/sizeof(struct local)) return module_result(0,0);
     state.cpu=kernel_surface_find_version(hub,"cpu.control",1,0);state.alloc=kernel_surface_find_version(hub,"mem.calloc",1,0);state.free=kernel_surface_find_version(hub,"mem.free",1,0);
     state.stack_alloc=kernel_surface_find_version(hub,"mem.stack_alloc",1,0);state.stack_free=kernel_surface_find_version(hub,"mem.stack_free",1,0);state.arm=kernel_surface_find_version(hub,"timer.arm",1,0);state.now=kernel_surface_find_version(hub,"clock.now_ns",1,0);
+    state.user_stack=kernel_surface_find_version(hub,"inthandle.user_stack",1,0);
+    if(!state.user_stack)return module_result(0,0);
     state.space_pin=kernel_surface_find_version(hub,"mem.space_pin",1,0);state.space_switch=kernel_surface_find_version(hub,"mem.space_switch",1,0);
     if(!state.space_pin || !state.space_switch || !state.cpu || !state.alloc || !state.free || !state.stack_alloc || !state.stack_free || !state.arm || !state.now) return module_result(0,0);
     kernel_surface_call info=kernel_surface_find(hub,"xstate.info");state.fp_init=kernel_surface_find(hub,"xstate.init");state.fp_save=kernel_surface_find(hub,"xstate.save");state.fp_restore=kernel_surface_find(hub,"xstate.restore");state.aligned=kernel_surface_find(hub,"mem.aligned_alloc");
@@ -171,4 +174,11 @@ struct kernel_surface_result threads_surface_tick(MODULE_ARGS) {
         suspend(THREAD_RUNNABLE,0);
     }
     return module_result(1,1);
+}
+
+struct kernel_surface_result threads_surface_entry_stack(MODULE_ARGS) {
+    MODULE_UNUSED();uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));
+    if((flags&512) || !state.hub)return module_result(0,0);
+    struct thread *t=state.cpus[current_cpu()].current;if(!t)return module_result(0,0);
+    t->context.entry_stack=a;return call(state.user_stack,a,0,0);
 }

@@ -13,16 +13,17 @@ resource handlers, user processes or isolation boundaries. Existing method calls
 stay synchronous; a separate threads API explicitly creates saved contexts.
 Private lower-half address spaces can be attached to kernel threads through
 request ABI2, with ownership, leases, context-switch root selection and targeted
-TLB invalidation. This is infrastructure; ring-3 execution and application
-interfaces remain pending. See [mem spaces](kmodules/shared/mem-spaces.md).
+TLB invalidation. [Protected processes](kmodules/shared/process.md) now load static
+ELF executables from ext4, enter ring 3 and contain user faults. Application
+handle transport and handler execution follow. See [mem spaces](kmodules/shared/mem-spaces.md).
 The [application handle contract](interfaces/README.md) now defines the C boundary
 and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
 publishing `/@keyboard`. Headers are compile-tested in C/C++20; application
-runtime, handler loading and USB HID implementation are subsequent work.
+handle runtime, handler loading and USB HID implementation are subsequent work.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
-Application-facing handles/handlers, userland and HID class drivers do not exist in this rewrite yet. The xHCI transport supplies root/downstream
+Application-facing handles/handlers and HID class drivers remain pending; the protected native executable foundation is implemented. The xHCI transport supplies root/downstream
 slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe and AHCI are kernel-only block backends. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
@@ -272,6 +273,7 @@ no formatting or migration. Test fixtures never enter the candidate image.
 ```sh
 make -C src test-portability
 make -C src test-threads-state test-threads-smp
+make -C src test-process-elf test-process-boot
 make -C src BUILD=../bin/tests/isolated test-clock test-tsc-validation test-irq test-timer test-apic test-pages
 make -C src test-inthandle-faults
 make -C src test-ext4-write test-ext4-runtime
@@ -469,6 +471,12 @@ src/
 │   │   ├── sata.h
 │   │   ├── sata.json
 │   │   ├── sata.md
+│   │   ├── process-elf.h
+│   │   ├── process-entry.S
+│   │   ├── process.c
+│   │   ├── process.h
+│   │   ├── process.json
+│   │   ├── process.md
 │   │   ├── scheduler.c
 │   │   ├── scheduler.h
 │   │   ├── scheduler.json
@@ -524,7 +532,11 @@ src/
 │   └── README.md
 ├── maps/
 │   └── startup.md
+├── sdk/
+│   └── application.ld
 ├── tests/
+│   ├── apps/
+│   │   └── process.c
 │   ├── README.md
 │   ├── acpi-boot.c
 │   ├── acpi-fixture.py
@@ -580,6 +592,9 @@ src/
 │   ├── native-check.py
 │   ├── nvme-boot.c
 │   ├── pci.c
+│   ├── process-boot.c
+│   ├── process-elf.c
+│   ├── probe-process.c
 │   ├── probe-block.c
 │   ├── probe-hubs.c
 │   ├── probe-storage.c

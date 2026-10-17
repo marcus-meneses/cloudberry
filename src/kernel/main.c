@@ -89,6 +89,11 @@ __attribute__((noreturn)) void kmain(void) {
     kernel_surface_call bootstrap_start=kernel_surface_find(kmodule_hub,"bootstrap.start");
     if(!bootstrap_start || bootstrap_start(0,0,0,0,0,0).status){debug("Cloudberry v2: bootstrap startup failed\n");halt();}
 #endif
+#ifdef BOOT_PROCESS_TEST
+    extern _Bool kernel_process_test(const struct kernel_surfaces *);
+    if(!kernel_process_test(kmodule_hub)){debug("Cloudberry v2: FAIL process test\n");halt();}
+    debug("Cloudberry v2: PASS process test\n");
+#endif
 #ifdef BOOT_BOOTSTRAP_TEST
     extern _Bool kernel_bootstrap_test(const struct kernel_surfaces *);
     if(!kernel_bootstrap_test(kmodule_hub)){debug("Cloudberry v2: FAIL bootstrap test\n");halt();}

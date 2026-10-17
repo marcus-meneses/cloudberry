@@ -48,6 +48,14 @@
     {
       "name": "inthandle.cpu_init",
       "symbol": "inthandle_surface_cpu_init"
+    },
+    {
+      "name": "inthandle.user_stack",
+      "symbol": "inthandle_surface_user_stack"
+    },
+    {
+      "name": "inthandle.user_fault",
+      "symbol": "inthandle_surface_user_fault"
     }
   ]
 }

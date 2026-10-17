@@ -500,6 +500,8 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("smp.prepare",calls[11]((uintptr_t)hub,heap,(uintptr_t)mp_request.response,0,0,0));
     START("timer.init",calls[9]((uintptr_t)hub,heap,mp_request.response->cpu_count,0,0,0));
     START("threads.init",calls[12]((uintptr_t)hub,heap,mp_request.response->cpu_count,0,0,0));
+    kernel_surface_call process=kernel_surface_find(hub,"process.init");if(!process)return startup_failure("process.init","missing");
+    START("process.init",process((uintptr_t)hub,heap,0,0,0,0));
     START("event.init",calls[10]((uintptr_t)hub,0,0,0,0,0));
     START("smp.start",calls[13](0,0,0,0,0,0));
     START("irq.init",calls[14]((uintptr_t)hub,heap,0,0,0,0));

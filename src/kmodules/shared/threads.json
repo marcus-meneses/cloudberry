@@ -20,6 +20,10 @@
     {
       "name": "threads.tick",
       "symbol": "threads_surface_tick"
+    },
+    {
+      "name": "threads.entry_stack",
+      "symbol": "threads_surface_entry_stack"
     }
   ]
 }

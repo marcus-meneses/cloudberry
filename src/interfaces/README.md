@@ -2,8 +2,8 @@
 
 This is a contract milestone. The headers specify the C ABI and compile-time
 interfaces; system-library function declarations have no runtime implementation
-yet. The current kernel still executes trusted kernel threads. These records do
-not expose the kmodule hub to applications or claim completed process isolation.
+yet. The kernel now supports initial protected static ELF processes; these records
+do not expose the kmodule hub, and their handle runtime is the next milestone.
 
 ## Identity, discovery and reflection
 
@@ -149,9 +149,8 @@ process using an OS I/O handle and its own memory handle, not a ring-0 kmodule
 given the public hub. The existing format3 `.kmod`/`.driver` loader loads trusted
 kmodules; it cannot silently substitute for a handler executable loader.
 
-Before that executable can run, implement minimal ring-3 entry/return and fault
-containment, process-owned address spaces/stacks/lifetime, a native executable
-loader and a copying/admission gate. Bridge only the scoped USB HID facilities
+Initial ring-3 entry/return, fault containment, owned process lifetime and static
+ext4 ELF loading are implemented in process. The copying/admission gate follows. Bridge only the scoped USB HID facilities
 needed by this provider through kernel I/O mediation. Then publish `/@keyboard`
 and verify a second isolated client can acquire only its manifest-authorized
 read/state operations. No general app installer, graphical interface, arbitrary

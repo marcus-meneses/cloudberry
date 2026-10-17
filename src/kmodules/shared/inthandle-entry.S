@@ -32,6 +32,10 @@ inthandle_vector_\number:
 .endr
 
 inthandle_common:
+    testb $3,24(%rsp)
+    jz 8f
+    swapgs
+8:
     pushq %rax
     pushq %rbx
     pushq %rcx
@@ -69,6 +73,12 @@ inthandle_common:
     popq %rbx
     popq %rax
     addq $16, %rsp
+    testb $3,8(%rsp)
+    jz 9f
+    andq $0x250fd7,16(%rsp)
+    orq $0x202,16(%rsp)
+    swapgs
+9:
     iretq
 .section .rodata
 .balign 4

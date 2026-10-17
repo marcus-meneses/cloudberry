@@ -11,7 +11,7 @@ enum inthandle_delivery { INTHANDLE_CPU_ENTRY=0, INTHANDLE_DEFERRED=1 };
 /* init establishes early BSP tables; cpu_init(storage,three_IST_tops) installs
  * CPU-local GDT/TSS/IDT (a=0 queries storage size). SMP supplies guarded stacks.
  * Timer/event enable owned local APIC IRQ delivery. init owns dedicated
- * NMI/double-fault/machine-check stacks. Exceptions <32 dump and halt.
+ * NMI/double-fault/machine-check stacks. CPL0 exceptions dump and halt; process-owned CPL3 faults may be contained.
  * bind(vector,surface_name,context): vectors32..255 only; NULL name unbinds.
  * The method is resolved from the hub. Callback must perform
  * its own controller acknowledgement; timer owns local APIC timer EOI.
@@ -24,5 +24,7 @@ enum inthandle_delivery { INTHANDLE_CPU_ENTRY=0, INTHANDLE_DEFERRED=1 };
  * cmos_read(index): preserves selector/NMI mask; register C is rejected.
  * nmi_mask(0/1): set mask and return previous value; 2 queries without change.
  * init establishes masked NMI before IDT activation, then enables it. */
+/* user_stack(top): IF=0 CPU-local TSS RSP0; user_fault(surface_name): one
+ * boot-pinned synchronous CPL3 fault sink. NMI/DF/MCE remain fatal. */
 void inthandle_dispatch(struct inthandle_frame *frame);
 #endif

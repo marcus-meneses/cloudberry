@@ -15,11 +15,12 @@ struct __attribute__((packed)) tss64 {
 struct binding {kernel_surface_call call;uintptr_t context,owner;uint64_t sequence;};
 static struct {
     _Alignas(16) struct idt_entry idt[256];
-    uint64_t gdt[5];
+    uint64_t gdt[7];
     struct tss64 tss;
     struct binding callbacks[256];
     uint64_t counts[256];
     _Alignas(16) unsigned char emergency[3][8192];
+    kernel_surface_call user_fault;
     uint8_t cmos_selector;
     int initialized;
 } state;
@@ -77,6 +78,9 @@ void inthandle_dispatch(struct inthandle_frame *frame) {
     }
     __atomic_add_fetch(&state.counts[frame->vector],1,__ATOMIC_RELAXED);
     struct binding callback=binding_read(frame->vector);
+    if(frame->vector<32 && (frame->cs&3)==3 && frame->vector!=2 && frame->vector!=8 && frame->vector!=18 && state.user_fault) {
+        if(!state.user_fault((uintptr_t)frame,0,0,0,0,0).status)return;
+    }
     if (frame->vector < 32 || !callback.call) fatal(frame);
     struct kernel_surface_result r=callback.call((uintptr_t)frame,callback.context,0,0,0,0);
     if (r.status) fatal(frame);
@@ -95,6 +99,8 @@ struct kernel_surface_result inthandle_surface_init(MODULE_ARGS) {
     cmos_select(0x80); /* NMI masked until the owned IDT/IST is active. */
     state.gdt[1] = UINT64_C(0x00af9a000000ffff);
     state.gdt[2] = UINT64_C(0x00cf92000000ffff);
+    state.gdt[5] = UINT64_C(0x00cff2000000ffff); /* user data, selector 0x2b */
+    state.gdt[6] = UINT64_C(0x00affa000000ffff); /* user code, selector 0x33 */
     uint64_t base = (uintptr_t)&state.tss, limit = sizeof(state.tss)-1;
     state.tss.iomap = sizeof(state.tss);
     for (unsigned i=0;i<3;++i) state.tss.ist[i]=(uintptr_t)&state.emergency[i][8192];
@@ -104,7 +110,7 @@ struct kernel_surface_result inthandle_surface_init(MODULE_ARGS) {
     for (unsigned i=0;i<256;++i) {
         uintptr_t entry = (uintptr_t)inthandle_vectors + inthandle_vectors[i];
         state.idt[i] = (struct idt_entry){ .low=entry, .selector=8,
-            .ist=i==2?1:i==8?2:i==18?3:0, .flags=0x8e, .middle=entry>>16, .high=entry>>32 };
+            .ist=i==2?1:i==8?2:i==18?3:0, .flags=i==128?0xee:0x8e, .middle=entry>>16, .high=entry>>32 };
     }
     struct descriptor_pointer gdt={sizeof(state.gdt)-1,(uintptr_t)state.gdt};
     struct descriptor_pointer idt={sizeof(state.idt)-1,(uintptr_t)state.idt};
@@ -179,12 +185,13 @@ struct kernel_surface_result inthandle_surface_nmi_mask(MODULE_ARGS) {
  * three guarded IST tops. The IDT template is immutable after BSP init. */
 struct kernel_surface_result inthandle_surface_cpu_init(MODULE_ARGS) {
     MODULE_UNUSED();
-    struct cpu_tables { _Alignas(16) struct idt_entry idt[256];uint64_t gdt[5];struct tss64 tss; };
+    struct cpu_tables { _Alignas(16) struct idt_entry idt[256];uint64_t gdt[7];struct tss64 tss; };
     if(!a) return module_result(sizeof(struct cpu_tables),state.initialized);
     if(!state.initialized || !b || (a&15)) return module_result(0,0);
     struct cpu_tables *cpu=(void *)a;const uintptr_t *tops=(const void *)b;
     for(unsigned i=0;i<256;++i)cpu->idt[i]=state.idt[i];
     cpu->gdt[1]=UINT64_C(0x00af9a000000ffff);cpu->gdt[2]=UINT64_C(0x00cf92000000ffff);
+    cpu->gdt[5]=UINT64_C(0x00cff2000000ffff);cpu->gdt[6]=UINT64_C(0x00affa000000ffff);
     uint64_t base=(uintptr_t)&cpu->tss,limit=sizeof(cpu->tss)-1;
     cpu->tss.iomap=sizeof(cpu->tss);
     for(unsigned i=0;i<3;++i) {if(!tops[i])return module_result(0,0);cpu->tss.ist[i]=tops[i];}
@@ -192,4 +199,23 @@ struct kernel_surface_result inthandle_surface_cpu_init(MODULE_ARGS) {
     cpu->gdt[4]=base>>32;
     struct descriptor_pointer gdt={sizeof(cpu->gdt)-1,(uintptr_t)cpu->gdt},idt={sizeof(cpu->idt)-1,(uintptr_t)cpu->idt};
     inthandle_activate(&gdt,&idt);return module_result(1,1);
+}
+
+/* Kernel-only facilities. RSP0 is CPU-local and set with IF clear before a
+ * saved user context is resumed. No untrusted selector/stack is accepted here. */
+struct kernel_surface_result inthandle_surface_user_stack(MODULE_ARGS) {
+    MODULE_UNUSED();uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));
+    if(flags&512)return module_result(0,0);
+    struct descriptor_pointer gdt;__asm__ volatile("sgdt %0":"=m"(gdt));
+    const uint64_t *entries=(const void *)gdt.address;
+    uint64_t low=entries[3],high=entries[4];
+    uintptr_t base=((low>>16)&0xffffff)|((low>>32)&UINT64_C(0xff000000))|(high<<32);
+    ((struct tss64 *)base)->rsp[0]=a;return module_result(1,1);
+}
+struct kernel_surface_result inthandle_surface_user_fault(MODULE_ARGS) {
+    MODULE_UNUSED();if(!a || state.user_fault)return module_result(0,0);
+    const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
+    const struct kernel_hub_owner *owner=kernel_hub_owner(hub,kernel_surface_owner(hub,(const char *)a));
+    if(!owner || !(owner->flags&HUB_OWNER_BOOT_PINNED))return module_result(0,0);
+    state.user_fault=kernel_surface_find_version(hub,(const char *)a,1,0);return module_result(1,state.user_fault!=NULL);
 }

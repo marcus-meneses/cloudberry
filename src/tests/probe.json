@@ -84,6 +84,10 @@
     {
       "name": "probe.space_fault_config",
       "symbol": "probe_space_fault_config"
+    },
+    {
+      "name": "probe.process",
+      "symbol": "probe_process_call"
     }
   ]
 }

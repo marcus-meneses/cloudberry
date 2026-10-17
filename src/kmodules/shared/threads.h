@@ -23,6 +23,9 @@ struct thread_info {uint64_t id,process_id;uint32_t cpu,state;uint64_t switches;
  * tick returns DEFERRED when a running thread cannot switch inside a critical
  * section; timer must rearm a short CPU-local retry without foreground calls.
  * reap only EXITED; executing stacks are never freed. Owner 0 is kernel work. */
+/* entry_stack(top): trusted current-thread RSP0 binding, with IF clear.
+ * Scheduler restores it with the saved context; zero on kernel dispatchers. */
+struct kernel_surface_result threads_surface_entry_stack(MODULE_ARGS);
 struct kernel_surface_result threads_surface_init(MODULE_ARGS);
 struct kernel_surface_result threads_surface_create(MODULE_ARGS);
 struct kernel_surface_result threads_surface_run(MODULE_ARGS);

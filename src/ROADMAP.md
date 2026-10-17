@@ -294,10 +294,12 @@ The initial application-facing C contract is defined in interfaces/README.md and
 compile-tested headers. The first loaded driver/handler will be a privileged
 keyboard process publishing /@keyboard. It follows foundational kmodules, uses
 scoped OS I/O and memory handles and has no direct application access to the hub.
-Next implementation sequence: minimal ring-3/process lifetime and executable
-loading, copied/admitted handle transport, kernel I/O mediation for USB HID, then
-keyboard publication and an isolated authorized client. Runtime user/kernel
-separation, manifest enforcement and actual keyboard HID execution remain future
+Protected process milestone implemented: static ext4 ELF loading, ring-3 entry,
+CPU-local kernel entry stacks/GS transitions, preemption, user fault containment
+and explicit quiescent cleanup. Isolated one/four-CPU boots and malformed-ELF
+UBSan checks pass; native user-mode acceptance remains open. Next: copied/admitted handle transport,
+kernel I/O mediation for USB HID, then
+keyboard publication and an isolated authorized client. Manifest enforcement and actual keyboard HID execution remain future
 work; this contract milestone does not claim they are implemented.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
