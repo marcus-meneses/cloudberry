@@ -532,6 +532,13 @@ $(BUILD)/kmodules/xstate.elf: $(BUILD)/kmodules/xstate-pic.o $(BUILD)/kmodules/x
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
 .PHONY: test-portability test-cpu-topology test-cpu-tsc test-cpu-ordering test-cpu-profile _test-portability
+.PHONY: test-interfaces
+test-interfaces:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/interfaces.c -o $(BUILD)/tests/src-interfaces-c
+	$(BUILD)/tests/src-interfaces-c
+	g++ -std=c++20 -O2 -Wall -Wextra -Werror -fsanitize=undefined -x c++ tests/interfaces.c -o $(BUILD)/tests/src-interfaces-cpp
+	$(BUILD)/tests/src-interfaces-cpp
 test-cpu-profile:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/cpu-profile.c -o $(BUILD)/tests/src-cpu-profile

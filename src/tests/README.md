@@ -93,6 +93,10 @@ records fail reporting. Native comparisons warn if the reference used different
 or unrecorded profiling sources. Coverage remains managed BSP instrumentation;
 raw CLI fault guards and unrelated AP intervals are not included.
 
+`make -C src BUILD=../bin/tests/isolated test-interfaces` checks the proposed
+handle and `/@keyboard` C/C++20 layouts, framing bounds and structured key/Unicode
+validation. These are contract tests, not runtime permission, HID or userland tests.
+
 Runtime module initialization and startup now both reject discovery, captured
 stubs, callback leases and table publication. `test-hub` checks concurrent gate
 rejection; `test-module-disk-boot` checks ABI2 private lookup, hidden hooks,

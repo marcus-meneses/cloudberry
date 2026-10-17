@@ -290,10 +290,15 @@ Bootstrap storage selection and selected future disk-module loading are implemen
 The five requested storage/hub priorities are closed.
 
 Activation hardening and private address-space infrastructure are implemented.
-Discuss the handler/handle architecture with the user before continuing into
-application execution or invocation boundaries. User/kernel privilege separation,
-safe boundary copying, process lifecycle and handle authorization remain future
-work; no independent application syscall interface has been introduced.
+The initial application-facing C contract is defined in interfaces/README.md and
+compile-tested headers. The first loaded driver/handler will be a privileged
+keyboard process publishing /@keyboard. It follows foundational kmodules, uses
+scoped OS I/O and memory handles and has no direct application access to the hub.
+Next implementation sequence: minimal ring-3/process lifetime and executable
+loading, copied/admitted handle transport, kernel I/O mediation for USB HID, then
+keyboard publication and an isolated authorized client. Runtime user/kernel
+separation, manifest enforcement and actual keyboard HID execution remain future
+work; this contract milestone does not claim they are implemented.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 
@@ -343,6 +348,10 @@ Follow-up requested after that acceptance:
    method/name, lock domain, caller PC, clock source/epoch and address-space identity
    for wait/hold/IRQ peaks. Focused host and guest validation is recorded in tests;
    fresh native performance acceptance requires the existing KVM collection script.
+3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
+   contract under interfaces, plus handlers/keyboard's loading/authorization plan.
+   /@keyboard is the first handler milestone; C++ object layouts stay out of the
+   ABI. Keyboard runtime implementation follows the process/transport foundation.
 
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
 qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI

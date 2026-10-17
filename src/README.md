@@ -15,6 +15,10 @@ Private lower-half address spaces can be attached to kernel threads through
 request ABI2, with ownership, leases, context-switch root selection and targeted
 TLB invalidation. This is infrastructure; ring-3 execution and application
 interfaces remain pending. See [mem spaces](kmodules/shared/mem-spaces.md).
+The [application handle contract](interfaces/README.md) now defines the C boundary
+and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
+publishing `/@keyboard`. Headers are compile-tested in C/C++20; application
+runtime, handler loading and USB HID implementation are subsequent work.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
@@ -320,6 +324,13 @@ src/
 │   ├── surfaces.h
 │   ├── spaces.c
 │   └── spaces.h
+├── handlers/
+│   └── keyboard/
+│       └── README.md
+├── interfaces/
+│   ├── README.md
+│   ├── handle.h
+│   └── keyboard.h
 ├── kmodules/
 │   ├── amd/
 │   │   ├── cpu-amd.c
@@ -531,6 +542,7 @@ src/
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
 │   ├── cpu-profile.c
+│   ├── interfaces.c
 │   ├── future.c / future.json / future-fail.c / future-fail.json (disk-only fixtures)
 │   ├── events-boot.c
 │   ├── ext4-runtime.c
