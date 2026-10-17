@@ -50,15 +50,15 @@ const struct config_value *value = ref ? (const void *)ref->address : NULL;
 
 Parsing and allocation finish before `hub.publish_tables(refs,count)` publishes
 the batch. This kernel mechanism validates capacity, descriptors and all name
-collisions under the CPU lock before changing the hub. Existing single-reference
+collisions under the nonblocking hub writer token before publishing any record. Existing single-reference
 publication remains available. Failed parsing/allocation/publication frees all
 temporary owned storage and leaves no partial configuration references.
 
 Published descriptors and data live until reboot. Source text is never retained.
 They are immutable by trusted-kernel contract; heap pages are not separately
-write-protected and this is not a userland isolation boundary. Reacquire hub
-reference pointers after subsequent export registration moves the reference area;
-descriptor/data pointers stay stable. The current schema retains five 56-byte
+write-protected and this is not a userland isolation boundary. Hub reference records
+and descriptor/data pointers remain stable across subsequent export registration.
+Configuration references identify the config provider, pinning its backing until reboot. The current schema retains five 56-byte
 item slots plus string backing (21 bytes for the default directory), excluding
 allocator metadata. Temporary publication references are freed after init.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject runtime absolute addresses in format2 module code/data before linking."""
+"""Reject runtime absolute addresses in format3 module code/data before linking."""
 import pathlib
 import struct
 import sys

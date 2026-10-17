@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check ACPI's private PIE fixups without extending the format2 loader ABI."""
+"""Check ACPI's private PIE fixups without extending the format3 loader ABI."""
 import pathlib
 import struct
 import sys
@@ -22,7 +22,7 @@ def validate(elf, image):
         name, _, _, _, value, _ = struct.unpack_from('<IBBHQQ', elf, offset)
         symbols[strings[name:].split(b'\0', 1)[0].decode()] = value
     magic, version, header, size, memory, writable, exports, count, entry = struct.unpack_from('<QIIQQQQII', image)
-    assert magic == 0x32444f4d4b424343 and version == 2 and header == 88 and entry == 48
+    assert magic == 0x32444f4d4b424343 and version == 3 and header == 88 and entry == 48
     assert size == len(image) and memory >= size and memory % 4096 == 0
     assert writable == symbols['writable_start'] and memory == symbols['memory_end']
     rela = named['.rela.dyn']

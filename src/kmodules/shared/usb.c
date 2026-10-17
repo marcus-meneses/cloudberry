@@ -303,7 +303,7 @@ struct kernel_surface_result usb_surface_init(MODULE_ARGS) {
     if(state.hub)return module_result(1,state.hub==hub && state.heap==b);
     if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || !b)return failure();
     /* Resolve in place: large automatic pointer arrays can be folded into
-     * absolute static initializers, which a format2 PIC image cannot relocate. */
+     * absolute static initializers, which a format3 PIC image cannot relocate. */
 #define RESOLVE(field,name) do {state.field=kernel_surface_find_version(hub,name,1,0);if(!state.field)return failure();} while(0)
     RESOLVE(cpu,"cpu.control");
     RESOLVE(alloc,"mem.calloc");
@@ -340,7 +340,7 @@ struct kernel_surface_result usb_surface_init(MODULE_ARGS) {
         host->hardware=i;host->next=state.hosts;state.hosts=host;
     }
     state.table=(struct usb_table){.magic=USB_TABLE_MAGIC,.major=1,.record_bytes=sizeof(struct usb_device)};
-    struct kernel_hub_table table={.name=USB_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
+    struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"usb.init"),.name=USB_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
     if(CALL(publish,&table,0,0).status)goto fail;
     state.hub=hub;return module_result(1,1);
 fail:

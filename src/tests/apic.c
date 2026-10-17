@@ -26,7 +26,7 @@ static struct kernel_surface_result read_mmio(MODULE_ARGS) {MODULE_UNUSED();asse
 static struct kernel_surface_result write_mmio(MODULE_ARGS) {MODULE_UNUSED();assert(a==1 && c==4);if (!b) io_index=d;else {assert(b==16);io[io_index]=d;}return module_result(1,1);}
 int main(int argc,char **argv) {
     mode=argc>1 && !strcmp(argv[1],"x2apic")?APIC_X2APIC:APIC_XAPIC;
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=5,.header_bytes=offsetof(__typeof__(fixture),methods),.tables_offset=offsetof(__typeof__(fixture),table),.table_count=1};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=5,.header_bytes=offsetof(__typeof__(fixture),methods),.tables_offset=offsetof(__typeof__(fixture),table),.table_count=1};
     const char *names[]={"inthandle.claim","inthandle.release","mmio.map","mmio.read","mmio.write"};kernel_surface_call calls[]={claim,release,map,read_mmio,write_mmio};
     for (unsigned i=0;i<5;++i) {strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].call=calls[i];fixture.methods[i].major=1;}
     regions.table=(struct mmio_table){.magic=MMIO_TABLE_MAGIC,.major=1,.entry_bytes=sizeof(struct mmio_region),.count=2};

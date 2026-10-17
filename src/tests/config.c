@@ -23,7 +23,7 @@ static void reset(void){
 static struct kernel_surface_result parse(const char *text,size_t n){return config_surface_init((uintptr_t)&fixture.hub,1,(uintptr_t)text,n,0,0);}
 static const struct config_value *get(const char *key){const struct kernel_hub_table *t=kernel_hub_find_table(&fixture.hub,key);assert(t);return (const void *)t->address;}
 int main(void){
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=4,.header_bytes=offsetof(__typeof__(fixture),methods),.tables_offset=offsetof(__typeof__(fixture),tables),.table_count=0,.table_capacity=8};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=4,.header_bytes=offsetof(__typeof__(fixture),methods),.tables_offset=offsetof(__typeof__(fixture),tables),.table_count=0,.table_capacity=8};
     const char *names[]={"cpu.control","mem.calloc","mem.free","hub.publish_tables"};kernel_surface_call calls[]={cpu,allocate,release,publish};
     for(unsigned i=0;i<4;++i){strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].major=1;fixture.methods[i].call=calls[i];}
     char input[]=" # comment\r\nversion = 1\r\nboot.show_inventory=false\ndrivers.directory=/syst\xc3\xa9m\nstorage.timeout_ms=4294967295\ndrivers.partition_guid=550E8400-e29b-41d4-a716-446655440000";

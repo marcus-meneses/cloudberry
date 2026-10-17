@@ -61,7 +61,7 @@ static struct kernel_surface_result refine(MODULE_ARGS) {
 static void setup(unsigned test_mode) {
     memset(records,0,sizeof(records));memset(&fixture,0,sizeof(fixture));
     state=(__typeof__(state)){.prepared=1,.started=1,.count=4,.startup=records,.hub=&fixture.hub,.control=control,.sample=sample,.now=now,.heap=1};
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=6,.header_bytes=offsetof(__typeof__(fixture),methods)};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=6,.header_bytes=offsetof(__typeof__(fixture),methods)};
     const char *names[]={"clock.info","clock.shared","clock.tsc_status","clock.smp_tsc","cpu.ticks","clock.refine"};
     kernel_surface_call calls[]={info,shared,diagnostics,enable,ticks,refine};
     for(unsigned i=0;i<6;++i) {strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].call=calls[i];fixture.methods[i].major=1;}

@@ -1,4 +1,4 @@
-# Startup memory ownership (x86-64, hub ABI 2.0)
+# Startup memory ownership (x86-64, hub ABI 3.0)
 
 Limine supplies four-level paging, its initial stack, a physical memory map,
 HHDM, modules, framebuffer, physical RSDP and an MP response. Original kernel/modules, bootloader
@@ -11,8 +11,13 @@ may supply new boot pages; no fixed physical address is assumed.
 | Initial stack and responses | Limine addresses | Retained bootloader memory |
 | Source module images | Limine HHDM addresses | Retained executable/modules memory |
 | Loaded kmodules | Sequential from `0xffffffffa0000000` | Exact reserved pages; RX code and RW/NX data/BSS; guard page between images |
-| Kmodule hub | `0xffffffffa1000000` | Four contiguous reserved pages (16384 bytes), RO/NX |
-| Kernel mediation stubs | `0xffffffffa2000000` | Three contiguous reserved pages (12288 bytes), RX |
+| Hub header | `0xffffffffa1000000` | One retained page, RO/NX |
+| Hub methods | `0xffff900000000000` | Page-backed on demand, RO/NX |
+| Hub table references | `0xffff900001000000` | Page-backed on demand, RO/NX |
+| Hub providers | `0xffff900002000000` | Page-backed on demand, RO/NX |
+| Private invocation metadata | `0xffff900003000000` | Read-only primary mapping; kernel writes through private alias |
+| Kernel mediation stubs | `0xffff900004000000` | Page-backed on demand, RX |
+| Private array/stub aliases | Each primary array address + `0x10000000000` | Same physical pages, RW/NX; kernel construction only |
 | Page tables and reservation chunks | HHDM + physical | Reserved usable pages |
 | Managed stacks | `0xffffa00000000000` to `0xffffb00000000000` | mem-owned RW/NX body, unmapped guard at either end |
 | Heap contexts and backing | HHDM + physical | Explicit reservations; backing grows on demand |
@@ -45,19 +50,26 @@ Growth is still physically contiguous per added region and ultimately bounded by
 available suitable RAM. Free returns blocks to the owning heap; it does not yet
 release those backing pages to other owners.
 
-Hub ABI2 stores only 48-byte method records (name, mediated entry, method version)
-and 64-byte table references, sharing the contiguous hub allocation dynamically. Argument definitions
-remain in headers. Registering exports moves the table-reference area within the
-hub, so clients must reacquire record pointers after registration; callable entry
-addresses and table backing addresses remain stable. Current production without an IOMMU backend has 240
-methods and sixteen table references, occupying 12,616 bytes (77.00%) of the four-page
-16 KiB hub. With sixteen table references, up to 318 methods fit. Mediation backing
-is sized from method capacity and occupies three pages (12 KiB); current stubs
-use 7,680 bytes (62.50%). An optional selected IOMMU backend adds seven methods:
-247 methods, 12,952 hub bytes (79.05%) and 7,904 stub bytes (64.32%). page_bytes describes the hub extent. Dynamic growth is not
-implemented. Capacity checks fail cleanly rather than overrunning this extent.
+Hub ABI3 separates stable method, table-reference and provider arrays from the
+one-page header. Individual physical pages are mapped as those arrays, private
+invocation metadata and RX mediation stubs grow. Each has a disjoint 16 MiB
+virtual reservation; this consumes no corresponding physical RAM upfront. Records
+are 56/72/96 bytes for methods/tables/providers, 16 bytes for invocation metadata,
+and 32 bytes per stub. The old shared 16 KiB capacity and static metadata arrays
+are gone. Header counters report mapped backing and fully committed slot capacity.
+Current production has 243 methods (250 with IOMMU), sixteen table references,
+and a provider record per loaded module plus the kernel. Growth does not move
+published pointers. Read-only records, RX stubs and private RW/NX aliases remain
+mapped until reboot, even after cooperative provider retirement.
 
-Kmodules provide format2 named/versioned export manifests; the generic loader
+Publication has a nonblocking writer token. Complete records precede release-
+publication of counts; readers acquire those counts. Allocation/mapping failure
+can retain construction pages but exposes no partial batch. Ledger/map critical
+sections cover one page at a time, not bulk image copying or SMP invalidation.
+Owner identities, pinned tables, queued/active caller leases and the safe retirement
+boundary are defined in [the hub contract](../kernel/hub.md).
+
+Kmodules provide format3 named/versioned export manifests; the generic loader
 validates their sizes, offsets, names, uniqueness and writable boundary, zeroes
 BSS, maps sections and generates kernel-owned mediation entries. No module export
 count/order or individual wrapper is hardcoded in the loader. The bootstrap policy
@@ -175,7 +187,7 @@ schema slots occupy 280 bytes, plus copied strings (21 bytes for the configured
 Limine reports the source file's address/size; parsed pointers do not depend on
 that source buffer. Config initializes after the boot heap, before hardware/APs.
 `hub.publish_tables(refs,count)` validates a whole batch before publication under
-the CPU lock. See [config](../kmodules/shared/config.md) for types and lifetime.
+the nonblocking hub writer token. See [config](../kmodules/shared/config.md) for types and lifetime.
 
 USB storage publishes `usb_storage.devices`, a live 16-byte list header. Each
 explicit open owns a record and 4 KiB staging buffer; each GPT slice owns 8 KiB

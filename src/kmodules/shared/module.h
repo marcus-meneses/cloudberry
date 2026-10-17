@@ -2,7 +2,7 @@
 #define CLOUDBERRY_KMODULE_IMAGE_H
 #include "../../kernel/surfaces.h"
 #define KMODULE_MAGIC UINT64_C(0x32444f4d4b424343)
-#define KMODULE_FORMAT 2u
+#define KMODULE_FORMAT 3u /* Requires kernel hub ABI3; format2 is rejected. */
 struct kmodule_image {
     uint64_t magic;
     uint32_t format, header_bytes;

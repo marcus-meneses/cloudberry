@@ -74,7 +74,7 @@ static struct kernel_surface_result publish(MODULE_ARGS) {MODULE_UNUSED();assert
 static void add(const char *name,kernel_surface_call fn) {struct kernel_surfaces *h=(void *)hub_memory;struct kernel_surface *m=(void *)(hub_memory+h->header_bytes);strcpy(m[h->count].name,name);m[h->count].call=fn;m[h->count++].major=1;}
 static void setup(void) {
     memset(registers,0,sizeof(registers));memset(hub_memory,0,sizeof(hub_memory));
-    struct kernel_surfaces *h=(void *)hub_memory;h->header_bytes=sizeof(*h);h->magic=KERNEL_SURFACES_MAGIC;h->major=2;
+    struct kernel_surfaces *h=(void *)hub_memory;h->header_bytes=sizeof(*h);h->magic=KERNEL_SURFACES_MAGIC;h->major=KERNEL_HUB_ABI;
     add("cpu.control",cpu);add("mem.calloc",alloc);add("mem.free",release_heap);add("pci.claim",claim);add("pci.busmaster",master);add("pci.msix",simple);add("pci.dma_alloc",dma_alloc);add("pci.dma_free",dma_free);add("pci.release",simple);add("irq.route",route);add("irq.enable",simple);add("irq.release",unroute);add("clock.now_ns",clock_now);add("threads.control",thread);add("irq.context",context);add("hub.publish_table",publish);add("xhci.interrupt",xhci_surface_interrupt);
     h->tables_offset=sizeof(*h)+h->count*sizeof(struct kernel_surface);h->table_count=1;struct kernel_hub_table *table=(void *)(hub_memory+h->tables_offset);strcpy(table->name,HWENUM_TABLE_NAME);table->address=(uintptr_t)&hardware;
     hardware.header.count=2;hardware.entries[1]=(struct hwenum_descriptor){.kind=HWENUM_PCI};hardware.entries[1].data.pci.class_code=12;hardware.entries[1].data.pci.subclass=3;hardware.entries[1].data.pci.programming_interface=0x30;

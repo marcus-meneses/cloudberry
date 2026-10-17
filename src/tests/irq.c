@@ -19,7 +19,7 @@ static struct kernel_surface_result apic(MODULE_ARGS) {MODULE_UNUSED();*(struct 
 static struct kernel_surface_result callback(MODULE_ARGS) {MODULE_UNUSED();const struct irq_notification *n=(void *)a;assert(!depth && b==123 && !c && n->owner==55 && n->kind==IRQ_MSI);assert(CALL(irq_surface_drain,1,0,0).status);++calls;count=n->count;return module_result(1,!failed);}
 static struct kernel_surface_result ticks(MODULE_ARGS) {MODULE_UNUSED();static uint64_t value;return module_result(++value,1);}
 int main(void) {
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.header_bytes=offsetof(__typeof__(fixture),methods),.count=6,.tables_offset=offsetof(__typeof__(fixture),tables),.table_count=3};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.header_bytes=offsetof(__typeof__(fixture),methods),.count=6,.tables_offset=offsetof(__typeof__(fixture),tables),.table_count=3};
     const char *names[]={"cpu.control","mem.calloc","inthandle.claim","inthandle.release","apic.info","cpu.ticks"};kernel_surface_call methods[]={control,allocate,claim,release,apic,ticks};
     for(unsigned i=0;i<6;++i){strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].call=methods[i];fixture.methods[i].major=1;}
     fixture.tables[0]=(struct kernel_hub_table){.name=HWENUM_TABLE_NAME,.address=(uintptr_t)&hardware};fixture.tables[1]=(struct kernel_hub_table){.name=MMIO_TABLE_NAME,.address=(uintptr_t)&regions};fixture.tables[2]=(struct kernel_hub_table){.name="smp.cpus",.address=(uintptr_t)&cpu};

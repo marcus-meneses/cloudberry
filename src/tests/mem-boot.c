@@ -41,7 +41,7 @@ static bool mapping_flags(struct boot_pages *pages, uintptr_t address, uint64_t 
 }
 #define CALL(method, a, b, c) method((uintptr_t)(a), (uintptr_t)(b), (uintptr_t)(c), 0, 0, 0)
 bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *pages) {
-    if (page->magic != KERNEL_SURFACES_MAGIC || page->major != 2 || page->minor != 0 ||
+    if (page->magic != KERNEL_SURFACES_MAGIC || page->major != KERNEL_HUB_ABI || page->minor != 0 ||
         page->page_bytes != KERNEL_HUB_BYTES || page->header_bytes != sizeof(*page) ||
         page->entry_bytes != sizeof(struct kernel_surface) || page->count < 18 ||
         page->physical_address % 4096 || page->mem_context_bytes != sizeof(struct mem_heap) ||
@@ -51,7 +51,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
         !mapping_flags(pages, KERNEL_MEDIATION_ADDRESS, 1)) return test_failure(__LINE__);
     for(size_t offset=0;offset<KERNEL_HUB_BYTES;offset+=BOOT_PAGE_SIZE)
         if(!mapping_flags(pages,KERNEL_SURFACES_ADDRESS+offset,UINT64_C(0x8000000000000001))) return test_failure(__LINE__);
-    for(size_t offset=0;offset<KERNEL_MEDIATION_PAGES*BOOT_PAGE_SIZE;offset+=BOOT_PAGE_SIZE)
+    for(size_t offset=0;offset<page->stub_bytes;offset+=BOOT_PAGE_SIZE)
         if(!mapping_flags(pages,KERNEL_MEDIATION_ADDRESS+offset,1)) return test_failure(__LINE__);
     const struct kernel_surface *entries = kernel_surface_entries(page);
     for (size_t i = 0; i < page->count; ++i) {

@@ -39,13 +39,12 @@ version, coverage, count, stride and owning heap context.
 
 `hub.publish_table(descriptor)` copies a `kernel_hub_table` record into the hub's
 compact table directory through the kernel's writable alias. It validates name
-termination, range/stride/count arithmetic, uniqueness and available hub capacity.
-Hub ABI2 stores compact methods and table references; argument definitions remain
-in headers. The published record `hwenum.hardware` contains the table address, byte size,
-count, descriptor stride and entries offset. The hardware records themselves
-live in mem-allocated storage outside the hub page. Modules never write the
-read-only hub mapping directly. Publication is trusted kernel code and currently
-serialized by boot; it is not a userland authorization mechanism.
+termination, range/stride/count arithmetic, uniqueness and available backing capacity.
+Hub ABI3 keeps stable method and table-reference arrays, growing physical backing
+on demand; argument definitions remain in headers. The descriptor records the
+hwenum provider ID. Its backing and owning heap have boot lifetime. Publication
+uses the hub writer token, validates the complete reference and copies it before
+making it visible. See [hub ownership](../../kernel/hub.md).
 
 The snapshot and its owning heap have boot lifetime. Unpublish, refresh, hotplug
 and module unload are not implemented. Normal boot starts a private heap with

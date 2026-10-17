@@ -73,7 +73,7 @@ struct kernel_surface_result usb_storage_surface_init(MODULE_ARGS) {
         const struct config_value *v=(const void *)t->address;
         if(v->type==CONFIG_UINT && v->bytes==8)state.timeout=*(const uint64_t *)v->data*1000000;
     }
-    struct kernel_hub_table table={.name="usb_storage.devices",.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.entry_bytes=sizeof(state.table)};
+    struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"usb_storage.init"),.name="usb_storage.devices",.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.entry_bytes=sizeof(state.table)};
     kernel_surface_call publish=kernel_surface_find_version(hub,"hub.publish_table",1,0);
     if(!publish || CALL(publish,&table,0,0).status){state.hub=NULL;return module_result(0,0);
     }return module_result(1,1);

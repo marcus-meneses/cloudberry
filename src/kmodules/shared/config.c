@@ -97,7 +97,7 @@ struct kernel_surface_result config_surface_init(MODULE_ARGS){
     for(size_t i=0,j=0;i<ITEMS;++i)if(items[i].descriptor.data){
         struct kernel_hub_table *t=&tables[j++];const char *prefix="config.";unsigned k=0;
         while(prefix[k]){t->name[k]=prefix[k];++k;}for(unsigned n=0;schemas[i].key[n];++n)t->name[k++]=schemas[i].key[n];
-        t->address=(uintptr_t)&items[i].descriptor;t->bytes=sizeof(struct config_value);t->entry_bytes=sizeof(struct config_value);t->count=1;
+        t->owner=kernel_surface_owner(hub,"config.init");t->address=(uintptr_t)&items[i].descriptor;t->bytes=sizeof(struct config_value);t->entry_bytes=sizeof(struct config_value);t->count=1;
     }
     error=CONFIG_PUBLICATION;if(CALL(publish,tables,count,0).status)goto failed;
     CALL(free,b,tables,0);owned=items;(void)owned;info=(struct config_info){.count=count,.ready=1};return module_result(count,1);

@@ -95,7 +95,7 @@ int main(void) {
     uint32_t psi=(480u<<16)|(2u<<4)|3;assert(usb_port_speed(2,3,&psi,1)==USB_HIGH && !usb_port_speed(2,4,&psi,1));
     const char *names[]={"cpu.control","mem.calloc","mem.free","threads.control","threads.create","clock.now_ns","irq.context","xhci.open","xhci.close","xhci.info","xhci.port","xhci.reset_port","xhci.device","xhci.endpoint","xhci.transfer","xhci.result","xhci.wait","xhci.cancel","xhci.remove","xhci.watch","hub.publish_table","usb.worker","xhci.hub","xhci.disconnect"};
     kernel_surface_call calls[]={cpu,mem,mem_free,thread_call,create_call,clock_call,cpu,open_call,success,info_call,port_call,success,device_call,endpoint_call,transfer_call,result_call,wait_call,success,success,success,publish,usb_surface_worker,success,success};
-    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=24,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=1};
+    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=24,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=1};
     for(unsigned i=0;i<24;++i){strcpy(hub.methods[i].name,names[i]);hub.methods[i].major=1;hub.methods[i].call=calls[i];}
     hardware.table.count=1;hardware.entries[0].kind=HWENUM_PCI;hardware.entries[0].data.pci.class_code=12;hardware.entries[0].data.pci.subclass=3;hardware.entries[0].data.pci.programming_interface=0x30;
     strcpy(hub.tables[0].name,HWENUM_TABLE_NAME);hub.tables[0].address=(uintptr_t)&hardware;

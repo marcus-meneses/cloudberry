@@ -3,7 +3,7 @@
 Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
 Kmodules are coupled kernel mechanisms; handlers/handles are a future layer.
 
-Completed foundation: versioned hub, heap, hardware/MMIO inventory, clock/RTC,
+Completed foundation: dynamic ABI3 hub and provider ownership/draining, heap, hardware/MMIO inventory, clock/RTC,
 vector and CMOS/NMI ownership, APIC timers, deadline callbacks, owned page reuse,
 guarded stacks, CPU-pinned preemptible threads, AP startup, per-CPU descriptor
 tables/stacks/timers, wake IPIs and acknowledged shared-address-space shootdown.
@@ -170,12 +170,58 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     journaled ext4, pins/bounds, IRQ loss/reset and stale identities. Automatic
     boot provenance/duplicate-GUID selection and physical qualification remain open.
 
+20. Closed: dynamic ABI3 hub and provider lifecycle. Separate page-backed method,
+    table/provider and invocation/stub arrays keep published addresses stable;
+    writer serialization, complete-batch publication and OOM/mapping-failure retry
+    replace the fixed 16 KiB ceiling. Format3 rejects old hub-layout binaries.
+    Providers expose live/draining/retired states; scheduler records, threads and
+    deferred IRQ routes lease callbacks through reclamation. Active/leased calls
+    drain without forced unwinding; retired stubs fail. Current boot modules and
+    hard-ISR providers stay pinned. Published-table owners cannot retire yet;
+    images/stubs remain mapped pending comprehensive reclamation.
+    Focused host and four-CPU guest checks pass. Active documentation was reviewed
+    for current storage, hub capacity/layout and lifetime claims.
+
 ## Next priorities
 
-Review update: 2026-10-16. USB/GPT/ext4 access and journaled writes are implemented;
-retain the storage integration and disk-loaded-driver sequence.
+Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
+Arena expansion, multi-instance storage and completion of USB hotplug cleanup
+are planned next, before bootstrap storage selection and disk-loaded future modules.
+USB enumeration/hotplug already exists; the new priority closes lifecycle and
+storage-disconnection gaps rather than replacing that implementation.
 
-1. Finish boot-device/driver-volume selection before HID. NVMe and AHCI SATA
+1. Remove the separate 16 MiB module-image arena ceiling. Introduce a larger,
+   explicitly reserved virtual arena with checked image-extent allocation and
+   per-image guard pages. Commit physical memory only as images are loaded;
+   preserve RX code and RW/NX state permissions. Loaded, retired and uncertain
+   failed-construction extents remain reserved until safe executable reclamation
+   exists. Keep this independent of the hub's 16 MiB array windows. Validate
+   loading beyond the old bound, non-overlap, guards and allocation failure using
+   isolated synthetic modules.
+2. Support multiple active NVMe/SATA instances without changing the common block
+   contract. Allocate per-controller ownership, queue, IRQ and DMA state; NVMe
+   namespaces and AHCI ports get distinct device records, cookies and lifetimes.
+   AHCI ports share controller ownership safely: opening/closing one port must
+   not reset or invalidate siblings. Controller-wide failures must have explicit
+   effects on every dependent device. Validate two controllers, multiple NVMe
+   namespaces and two SATA ports, stale identities and closing/failing one device
+   while another remains usable where the hardware failure boundary permits it.
+   Simultaneous instances do not imply parallel command queues or SMP I/O dispatch.
+3. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
+   AHCI/NVMe controllers and platform devices as boot-lifetime hardware; general
+   PCI/controller removal, rediscovery and kernel-module unloading are excluded.
+   Handle USB attachment, removal and nested hub subtree removal with fresh
+   identities on reattachment. Stop new operations, notify dependants, cancel/fail
+   pending work and drain callbacks/transfers before safe instance reclamation.
+   Include USB-storage transport state, dependent partition views and ext4 mounts:
+   disconnect old views permanently, report uncertain write/flush outcomes, and
+   require a fresh explicit mount after reattachment. Add a filesystem disconnect/
+   abort path that can discard in-memory state without writing to vanished media;
+   retain resources only where outstanding references or uncertain DMA make reuse
+   unsafe. Keep driver code and top-level registry tables loaded. Validate repeated
+   attach/remove cycles, in-flight I/O, nested hub loss, cleanup and stale-reference
+   rejection on disposable media; verify that unrelated devices keep working.
+4. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
    now provide the common block read/write/flush contract alongside USB BOT.
    USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
    GUID across available devices without silently accepting duplicates or assuming
@@ -184,10 +230,10 @@ retain the storage integration and disk-loaded-driver sequence.
    or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
    and writes are implemented; optimize barrier batching only after preserving
    commit/checkpoint ordering and repeating crash validation.
-2. Load driver modules from disk through the kernel: reuse image/contract checks,
+5. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
-   USB/xHCI/mass-storage/partition/filesystem modules must initially arrive through
-   Limine so the kernel can reach that driver partition. Loading and safe hot
+   modules, including all existing kmodules, remain Limine-loaded from the boot
+   partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot
    executable replacement are separate milestones.
 
 After disk loading: establish process address spaces, user/kernel privilege
@@ -427,7 +473,7 @@ filtering and bounded replacements. HPET remains the runtime health reference
 and fallback. Physical hardware and native Intel CPU acceptance remain open.
 
 
-Hub capacity expanded to 16 KiB (four contiguous pages), with mediation backing
+Historical milestone, superseded by ABI3 dynamic growth (item 20): hub capacity expanded to 16 KiB (four contiguous pages), with mediation backing
 computed from method capacity (three pages / 12 KiB). All pages retain RO/NX hub
 and RX stub permissions. Current 148 methods and four table references use
 45.36% of the hub; up to 334 methods fit with those references. This is fixed

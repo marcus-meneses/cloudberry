@@ -6,7 +6,7 @@ SECTIONS {
     image_start = .;
     .module_header : {
         QUAD(0x32444f4d4b424343)
-        LONG(2) LONG(88)
+        LONG(3) LONG(88)
         QUAD(image_end) QUAD(memory_end) QUAD(writable_start)
         QUAD(exports_start) LONG((exports_end - exports_start) / 48) LONG(48)
         KEEP(*(.module_name))

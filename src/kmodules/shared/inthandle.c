@@ -119,6 +119,8 @@ struct kernel_surface_result inthandle_surface_bind(MODULE_ARGS) {
     kernel_surface_call callback=b?kernel_surface_find_version(hub,(const char *)b,1,0):NULL;
     if (b && !callback) return module_result(0,0);
     uint64_t flags=irq_save();
+    const struct kernel_hub_owner *provider=b?kernel_hub_owner(hub,kernel_surface_owner(hub,(const char *)b)):NULL;
+    if(provider && !(provider->flags&HUB_OWNER_BOOT_PINNED)){irq_restore(flags);return module_result(0,0);}
     if (binding_read(a).owner) {irq_restore(flags);return module_result(0,0);}
     binding_write(a,callback,c,0);
     irq_restore(flags);return module_result(1,1);
@@ -148,7 +150,8 @@ struct kernel_surface_result inthandle_surface_claim(MODULE_ARGS) {
     kernel_surface_call callback=kernel_surface_find_version(hub,(const char *)b,1,0);
     if (!callback) return module_result(0,0);
     uint64_t flags=irq_save();
-    int ok=!binding_read(a).call;
+    const struct kernel_hub_owner *provider=kernel_hub_owner(hub,kernel_surface_owner(hub,(const char *)b));
+    int ok=(!provider || (provider->flags&HUB_OWNER_BOOT_PINNED)) && !binding_read(a).call;
     if (ok) binding_write(a,callback,c,d);
     irq_restore(flags);return module_result(ok,ok);
 }

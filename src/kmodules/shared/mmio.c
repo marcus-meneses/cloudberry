@@ -39,7 +39,7 @@ static size_t collect(const struct hwenum_table *hw,struct mmio_table *table) {
 struct kernel_surface_result mmio_surface_init(MODULE_ARGS) {
     MODULE_UNUSED(); const struct kernel_surfaces *hub=(const void *)a;
     if (state.table) return module_result((uintptr_t)state.table,state.hub==hub && state.heap==(void *)b);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !b) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b) return module_result(0,0);
     const struct kernel_hub_table *ref=kernel_hub_find_table(hub,HWENUM_TABLE_NAME);
     if (!ref || ref->bytes<sizeof(struct hwenum_table)) return module_result(0,0);
     const struct hwenum_table *hw=(const void *)ref->address;
@@ -57,7 +57,7 @@ struct kernel_surface_result mmio_surface_init(MODULE_ARGS) {
     struct mmio_table *table=(void *)memory.value;
     *table=(struct mmio_table){.magic=MMIO_TABLE_MAGIC,.major=1,.entry_bytes=sizeof(struct mmio_region),.count=count};
     collect(hw,table);
-    struct kernel_hub_table published={.name=MMIO_TABLE_NAME,.address=(uintptr_t)table,.bytes=bytes,
+    struct kernel_hub_table published={.owner=kernel_surface_owner(hub,"mmio.init"),.name=MMIO_TABLE_NAME,.address=(uintptr_t)table,.bytes=bytes,
         .count=count,.entry_bytes=sizeof(struct mmio_region),.entries_offset=sizeof(*table)};
     if (publish((uintptr_t)&published,0,0,0,0,0).status) {
         release(b,(uintptr_t)table,0,0,0,0); return module_result(0,0);

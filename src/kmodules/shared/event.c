@@ -14,7 +14,7 @@ static struct {
 struct kernel_surface_result event_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if (state.initialized) return module_result(1,state.hub==hub);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI) return module_result(0,0);
     state.run=kernel_surface_find_version(hub,"scheduler.run",1,0);
     state.next=kernel_surface_find_version(hub,"scheduler.next_deadline",1,0);
     state.arm=kernel_surface_find_version(hub,"timer.arm",1,0);

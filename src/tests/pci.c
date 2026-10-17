@@ -55,7 +55,7 @@ int main(int argc,char **argv) {
     int translated=argc>1 && argv[1][0]=='t';
     const char *names[]={"cpu.control","mem.calloc","mem.free","mmio.map","mem.pages_alloc","mem.pages_free","hardware.read","hub.publish_table","iommu.attach","iommu.map","iommu.unmap","iommu.detach","iommu.ready"};
     kernel_surface_call calls[]={cpu,allocate,release,map,pages,free_pages,read_config,publish,attach,map_dma,unmap_dma,detach,ready};
-    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=translated?13:8,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=2};
+    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=translated?13:8,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=2};
     for(unsigned i=0;i<hub.hub.count;++i) {strcpy(hub.methods[i].name,names[i]);hub.methods[i].call=calls[i];hub.methods[i].major=1;}
     hardware.table.count=argc>1?2:1;hardware.entries[0].kind=HWENUM_PCI;
     if(argc>1) {hardware.entries[1].kind=HWENUM_ACPI_TABLE;memcpy(hardware.entries[1].data.acpi.signature,"DMAR",4);}

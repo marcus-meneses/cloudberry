@@ -59,7 +59,8 @@ QEMU with PCIe, NVMe, AHCI SATA and xHCI USB devices.
 
 Implemented foundations include:
 
-- Independently loaded kernel modules with a versioned method/table hub.
+- Independently loaded format3 kernel modules with a dynamic ABI3 method/table/provider hub.
+- Stable published entries, explicit provider ownership, queued/active call leases and cooperative retirement.
 - Limine-loaded text configuration parsed into owned typed hub references.
 - A build-prepared 512 MiB ext4 driver partition identified by its configured GPT GUID.
 - Owned memory allocation, page mappings, guarded stacks and TLB coordination.
@@ -80,8 +81,8 @@ clock and extended-state foundation; native xHCI and physical-device validation
 remain pending.
 
 The [current assessment](src/README.md#current-assessment-2026-10-16) separates
-implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: implement
-boot-volume selection across the common block backends, then load driver modules from disk. Process isolation follows that
+implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: expand the module-image arena, support multiple NVMe/SATA instances and complete USB device/hub hotplug cleanup,
+then implement bootstrap boot-volume selection and load selected future modules from disk. Process isolation follows that
 foundation. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
 
 ## Build and run

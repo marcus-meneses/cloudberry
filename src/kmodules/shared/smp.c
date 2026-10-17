@@ -128,7 +128,7 @@ struct kernel_surface_result smp_surface_prepare(MODULE_ARGS) {
     if(call(state.idt,state.startup[0].tables,(uintptr_t)state.startup[0].ist,0).status)return module_result(0,0);
     for(unsigned vector=CPU_TLB_VECTOR;vector<=CPU_WAKE_VECTOR;++vector)if(claim(vector,(uintptr_t)"smp.interrupt",(uintptr_t)&state,(uintptr_t)&state,0,0).status)return module_result(0,0);
     state.cpus[0].online=1;
-    struct kernel_hub_table ref={.name="smp.cpus",.address=(uintptr_t)state.cpus,.bytes=state.count*sizeof(struct cpu_record),.count=state.count,.entry_bytes=sizeof(struct cpu_record)};
+    struct kernel_hub_table ref={.owner=kernel_surface_owner(hub,"smp.prepare"),.name="smp.cpus",.address=(uintptr_t)state.cpus,.bytes=state.count*sizeof(struct cpu_record),.count=state.count,.entry_bytes=sizeof(struct cpu_record)};
     if(call(publish,(uintptr_t)&ref,0,0).status)return module_result(0,0);
     state.prepared=1;return module_result(state.count,1);
 }

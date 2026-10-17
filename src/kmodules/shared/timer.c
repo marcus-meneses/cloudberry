@@ -19,7 +19,7 @@ static struct timer_local *local(void) {
 struct kernel_surface_result timer_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if (local()->initialized) return module_result(1,state.hub==hub);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI) return module_result(0,0);
     kernel_surface_call now=kernel_surface_find_version(hub,"clock.now_ns",1,0),
         claim=kernel_surface_find_version(hub,"inthandle.claim",1,0),
         release=kernel_surface_find_version(hub,"inthandle.release",1,0),

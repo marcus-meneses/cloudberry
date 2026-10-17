@@ -38,7 +38,7 @@ int main(void) {
     duplicate[6]=devs[0];duplicate[6].reference.id=7;acpi_match_pci(duplicate,7,&pci);
     assert(duplicate[1].pci_hardware_index==UINT64_MAX && duplicate[2].pci_hardware_index==UINT64_MAX);
     struct acpi_table acpi={.magic=ACPI_TABLE_MAGIC,.major=1,.entry_bytes=sizeof(struct acpi_device),.generation=1,.count=6,.entries=devs};
-    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=4,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=1};
+    hub.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=4,.header_bytes=offsetof(__typeof__(hub),methods),.tables_offset=offsetof(__typeof__(hub),tables),.table_count=1};
     const char *names[]={"cpu.control","mem.calloc","mem.free","hub.publish_table"};kernel_surface_call calls[]={cpu,alloc,release,publish};
     for(unsigned i=0;i<4;++i){strcpy(hub.methods[i].name,names[i]);hub.methods[i].call=calls[i];}
     strcpy(hub.tables[0].name,ACPI_TABLE_NAME);hub.tables[0].address=(uintptr_t)&acpi;

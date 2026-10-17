@@ -54,7 +54,7 @@ use allocating or potentially blocking foreground methods.
 
 Short mutations use recursive `cpu.control(ENTER/LEAVE)` with IF preservation.
 Do not suspend while holding a lock, or call a thread executor from an ISR.
-Existing mem/memory, clock, mmio, hwenum, hub and callback scheduler methods are
+Existing mem/memory, clock, mmio, hwenum and callback scheduler methods are
 synchronized through kernel mediation. The clock has its own ordered lock.
 A scheduler callback runs outside its queue lock, synchronously on its caller;
 the event module invokes callbacks on its dedicated preemptible worker. Thread
@@ -87,3 +87,10 @@ A tick received while a running thread's critical depth inhibits switching retur
 THREAD_TICK_DEFERRED. Timer rearms a CPU-local relative retry, so consuming a
 one-shot during an IRQ-enabled lock wait cannot permanently remove preemption.
 No-active-thread ticks remain one-shot; idle behavior is unchanged.
+
+Thread records lease their entry provider from successful creation through reap,
+including blocked/running/exited states. A failed create releases its lease; an
+unsuccessful reap retains it. New threads for a draining provider fail. The mediation
+gate counts an active call across thread preemption/blocking until it returns.
+See [hub lifetime](../../kernel/hub.md); this does not add forced cancellation or
+unmapping of executable providers.

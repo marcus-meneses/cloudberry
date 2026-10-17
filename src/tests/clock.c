@@ -49,7 +49,7 @@ int main(int argc,char **argv) {
     cpu=(struct clock_cpu){.flags=CLOCK_TSC_PRESENT|(fallback?0:CLOCK_TSC_INVARIANT),
         .hz=enumerated?3000000000:0};
     if (enumerated) cpu.flags|=CLOCK_TSC_ENUMERATED;
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=4,
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=4,
         .header_bytes=offsetof(__typeof__(fixture),methods),.table_count=2,.tables_offset=offsetof(__typeof__(fixture),tables)};
     const char *names[]={"mmio.map","mmio.read","mmio.write","hardware.read"};
     kernel_surface_call calls[]={map,read_mmio,write_mmio,physical_read};

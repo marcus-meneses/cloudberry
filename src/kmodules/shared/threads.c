@@ -35,7 +35,7 @@ __attribute__((noreturn)) static void start(void) {
 }
 struct kernel_surface_result threads_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();if(state.hub) return module_result(1,state.hub==(const void *)a && state.count==c);
-    const struct kernel_surfaces *hub=(const void *)a;if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !b || !c || c>SIZE_MAX/sizeof(struct local)) return module_result(0,0);
+    const struct kernel_surfaces *hub=(const void *)a;if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b || !c || c>SIZE_MAX/sizeof(struct local)) return module_result(0,0);
     state.cpu=kernel_surface_find_version(hub,"cpu.control",1,0);state.alloc=kernel_surface_find_version(hub,"mem.calloc",1,0);state.free=kernel_surface_find_version(hub,"mem.free",1,0);
     state.stack_alloc=kernel_surface_find_version(hub,"mem.stack_alloc",1,0);state.stack_free=kernel_surface_find_version(hub,"mem.stack_free",1,0);state.arm=kernel_surface_find_version(hub,"timer.arm",1,0);state.now=kernel_surface_find_version(hub,"clock.now_ns",1,0);
     if(!state.cpu || !state.alloc || !state.free || !state.stack_alloc || !state.stack_free || !state.arm || !state.now) return module_result(0,0);
@@ -54,7 +54,7 @@ struct kernel_surface_result threads_surface_create(MODULE_ARGS) {
     if(!state.hub || !r || r->abi!=1 || r->reserved || r->cpu>=state.count || !r->stack_bytes || r->stack_bytes<4096 || r->payload.reserved ||
         (r->payload.bytes && (!r->payload.data || r->payload.data_register>5)) || r->payload.bytes>SIZE_MAX-sizeof(struct thread)-128-state.xstate.bytes) return module_result(0,0);
     int found=0;const struct kernel_surface *methods=kernel_surface_entries(state.hub);
-    for(size_t i=0;i<state.hub->count;++i) if((uintptr_t)methods[i].call==r->entry && methods[i].major==r->major && methods[i].minor>=r->minor) {found=1;break;}
+    for(size_t i=0;i<kernel_surface_count(state.hub);++i) if((uintptr_t)methods[i].call==r->entry && methods[i].major==r->major && methods[i].minor>=r->minor) {found=1;break;}
     if(!found) return module_result(0,0);
     struct kernel_surface_result allocated=call(state.alloc,state.heap,1,sizeof(struct thread)+128+r->payload.bytes+state.xstate.bytes);
     if(allocated.status) return allocated;
@@ -63,6 +63,7 @@ struct kernel_surface_result threads_surface_create(MODULE_ARGS) {
     if(stack.status) {call(state.free,state.heap,(uintptr_t)t,0);return stack;}
     t->context.xstate=((uintptr_t)(t+1)+15+r->payload.bytes+63)&~(uintptr_t)63;
     if(call(state.fp_init,t->context.xstate,state.xstate.bytes,0).status) {call(state.stack_free,t->stack.id,r->process_id,0);call(state.free,state.heap,(uintptr_t)t,0);return module_result(0,0);}
+    if(kernel_hub_pin_call(state.hub,(kernel_surface_call)r->entry,1).status){call(state.stack_free,t->stack.id,r->process_id,0);call(state.free,state.heap,(uintptr_t)t,0);return module_result(0,0);}
     t->info=(struct thread_info){.id=0,.process_id=r->process_id,.cpu=r->cpu,.state=THREAD_RUNNABLE};t->entry=(kernel_surface_call)r->entry;
     for(size_t i=0;i<6;++i)t->args[i]=r->payload.arguments[i];
     if(r->payload.bytes) {unsigned char *dst=(void *)(((uintptr_t)(t+1)+15)&~(uintptr_t)15);const unsigned char *src=r->payload.data;
@@ -73,7 +74,7 @@ struct kernel_surface_result threads_surface_create(MODULE_ARGS) {
     t->context.rsp=(uintptr_t)sp;
     struct kernel_surface_result queued=call(state.now,0,0,0);t->ready_ns=queued.value;t->ready_valid=!queued.status;
     uint64_t flags=enter();
-    if(state.serial==UINT64_MAX) {leave(flags);struct kernel_surface_result released=call(state.stack_free,t->stack.id,r->process_id,0);uint64_t cleanup=released.status?t->stack.id:0;call(state.free,state.heap,(uintptr_t)t,0);return module_result(cleanup,0);}
+    if(state.serial==UINT64_MAX) {leave(flags);struct kernel_surface_result released=call(state.stack_free,t->stack.id,r->process_id,0);uint64_t cleanup=released.status?t->stack.id:0;kernel_hub_pin_call(state.hub,t->entry,0);call(state.free,state.heap,(uintptr_t)t,0);return module_result(cleanup,0);}
     t->info.id=++state.serial;
     if(state.tail)state.tail->next=t;else state.head=t;state.tail=t;uint64_t id=t->info.id;
     leave(flags);call(state.cpu,CPU_WAKE,r->cpu,0);return module_result(id,1);
@@ -144,7 +145,7 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
         if(released.status) {set_status(t,THREAD_EXITED);leave(flags);return released;}
         prev=NULL;struct thread *at=state.head;while(at!=t) {prev=at;at=at->next;}
         if(prev)prev->next=t->next;else state.head=t->next;if(state.tail==t)state.tail=prev;
-        leave(flags);return call(state.free,state.heap,(uintptr_t)t,0);
+        leave(flags);kernel_hub_pin_call(state.hub,t->entry,0);return call(state.free,state.heap,(uintptr_t)t,0);
     }
     leave(flags);return module_result(ok,ok);
 }

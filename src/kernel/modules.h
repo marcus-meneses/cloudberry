@@ -5,14 +5,28 @@
 #include "../boot/memory.h"
 #include "surfaces.h"
 #include "../kmodules/shared/module.h"
+#ifndef KERNEL_MODULES_ADDRESS
 #define KERNEL_MODULES_ADDRESS UINT64_C(0xffffffffa0000000)
-#define KERNEL_MEDIATION_ADDRESS UINT64_C(0xffffffffa2000000)
-#define KERNEL_HUB_BYTES (4u * BOOT_PAGE_SIZE)
+#endif
+#ifndef KERNEL_HUB_ARRAYS_ADDRESS
+#define KERNEL_HUB_ARRAYS_ADDRESS UINT64_C(0xffff900000000000)
+#endif
+/* Disjoint virtual reservations, not physical allocations. Private aliases keep
+ * public records RO/NX and mediation RX while construction remains writable. */
+#define KERNEL_HUB_WINDOW_BYTES UINT64_C(0x01000000)
+#define KERNEL_HUB_ALIAS_DELTA UINT64_C(0x10000000000)
+#define KERNEL_METHODS_ADDRESS KERNEL_HUB_ARRAYS_ADDRESS
+#define KERNEL_TABLES_ADDRESS (KERNEL_HUB_ARRAYS_ADDRESS+KERNEL_HUB_WINDOW_BYTES)
+#define KERNEL_OWNERS_ADDRESS (KERNEL_HUB_ARRAYS_ADDRESS+2*KERNEL_HUB_WINDOW_BYTES)
+#define KERNEL_METADATA_ADDRESS (KERNEL_HUB_ARRAYS_ADDRESS+3*KERNEL_HUB_WINDOW_BYTES)
+#define KERNEL_MEDIATION_ADDRESS (KERNEL_HUB_ARRAYS_ADDRESS+4*KERNEL_HUB_WINDOW_BYTES)
+#define KERNEL_HUB_BYTES BOOT_PAGE_SIZE
 #define KERNEL_MEDIATION_STUB_BYTES 32u
-#define KERNEL_METHOD_CAPACITY (KERNEL_HUB_BYTES / sizeof(struct kernel_surface))
-#define KERNEL_MEDIATION_PAGES ((KERNEL_METHOD_CAPACITY * KERNEL_MEDIATION_STUB_BYTES + BOOT_PAGE_SIZE - 1) / BOOT_PAGE_SIZE)
 const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *);
 bool kernel_module_load(struct boot_pages *, const void *image, size_t bytes, const char *name);
+/* flags=0 permits cooperative retirement; boot path uses BOOT_PINNED.
+ * Image/stub mappings remain pinned even after retirement; no unsafe unloading. */
+bool kernel_module_load_owned(struct boot_pages *,const void *,size_t,const char *,uint32_t flags);
 bool kernel_modules_load(struct boot_pages *);
 bool kernel_modules_start(struct boot_pages *, uint64_t rsdp_physical);
 #ifdef BOOT_MEM_TEST

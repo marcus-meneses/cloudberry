@@ -191,7 +191,7 @@ static bool firmware(struct scan *s, uint64_t rsdp) {
 
 struct hwenum_table *hwenum_enumerate(const struct kernel_surfaces *hub, void *heap,
                                      const struct hwenum_boot *boot) {
-    if (!hub || hub->magic != KERNEL_SURFACES_MAGIC || hub->major != 2 ||
+    if (!hub || hub->magic != KERNEL_SURFACES_MAGIC || hub->major != KERNEL_HUB_ABI ||
         !heap || !boot || !boot->memory || !boot->memory->entries) return NULL;
     const struct kernel_hub_table *existing = kernel_hub_find_table(hub, HWENUM_TABLE_NAME);
     if (existing) return (struct hwenum_table *)existing->address;
@@ -221,6 +221,7 @@ struct hwenum_table *hwenum_enumerate(const struct kernel_surfaces *hub, void *h
     zero(&published, sizeof(published));
     const char *name = HWENUM_TABLE_NAME;
     for (size_t i = 0; name[i]; ++i) published.name[i] = name[i];
+    published.owner=kernel_surface_owner(hub,"hwenum.enumerate");
     published.address = (uintptr_t)s.table;
     published.bytes = sizeof(*s.table) + s.table->count * sizeof(s.table->entries[0]);
     published.count = s.table->count; published.entry_bytes = sizeof(s.table->entries[0]);

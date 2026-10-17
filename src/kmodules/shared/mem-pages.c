@@ -69,7 +69,7 @@ static uintptr_t stack_gap(size_t span) {
 struct kernel_surface_result mem_surface_pages_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if (state.hub) return module_result(1,state.hub==hub && state.heap==(void *)b);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !b) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b) return module_result(0,0);
     kernel_surface_call allocate=kernel_surface_find_version(hub,"mem.calloc",1,0),free=kernel_surface_find_version(hub,"mem.free",1,0),
         reserve=kernel_surface_find_version(hub,"memory.reserve",1,1),release=kernel_surface_find_version(hub,"memory.release",1,0),
         map=kernel_surface_find_version(hub,"memory.map_owned",1,0),unmap=kernel_surface_find_version(hub,"memory.unmap_owned",1,0);

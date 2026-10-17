@@ -72,7 +72,7 @@ static void reset(void) {
     assert(mem_init(&heap, arena, sizeof arena));
     memset(&fixture, 0, sizeof fixture); memset(firmware, 0, sizeof firmware);
     memset(config, 255, sizeof config);
-    fixture.hub.magic = KERNEL_SURFACES_MAGIC; fixture.hub.major = 2; fixture.hub.minor = 0;
+    fixture.hub.magic = KERNEL_SURFACES_MAGIC; fixture.hub.major = KERNEL_HUB_ABI; fixture.hub.minor = 0;
     fixture.hub.header_bytes = offsetof(__typeof__(fixture), methods);
     fixture.hub.entry_bytes = sizeof(struct kernel_surface); fixture.hub.count = 5;
     fixture.hub.tables_offset = offsetof(__typeof__(fixture), tables);

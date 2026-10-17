@@ -35,7 +35,7 @@ static void local_setup(uintptr_t address,uint32_t mode) {
 struct kernel_surface_result apic_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if (state.initialized) return module_result(1,state.hub==hub);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI) return module_result(0,0);
     kernel_surface_call claim=kernel_surface_find_version(hub,"inthandle.claim",1,0),
         release=kernel_surface_find_version(hub,"inthandle.release",1,0),
         map=kernel_surface_find_version(hub,"mmio.map",1,0),

@@ -74,3 +74,6 @@ preserves selector, mask and IF, and rejects acknowledgement register C.
 No code guesses the old mask by reading the write-only selector port. Clock
 uses this surface for RTC reads. A boot check deliberately masks NMI, reads the
 RTC and verifies the mask remains set before restoring the previous policy.
+
+Hard-ISR bindings require boot-pinned providers. Retirable modules use foreground
+deferred IRQ callbacks, whose routes lease provider lifetime. See [hub lifetime](../../kernel/hub.md).

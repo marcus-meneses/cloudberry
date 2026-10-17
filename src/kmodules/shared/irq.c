@@ -36,7 +36,7 @@ static struct slot *find(uint64_t id) {for(unsigned i=32;i<224;++i)if(state.slot
 struct kernel_surface_result irq_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if(state.initialized)return module_result(1,state.hub==hub);
-    if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !b)return module_result(0,0);
+    if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b)return module_result(0,0);
     state.cpu=kernel_surface_find_version(hub,"cpu.control",1,0);if(!bsp())return module_result(0,0);
     state.ticks=kernel_surface_find_version(hub,"cpu.ticks",1,0);
     state.claim=kernel_surface_find_version(hub,"inthandle.claim",1,0);state.release=kernel_surface_find_version(hub,"inthandle.release",1,0);
@@ -53,7 +53,7 @@ struct kernel_surface_result irq_surface_route(MODULE_ARGS) {
     if(!state.initialized || !bsp() || !r || !b || !r->owner || r->reserved || r->level>1 || r->active_low>1 || state.serial==UINT64_MAX || state.destination>255 ||
        (r->kind!=IRQ_IOAPIC && r->kind!=IRQ_MSI) || (r->kind==IRQ_MSI && (r->level || r->active_low || r->gsi)))return module_result(0,0);
     int found=0;const struct kernel_surface *methods=kernel_surface_entries(state.hub);
-    for(size_t i=0;i<state.hub->count;++i)if(methods[i].call==r->callback && methods[i].major==r->major && methods[i].minor>=r->minor)found=1;
+    for(size_t i=0;i<kernel_surface_count(state.hub);++i)if(methods[i].call==r->callback && methods[i].major==r->major && methods[i].minor>=r->minor)found=1;
     if(!found)return module_result(0,0);
     uint64_t flags=lock();uintptr_t controller=0;uint32_t input=0;
     if(r->kind==IRQ_IOAPIC) {
@@ -75,6 +75,7 @@ struct kernel_surface_result irq_surface_route(MODULE_ARGS) {
         if(!state.claim(vector,(uintptr_t)"irq.interrupt",(uintptr_t)candidate,(uintptr_t)candidate,0,0).status) {slot=candidate;break;}
     }
     if(!slot) {unlock(flags);return module_result(0,0);}
+    if(kernel_hub_pin_call(state.hub,r->callback,1).status){call(state.release,vector,(uintptr_t)slot,0);unlock(flags);return module_result(0,0);}
     *slot=(struct slot){.info={.route={.id=++state.serial,.owner=r->owner,.kind=r->kind,.vector=vector,.gsi=r->gsi,.masked=1,
         .message_address=UINT64_C(0xfee00000)|((uint64_t)state.destination<<12),.message_data=vector|(1u<<14)}},.controller=controller,.input=input,
         .low=vector|(r->level?(1u<<15):0)|(r->active_low?(1u<<13):0),.level=r->level,.callback=r->callback,.context=r->context};
@@ -92,7 +93,7 @@ struct kernel_surface_result irq_surface_release(MODULE_ARGS) {
     uint64_t flags=lock();struct slot *s=find(a);int ok=0;
     if(s && s->info.route.owner==b && !s->armed && !s->running && !__atomic_load_n(&s->info.pending,__ATOMIC_ACQUIRE)) {
         unsigned vector=s->info.route.vector,bit=1u<<(vector&31),offset=(vector/32)*16;
-        if((!s->controller || !(io_read(s->controller,0x10+s->input*2)&(1u<<14))) && !(local_read(0x100+offset)&bit) && !(local_read(0x200+offset)&bit) && !call(state.release,vector,(uintptr_t)s,0).status) {*s=(struct slot){0};ok=1;}
+        if((!s->controller || !(io_read(s->controller,0x10+s->input*2)&(1u<<14))) && !(local_read(0x100+offset)&bit) && !(local_read(0x200+offset)&bit) && !call(state.release,vector,(uintptr_t)s,0).status) {kernel_hub_pin_call(state.hub,s->callback,0);*s=(struct slot){0};ok=1;}
     }
     unlock(flags);return module_result(ok,ok);
 }

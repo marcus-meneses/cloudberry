@@ -108,7 +108,7 @@ establish physical firmware compatibility.
 ## Image and validation
 
 Only this module uses a private PIE link to accommodate upstream static pointer
-tables. The format2 loader and public hub ABI stay unchanged. `acpi.init` validates
+tables. Private fixup handling stays inside ACPI; the current format3 loader requires hub ABI3. `acpi.init` validates
 and applies local `R_X86_64_RELATIVE` fixups to writable module state once; export
 records stay relative and read-only. The build checks relocation types, bounds,
 unique targets and linker marker extents. GOT dependencies are rejected.

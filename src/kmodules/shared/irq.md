@@ -68,9 +68,9 @@ failed-callback retention, ownership/quiescence/IRR checks and stale IDs. Isolat
 one/four-CPU TCG boots route a real HPET comparator's level interrupt through an
 IOAPIC, check mask/EOI, deferred cause clearing/rearm, repeated delivery and release.
 HPET comparator setup is test-only and is restored; production boot enables no
-device routes automatically. The read-only NVMe module now uses pci MSI-X
-programming and real completion delivery on disposable test media. xHCI, MSI
-capability programming, ACPI PCI routing, remapping and affinity remain future work.
+device routes automatically. NVMe and xHCI use PCI MSI-X; AHCI SATA uses PCI MSI, all with deferred
+completion notification. Disposable-media tests verify real delivery. ACPI PCI
+INTx routing, interrupt remapping and general affinity remain future work.
 
 References: [Intel HPET specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/software-developers-hpet-spec-1-0a.pdf),
 [Intel IOAPIC redirection registers](https://edc.intel.com/content/www/us/en/design/publications/core-ultra-processors-for-edge-ps-series-soc-i-o-registers/001/redirection-table-entry-0-rte0-offset-10/).
@@ -82,3 +82,7 @@ Move longer work to independent threads. irq.context() identifies the calling
 deferred callback context; blocking NVMe operations reject it to prevent waiting
 on their own dispatcher. The isolated HPET test verifies completion while a
 200 ms scheduler callback is still running.
+
+Routes lease their callback provider from creation through successful quiet release.
+New routes for a draining provider fail. Hard-ISR front ends remain boot-pinned;
+deferred callbacks may belong to drainable modules. See [hub lifetime](../../kernel/hub.md).

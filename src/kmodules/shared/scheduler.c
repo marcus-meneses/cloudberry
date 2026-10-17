@@ -62,13 +62,14 @@ static void destroy(struct task *t) {
     if (t->all_previous) t->all_previous->all_next=t->all_next; else state.all=t->all_next;
     if (t->all_next) t->all_next->all_previous=t->all_previous;
     --state.stats.retained;
+    if(t->entry)kernel_hub_pin_call(state.hub,t->entry,0);
     state.release((uintptr_t)state.heap,(uintptr_t)t,0,0,0,0);
 }
 struct kernel_surface_result scheduler_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();
     const struct kernel_surfaces *hub=(const void *)a;
     if (state.initialized) return module_result(1,state.hub==hub && state.heap==(void *)b);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !b) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !b) return module_result(0,0);
     kernel_surface_call allocate=kernel_surface_find_version(hub,"mem.calloc",1,0);
     kernel_surface_call release=kernel_surface_find_version(hub,"mem.free",1,0);
     kernel_surface_call dispatch=kernel_surface_find_version(hub,"inthandle.dispatch",1,1);
@@ -93,7 +94,7 @@ struct kernel_surface_result scheduler_surface_submit(MODULE_ARGS) {
     kernel_surface_call entry=NULL;
     if (r->kind==SCHEDULER_METHOD) {
         const struct kernel_surface *entries=kernel_surface_entries(state.hub);
-        for (size_t i=0;i<state.hub->count;++i)
+        for (size_t i=0;i<kernel_surface_count(state.hub);++i)
             if ((uintptr_t)entries[i].call==r->entry_vector && entries[i].major==r->entry_major &&
                 entries[i].minor>=r->entry_minor) { entry=entries[i].call; break; }
         if (!entry) return module_result(0,0);
@@ -114,6 +115,7 @@ struct kernel_surface_result scheduler_surface_submit(MODULE_ARGS) {
     struct kernel_surface_result memory=state.allocate((uintptr_t)state.heap,1,sizeof(struct task)+r->payload.bytes,0,0,0);
     if (memory.status || !memory.value) return module_result(0,0);
     struct task *t=(void *)memory.value;
+    if(entry && kernel_hub_pin_call(state.hub,entry,1).status){state.release((uintptr_t)state.heap,(uintptr_t)t,0,0,0,0);return module_result(0,0);}
     t->id=state.next_id++; t->process_id=r->process_id;t->deadline_ns=r->deadline_ns; t->state=SCHEDULER_QUEUED; t->kind=r->kind;
     t->entry_vector=r->entry_vector; t->entry=entry; t->payload=r->payload;
     if (r->payload.bytes) {

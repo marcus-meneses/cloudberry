@@ -211,7 +211,7 @@ struct kernel_surface_result acpi_surface_init(MODULE_ARGS) {
     kernel_surface_call associate=kernel_surface_find(acpi_hub,"pci.associate"),publish=kernel_surface_find(acpi_hub,"hub.publish_table");
     if(!pci || !associate || !publish){s=UACPI_STATUS_NOT_FOUND;goto fail;}
     acpi_match_pci((void *)table.entries,table.count,(const void *)pci->address);
-    struct kernel_hub_table published={.name=ACPI_TABLE_NAME,.address=(uintptr_t)&table,.bytes=sizeof(table),.count=1,.entry_bytes=sizeof(table)};
+    struct kernel_hub_table published={.owner=kernel_surface_owner(acpi_hub,"acpi.init"),.name=ACPI_TABLE_NAME,.address=(uintptr_t)&table,.bytes=sizeof(table),.count=1,.entry_bytes=sizeof(table)};
     if(CALL(publish,&published,0,0).status){s=UACPI_STATUS_INTERNAL_ERROR;goto fail;}
     for(size_t i=0;i<table.count;++i) {
         struct acpi_device *dev=(struct acpi_device *)&table.entries[i];

@@ -787,3 +787,23 @@ test-block-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-block-boot
 _test-block-boot: $(ISO) $(BUILD)/tests/src-block-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=$(BLOCK_BACKEND) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+
+.PHONY: test-hub
+test-hub:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -pthread tests/hub.c kernel/mediate.S -Wl,--gc-sections -o $(TEST_BUILD)/tests/src-hub
+	$(TEST_BUILD)/tests/src-hub
+
+$(BUILD)/tests/src-hub-main.o: kernel/main.c kernel/surfaces.h Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_HUB_TEST=1 -c $< -o $@
+$(BUILD)/tests/src-hub-boot.o: tests/hub-boot.c tests/probe.h kernel/surfaces.h Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-hub-kernel.elf: FORCE $(BUILD)/tests/src-hub-main.o $(BUILD)/tests/src-hub-boot.o $(COMMON_OBJECTS) boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+.PHONY: test-hub-boot _test-hub-boot
+test-hub-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-hub-boot
+_test-hub-boot: $(ISO) $(BUILD)/tests/src-hub-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=nvme --hub-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"

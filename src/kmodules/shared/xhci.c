@@ -276,7 +276,7 @@ struct kernel_surface_result xhci_surface_init(MODULE_ARGS) {
     if(!bsp() || !hw || !publish)goto fail;
     state.hw=(const void *)hw->address;
     state.table=(struct xhci_table){.magic=XHCI_TABLE_MAGIC,.major=1,.record_bytes=sizeof(struct xhci_record)};
-    struct kernel_hub_table table={.name=XHCI_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
+    struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"xhci.init"),.name=XHCI_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
     if(CALL(publish,&table,0,0).status)goto fail;
     return module_result(1,1);
 fail:state.hub=NULL;return failure();

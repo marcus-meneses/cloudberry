@@ -2,18 +2,22 @@
 
 Kmodules are coupled kernel methods sharing an address space and normal C ABI:
 six register arguments, value/status in RAX/RDX. They are not handlers or processes.
-A format2 PIC image and JSON export manifest describe named/versioned surfaces;
+A format3 PIC image and JSON export manifest describe named/versioned surfaces;
 the generic loader maps RX code and RW/NX state and generates mediation entries.
-The four-page (16 KiB) hub retains compact names, versions, entries and table references;
-arguments are defined in headers. Runtime module unload is not implemented.
+Hub ABI3 has a stable header and separate growable method/table/provider arrays.
+Records and callable entries never move; physical pages are allocated on demand.
+[Ownership and lifetime](../kernel/hub.md) defines boot pinning, active calls,
+retained callback leases and cooperative retirement. Image unmapping and table
+withdrawal remain unsupported. Current modules stay Limine-loaded; only selected
+future modules will use the ext4 driver directory.
 
 | Module | Responsibility and contract |
 | --- | --- |
 | [config](shared/config.md) | Strict boot-text schema, owned typed values and atomic config.<key> hub references |
 | [acpi/platform](shared/acpi.md) | AML namespace, stable firmware companions and non-PCI platform inventory; runtime SCI/driver policy deferred |
-| [usb](shared/usb.md) | Root/downstream enumeration, configuration validation, interface ownership and scoped synchronous I/O; HID/storage class drivers deferred |
+| [usb](shared/usb.md) | Root/downstream enumeration, configuration validation, interface ownership and scoped synchronous I/O; HID/UAS class drivers deferred; BOT storage implemented |
 | [usb-hub](shared/usb-hub.md) | Hub discovery, owned port registry, power/reset, nested enumeration and interrupt-driven hotplug |
-| [xhci](shared/xhci.md) | Owned controller/port registry, command/event rings, root/downstream slots/endpoints, asynchronous transfers and restart cleanup; HID/storage class drivers deferred |
+| [xhci](shared/xhci.md) | Owned controller/port registry, command/event rings, root/downstream slots/endpoints, asynchronous transfers and restart cleanup; HID/UAS class drivers deferred; BOT storage implemented |
 | [mem](shared/mem-pages.md) | Caller-owned heaps plus owned pages, sanitization/reuse and guarded stacks |
 | [inthandle](shared/inthandle.md) | Early faults, per-CPU descriptor tables, owned vectors and CMOS/NMI policy |
 | [hwenum](shared/hwenum.md) | Firmware/PCI enumeration and hardware descriptor table/dump |
@@ -27,8 +31,12 @@ arguments are defined in headers. Runtime module unload is not implemented.
 | [smp](shared/smp.md) | Limine AP startup, CPU-local stacks/tables, shared clock, wake/TLB IPIs |
 | [irq](shared/irq.md) | Owned IOAPIC routes/MSI messages and deferred device notifications |
 | [iommu](shared/iommu.md) | Intel VT-d/AMD-Vi requester domains, pinned translations, invalidation and faults |
-| [pci](shared/pci.md) | Exclusive endpoint/BAR/MSI-X ownership and tracked/pinned DMA |
-| [nvme](shared/nvme.md) | Explicit read-only controller/namespace, completion IRQs and reset/quiescence |
+| [pci](shared/pci.md) | Exclusive endpoint/BAR/MSI/MSI-X ownership and tracked/pinned DMA |
+| [nvme](shared/nvme.md) | Explicit controller/namespace block read/write/flush, completion IRQs and reset/quiescence |
+| [sata](shared/sata.md) | Explicit AHCI controller/port block read/write/flush, MSI completion and reset/quiescence |
+| [usb-storage](shared/usb-storage.md) | USB BOT/SCSI block read/write/flush and interface ownership |
+| [partition](shared/partition.md) | Validated GPT GUID selection and bounded common-block slices |
+| [ext4-fs](shared/ext4-fs.md) | Interchangeable block-backed ext4, journaled mutations and crash replay |
 | [splash](shared/splash.md) | Temporary UEFI framebuffer validation and centered pre-flight logo |
 
 Mem core primitives implement malloc/free/calloc/realloc/aligned allocation and
@@ -39,7 +47,7 @@ zero-size and alignment rules are described in mem.h. Configured adapters grow
 heaps through memory.reserve; heap backing is retained, while owned PAGES/STACK
 allocations support release. Raw primitives need external locking.
 
-Mediated mem/memory, hub, hwenum, PCI, mmio, clock and callback scheduler surfaces share
+Mediated mem/memory, hwenum, PCI, mmio, clock and callback scheduler surfaces share
 ordered global/clock CPU locks with IF preservation. Interrupt binding mutations use that
 lock; hardware readers take atomic sequence snapshots. Timer state is CPU-local.
 Stack allocation/free use internal short critical sections and bounded mapping
@@ -47,6 +55,8 @@ batches rather than one operation-wide lock. Thread control protects short trans
 execution or context switches. Callback invocation releases its queue lock and stays synchronous on its caller.
 Clock-only operations never acquire the global lock; init/RTC/activation acquire
 global before clock. Lock-order inversion is fatal. Never call allocating/foreground methods from a hardware ISR.
+Hub publication uses a separate nonblocking writer token, with short ledger/map
+critical sections and no lock across bulk construction or SMP invalidation.
 New modules must supply their own shared-state/reentrancy contract.
 
 Threads are pinned, preemptible outside critical sections and eagerly preserve
@@ -57,7 +67,7 @@ validation before TSC activation, retaining HPET health checks/fallback. Shared
 address-space mapping changes wait for remote invalidation before physical reuse.
 Owners must quiesce in-flight IRQ callbacks before freeing a binding's context.
 
-Focused test targets include test-config, test-config-boot, test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
+Focused test targets include test-hub, test-hub-boot, test-block-boot, test-config, test-config-boot, test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,
 test-scheduler, test-irq, test-acpi, test-acpi-boot, test-usb, test-usb-boot, test-usb-hub, test-usb-hub-boot, test-pci, test-tsc-validation and test-threads-smp. The latter uses one/four-CPU disposable TCG
 boots, including timer preemption on every CPU and remote cached mapping reuse.
 These boots also validate real NVMe MSI-X reads and lost-completion timeout/reset

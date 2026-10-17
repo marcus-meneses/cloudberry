@@ -13,7 +13,7 @@ registry and queues) and 1 (clock). Nested lock hold durations can overlap and m
 Domain counters separate their acquisitions,
 contention and time. max_hold_method is hub method index + 1; zero denotes an
 explicit critical section with no mediated method tag. max_hold_domain identifies
-the lock. Hub entries are immutable after boot loading, so this attribution is
+the lock. Hub entries are immutable once published, and later growth preserves their indexes, so this attribution is
 stable for the boot. Counts include instrumentation overhead.
 
 Durations are ordered local TSC ticks, not nanoseconds or guest CPU execution

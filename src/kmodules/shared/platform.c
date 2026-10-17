@@ -36,7 +36,7 @@ struct kernel_surface_result platform_surface_init(MODULE_ARGS) {
         }
     }
     table=(struct platform_table){.magic=PLATFORM_TABLE_MAGIC,.major=1,.entry_bytes=sizeof(struct platform_device),.count=count,.generation=1,.entries=entries};
-    struct kernel_hub_table published={.name=PLATFORM_TABLE_NAME,.address=(uintptr_t)&table,.bytes=sizeof(table),.count=1,.entry_bytes=sizeof(table)};
+    struct kernel_hub_table published={.owner=kernel_surface_owner(hub,"platform.init"),.name=PLATFORM_TABLE_NAME,.address=(uintptr_t)&table,.bytes=sizeof(table),.count=1,.entry_bytes=sizeof(table)};
     if(CALL(publish,&published,0,0).status){CALL(release,b,entries,0);table=(struct platform_table){0};return module_result(0,0);}
     saved_hub=hub;saved_heap=b;return module_result(count,1);
 }

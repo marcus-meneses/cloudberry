@@ -1,7 +1,8 @@
 # Isolated acceptance
 
 Boot tests rebuild below `bin/tests/isolated`, use test-only kernels/probes and
-create disposable storage. NVMe media contain known data and are attached read-only.
+create disposable storage. Original NVMe read tests attach known data read-only;
+focused block-write tests make only their disposable boot image writable.
 No test attaches the persistent candidate disks or changes host permissions.
 
 ```sh
@@ -409,7 +410,7 @@ outside this test and outside USB core.
 Successful reports live under mem-boot-<N>cpu[-intel|-amd]-usb-hotplug. USB3 parser
 rules are modeled; native/physical USB acceptance remains pending. Test probes
 never enter the candidate ISO. The build also checks new USB objects for absolute
-runtime pointer relocations, which the format2 loader cannot relocate.
+runtime pointer relocations, which the format3 loader cannot relocate.
 
 ## External USB hubs
 
@@ -596,3 +597,39 @@ Latest isolated TCG qualification (2026-10-16 local date):
 - sata, 1 CPU(s), none IOMMU model: `f07052b863014a79a6a818d39b11b330`.
 - sata, 4 CPU(s), intel IOMMU model: `12251496e312483d93c83d3fb8027ba0`.
 - nvme, 4 CPU(s), amd IOMMU model: `a9c71348fc9a44e1ac0ed6200914b615`.
+
+## Dynamic hub and provider draining
+
+```
+make -C src test-hub
+make -C src test-hub-boot QEMU_CPUS=4 QEMU_IOMMU=amd
+```
+
+The host test uses shared page aliases and real generated RX mediation stubs,
+three concurrent registry readers and a blocked caller. It grows to 602 methods
+and 200 owned tables, injects physical-allocation and writable-alias mapping
+failure, verifies retry without partial publication, stable pointers, boot/table
+pinning, active and leased draining, resume, irreversible retirement and stale-call
+failure. No fixed giant physical registry is allocated.
+
+The dedicated isolated guest test late-loads format3 synthetic modules, rejects
+format2 before allocation/publication, grows by 600 methods/200 tables, checks
+actual RO/NX and RX page flags and executes a late stub on CPU1. It exercises blocked-call accounting plus thread,
+scheduler-result and IRQ-route leases. It drains and retires only synthetic test
+providers. All production boot modules remain pinned. Four-CPU AMD-Vi TCG passes;
+physical image unmapping/table withdrawal are deliberately not implemented.
+The storage regression boots from disposable AHCI with four CPUs and Intel VT-d,
+then exercises configured-GUID ext4 writes/remount and independent fsck checks.
+Results live under `bin/tests/isolated/tests/hub-4cpu-amd`; no candidate VM or
+persistent developer disk is attached. See [the current hub contract](../kernel/hub.md).
+
+Latest dynamic-hub qualification (2026-10-16 local date):
+
+- `hub-4cpu-amd`: `91e42dc936974637bb5c6bd3f2283b84`, passed.
+- `block-sata-4cpu-intel`: `a77daa62958c440e809186dfb54b0383`, passed.
+
+Resized-layout qualification (2026-10-17): the isolated four-CPU AMD-Vi TCG
+boot rebuilt the kernel and hub probe against 16 MiB windows and passed late
+registration, stable RO/RX mappings, CPU1 stub execution, caller/lease draining,
+retirement and stale-call rejection. GPT/ext4 host checks passed afterward.
+Run ID: `8ad19743be294d31aeefcb8b0d6c1209`. Candidate VM and persistent developer disks were not used.

@@ -61,7 +61,7 @@ struct kernel_surface_result pci_surface_init(MODULE_ARGS) {
         }
         if(ambiguous)r->identity.flags|=DEVICE_ASSOCIATION_ERROR;
     }
-    struct kernel_hub_table table={.name=PCI_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
+    struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"pci.init"),.name=PCI_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
     if(CALL(publish,&table,0,0).status)return init_failed();
     state.hub=hub;return module_result(1,1);
 }

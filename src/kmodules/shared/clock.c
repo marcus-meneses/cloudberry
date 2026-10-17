@@ -193,7 +193,7 @@ struct kernel_surface_result clock_surface_calibrate(MODULE_ARGS) {
 struct kernel_surface_result clock_surface_init(MODULE_ARGS) {
     MODULE_UNUSED();const struct kernel_surfaces *hub=(const void *)a;
     if (state.initialized) return module_result(state.info.source,hub==state.hub);
-    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2) return module_result(0,0);
+    if (!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI) return module_result(0,0);
     if (!clock_platform_configure(hub)) return module_result(0,0);
     state.configured=0;state.hub=hub;state.cpu=clock_cpu_detect();state.info=(struct clock_info){.flags=state.cpu.flags};
     state.read=kernel_surface_find_version(hub,"mmio.read",1,0);

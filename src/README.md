@@ -121,8 +121,11 @@ returns for module startup. Limine quiet mode suppresses its ordinary screen out
 firmware output before Limine remains outside kernel control. Hwenum owns hardware inventory formatting;
 main invokes hwenum.dump without interpreting descriptors. Splash owns validation
 and centered logo rendering. Modules carry named/versioned export manifests;
-payload definitions stay in C headers. The compact hub occupies four pages (16 KiB); mediation entries occupy three
-pages (12 KiB). Consumers use the hub's reported extent.
+payload definitions stay in C headers. Hub ABI3 has a stable one-page header and
+separate method/table/provider arrays and stubs backed by pages on demand.
+Published pointers never move. [Hub ownership and draining](kernel/hub.md)
+defines leases, provider state and retirement; bundled format3 images reject
+incompatible old layouts before loading.
 
 The [callback scheduler](kmodules/shared/scheduler.md) supports mediated methods or
 copied deferred interrupt frames, process ownership, deadlines and retained
@@ -142,7 +145,9 @@ External inputs remain masked until an owner enables an explicit IRQ route.
 
 Shared mutable mechanisms use ordered global and clock locks with local IRQs
 disabled. Ordinary timestamp reads no longer acquire the allocator/queue lock. Raw mem primitives require caller synchronization; mediated
-mem/memory, hub, clock, PCI, mmio, hwenum and scheduler mutations are serialized.
+mem/memory, clock, PCI, mmio, hwenum and scheduler mutations are serialized.
+Hub publication instead uses its own nonblocking writer token, with page-sized
+ledger/map critical sections and bulk construction outside the CPU lock.
 Stack construction/teardown use short transitions and mapping batches of at most
 16 pages, with one shootdown per batch. Exited thread cleanup runs outside its
 list lock. Callbacks execute outside their queue lock on preemptible workers;
@@ -195,7 +200,7 @@ follow process isolation and safe boundary transfer.
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; automatic boot-volume selection, parallel controllers and physical durability remain open |
-| Modules | Separate Limine-loaded images, validated versioned exports and mediated hub | Disk loading, dependency-driven driver selection and executable hot replacement remain future work |
+| Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; table withdrawal, disk loading, dependency-driven selection and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
 stop/start reclaims existing hubs while USB core and root attachment identity
@@ -205,10 +210,14 @@ validated against their prefix before configuration. Automatic failed-provider
 recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
-The production hub uses 77.00% of its 16 KiB extent, or 79.05% with the selected
-IOMMU backend; mediation uses 62.50%/64.32% of 12 KiB. Capacity is sufficient for
-the immediate storage work. These figures measure registry/stub occupancy, not
-whole-kernel RAM use or a demonstrated throughput/latency bound.
+The hub grows within reserved virtual windows and allocates physical pages only
+as needed. Its current production registry has 243 methods, or 250 with a selected
+IOMMU backend, plus sixteen table references. Capacity and committed backing are
+reported by the header rather than as a percentage of a fixed 16 KiB allocation.
+Provider records expose ownership and lifetime. All current boot modules are
+pinned; selected future providers can drain calls and leases and retire without
+image unmapping. Published-table owners remain pinned until table-reader lifetime
+tracking exists. These mechanisms do not establish a throughput/latency bound.
 
 Current QEMU boot media is a read-only USB mass-storage ISO. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
 driver partition by its configured GUID. Production init claims no storage interface
@@ -278,6 +287,7 @@ src/
 ├── kernel/
 │   ├── cpu.c
 │   ├── cpu.h
+│   ├── hub.md
 │   ├── main.c
 │   ├── mediate.S
 │   ├── modules.c
@@ -484,6 +494,8 @@ src/
 │   ├── ext4-runtime.c
 │   ├── ext4-write.c
 │   ├── ext4-write.py
+│   ├── hub-boot.c
+│   ├── hub.c
 │   ├── hwenum.c
 │   ├── inthandle-faults.py
 │   ├── iommu-amd-backend.c
@@ -601,7 +613,8 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are boot-volume selection and driver
+Current next priorities are module-image arena expansion, multiple NVMe/SATA
+instances and completion of USB device/hub hotplug cleanup, followed by bootstrap boot-volume selection and driver
 reading and loading driver modules from disk, followed by process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 

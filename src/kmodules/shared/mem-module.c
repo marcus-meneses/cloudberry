@@ -21,7 +21,7 @@ static int grow(struct mem_heap *heap, size_t bytes, size_t alignment) {
 }
 struct kernel_surface_result mem_surface_configure(MODULE_ARGS) {
     MODULE_UNUSED(); const struct kernel_surfaces *candidate = (const void *)a;
-    if (!candidate || candidate->magic != KERNEL_SURFACES_MAGIC || candidate->major != 2 ||
+    if (!candidate || candidate->magic != KERNEL_SURFACES_MAGIC || candidate->major != KERNEL_HUB_ABI ||
         !kernel_surface_find_version(candidate, "memory.reserve", 1, 0)) return module_result(0, 0);
     cpu=kernel_surface_find(candidate,"cpu.control");hub = candidate; return module_result(1, 1);
 }

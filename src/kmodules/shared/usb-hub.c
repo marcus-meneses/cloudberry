@@ -186,7 +186,7 @@ struct kernel_surface_result usb_hub_surface_init(MODULE_ARGS) {
     if(CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
     const struct kernel_hub_table *usb=kernel_hub_find_table(hub,USB_TABLE_NAME);kernel_surface_call publish=kernel_surface_find(hub,"hub.publish_table");if(!usb || !publish)return module_result(0,0);
     state.usb=(void *)usb->address;state.heap=b;state.table=(struct usb_hub_table){.magic=USB_HUB_TABLE_MAGIC,.major=1,.record_bytes=sizeof(struct usb_hub_record)};
-    struct kernel_hub_table table={.name=USB_HUB_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
+    struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"usb_hub.init"),.name=USB_HUB_TABLE_NAME,.address=(uintptr_t)&state.table,.bytes=sizeof(state.table),.count=1,.entry_bytes=sizeof(state.table)};
     if(CALL(publish,&table,0,0).status)return module_result(0,0);
     state.hub=hub;return module_result(1,1);
 }

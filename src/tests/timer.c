@@ -36,7 +36,7 @@ static struct kernel_surface_result info(MODULE_ARGS) {
 static int deferred;
 static struct kernel_surface_result tick(MODULE_ARGS) {MODULE_UNUSED();assert(eois && a);return module_result(deferred?THREAD_TICK_DEFERRED:THREAD_TICK_HANDLED,1);}
 int main(void) {
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=5,.header_bytes=offsetof(__typeof__(fixture),methods)};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=5,.header_bytes=offsetof(__typeof__(fixture),methods)};
     const char *names[]={"clock.now_ns","inthandle.claim","inthandle.release","apic.info","threads.tick"};kernel_surface_call calls[]={now,claim,release,info,tick};
     for (unsigned i=0;i<5;++i) {strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].call=calls[i];fixture.methods[i].major=1;}
     irq_flags=0x200;

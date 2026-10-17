@@ -81,7 +81,7 @@ static struct scheduler_completion result(uint64_t id, bool reap) {
 int main(void) {
     assert(CALL(scheduler_surface_run,1,0,0).status==KERNEL_SURFACE_FAILED);
     assert(mem_init(&heap,arena,sizeof(arena)));
-    fixture.hub.magic=KERNEL_SURFACES_MAGIC; fixture.hub.major=2;
+    fixture.hub.magic=KERNEL_SURFACES_MAGIC; fixture.hub.major=KERNEL_HUB_ABI;
     fixture.hub.header_bytes=offsetof(__typeof__(fixture),methods); fixture.hub.count=10;
     const char *names[]={"mem.calloc","mem.free","inthandle.dispatch","inthandle.is_bound",
                          "test.work","test.copied","test.nested","test.failed","test.remove","clock.now_ns"};

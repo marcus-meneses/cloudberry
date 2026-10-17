@@ -32,7 +32,7 @@ static struct kernel_surface_result map(MODULE_ARGS) {
 int main(void) {
     assert(CALL(mmio_surface_map,0,0,0).status==KERNEL_SURFACE_FAILED);
     assert(mem_init(&heap,arena,sizeof(arena)));
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,
         .header_bytes=offsetof(__typeof__(fixture),methods),.count=4,
         .tables_offset=offsetof(__typeof__(fixture),tables),.table_count=1};
     const char *names[]={"mem.calloc","mem.free","hub.publish_table","hardware.map_mmio"};

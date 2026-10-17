@@ -7,7 +7,7 @@ normal boot; event.run enters the live BSP execution loop after diagnostics.
 
 Hub surfaces: scheduler.init, scheduler.submit, scheduler.run, scheduler.cancel,
 scheduler.result, scheduler.stats, scheduler.remove_process and scheduler.next_deadline. Exact structures/call arguments are in
-`scheduler.h`; the hub/debug output contains names and entries only.
+`scheduler.h`; the hub contains names, versions, entries and provider ownership.
 
 A scheduler_request declares its format ABI (3), process_id, deadline_ns, target kind, entry vector, required
 entry major/minor and payload structure. Process ID zero identifies kernel-owned
@@ -144,3 +144,9 @@ threads. See profiling.md for the measured change.
 Submissions from APs send a wake IPI to the BSP after queue publication, so its
 idle event loop cannot sleep indefinitely with newly submitted callbacks. The
 isolated SMP test publishes from an AP while the BSP enters idle.
+
+METHOD records lease their provider at submission until record destruction, including
+retained completed/cancelled results. Failed construction releases the lease; new
+submissions targeting draining providers fail. Existing queued leases may dispatch
+while draining. Result reclamation or process removal releases the lease after any
+running callback returns. See [hub lifetime](../../kernel/hub.md).

@@ -49,7 +49,7 @@ static struct kernel_surface_result unmap_batch(MODULE_ARGS) {
 int main(void) {
     struct boot_memory_entry region={0x1000,sizeof(physical),0};struct boot_memory_entry *entries[]={&region};struct boot_memory_map memory={0,1,entries};
     assert(boot_pages_init(&pages,&memory,(uintptr_t)physical-0x1000));assert(mem_init(&heap,metadata,sizeof(metadata)));
-    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=2,.count=8,.header_bytes=offsetof(__typeof__(fixture),methods)};
+    fixture.hub=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.count=8,.header_bytes=offsetof(__typeof__(fixture),methods)};
     const char *names[]={"mem.calloc","mem.free","memory.reserve","memory.release","memory.map_owned","memory.unmap_owned","memory.map_batch","memory.unmap_batch"};kernel_surface_call calls[]={allocate,free_meta,reserve,release,map,unmap,map_batch,unmap_batch};
     for (unsigned i=0;i<8;++i) {strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].call=calls[i];fixture.methods[i].major=1;fixture.methods[i].minor=1;}
     assert(!CALL(mem_surface_pages_init,&fixture.hub,&heap,0).status);

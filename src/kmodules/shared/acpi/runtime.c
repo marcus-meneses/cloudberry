@@ -13,7 +13,7 @@ static kernel_surface_call alloc_mem,free_mem,map_mem,read_port,write_port,pci_r
 static int busy;
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 int acpi_runtime_setup(const struct kernel_surfaces *hub,uintptr_t heap,uint64_t rsdp) {
-    if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=2 || !heap || !rsdp)return 0;
+    if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || hub->major!=KERNEL_HUB_ABI || !heap || !rsdp)return 0;
     acpi_hub=hub;acpi_heap=heap;acpi_rsdp=rsdp;
     const char *names[]={"mem.malloc","mem.free","hardware.firmware_map","hardware.port_read","hardware.port_write","pci.firmware_read","pci.firmware_write","clock.now_ns","cpu.control","threads.control","hardware.log"};
     kernel_surface_call *slots[]={&alloc_mem,&free_mem,&map_mem,&read_port,&write_port,&pci_read,&pci_write,&now,&cpu,&thread,&log_output};
