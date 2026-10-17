@@ -93,5 +93,9 @@ handling enabled but defers thread switching during revocation, preventing a
 context-switch flush from hiding stale translations. Each cycle returns owned
 page/table/stack reservations to its baseline. No probe enters candidate images,
 and production exception dispatch is unchanged.
+The same target measures paired root-selection controls, remote/inactive
+protection, yield elapsed time and dense/sparse teardown with raw host reports;
+see [profiling methodology and observations](../../tests/address-space-profiling.md).
+No production scheduling/TLB optimization is inferred from TCG-only timings.
 Ring-3 fault containment and the eventual handler invocation boundary remain
 separate acceptance milestones.

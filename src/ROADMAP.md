@@ -266,6 +266,18 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     handling remains unchanged; ring-3 supervisor protection awaits user-mode
     acceptance. Four-CPU AMD-Vi and Intel VT-d guest acceptance pass.
 
+29. Closed: isolated probes record interleaved empty-clock/same-root/root-roundtrip
+    timings, worker CPU/space/owner, yield elapsed time and paired active/inactive
+    protection changes. Ten trials each measure dense 32/512-page and sparse
+    128-page construction/teardown, table backing and managed BSP hold/IRQ-off
+    maxima. Host reports retain all raw samples, median/p95/max and paired
+    estimates; malformed/incomplete data fails acceptance. Single-CPU and both
+    four-CPU IOMMU emulations pass, along with seven parser checks. Results use
+    HPET/PGE-off/TCG; native timing and the PGE-toggle path remain unmeasured.
+    Sparse population is costly in this environment; allocation/ledger attribution
+    precedes optimization. Production scheduling/invalidation policy is unchanged.
+    See tests/address-space-profiling.md for methodology, observations and run IDs.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.

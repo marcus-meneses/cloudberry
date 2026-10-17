@@ -10,7 +10,7 @@ lock=(test/'run.lock').open('a')
 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 except BlockingIOError:raise SystemExit('this isolated test is already running; refusing to overwrite its media')
 report=test/'report.json';report.unlink(missing_ok=True)
-result={'run_id':uuid.uuid4().hex,'status':'running','backend':args.backend,'hub_only':args.hub_only,'spaces_only':args.spaces_only,'cpus':args.cpus,'iommu':args.iommu,'accelerator':args.accel,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+result={'run_id':uuid.uuid4().hex,'status':'running','backend':args.backend,'hub_only':args.hub_only,'spaces_only':args.spaces_only,'cpus':args.cpus,'iommu':args.iommu,'accelerator':args.accel,'cpu_spec':args.cpu,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 def save(): (test/'result.json').write_text(json.dumps(result,indent=2)+'\n')
 save()
 try:
@@ -60,6 +60,10 @@ try:
     if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')
     if args.bootstrap and not args.duplicate and 'PASS bootstrap unique GUID' not in log.read_text():raise RuntimeError('unique volume was not selected')
+    if args.spaces_only:
+        from space_report import parse_spaces
+        if 'PASS address-space profiling' not in log.read_text():raise RuntimeError('profiling acceptance did not run')
+        result['address_spaces']=parse_spaces(log.read_text(),args.cpus)
     subprocess.run([sys.executable,str(root/'src/tests/boot-image.py'),str(image)],check=True)
     result['status']='passed';result['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat();save();report.write_text(json.dumps(result,indent=2)+'\n');print('PASS isolated',('address spaces' if args.spaces_only else 'dynamic hub' if args.hub_only else args.backend+' boot/GPT/ext4 block backend'),'; report:',report)
 except BaseException as error:

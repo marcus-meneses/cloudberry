@@ -57,6 +57,11 @@ after each probe; unexpected faults halt. The fault code/assembly is linked only
 into the isolated probe module, never production inthandle. Each cycle checks
 that owned page/table/stack reservations return to baseline.
 Reports live under `bin/tests/isolated/tests/spaces-<N>cpu-<iommu>/`.
+The same isolated target now records paired clock/same-root/root-change controls,
+active versus inactive protection changes, yield elapsed time, and ten teardown
+trials per dense/sparse geometry. Raw samples, median/p95/max, worker identity,
+clock and PGE/PCID metadata are saved in `report.json.address_spaces`; missing or
+malformed groups fail acceptance. See [method and dated measurements](address-space-profiling.md).
 User-mode execution and a handler invocation boundary are not tested or supplied.
 
 Runtime module initialization and startup now both reject discovery, captured

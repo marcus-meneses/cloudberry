@@ -546,6 +546,9 @@ src/
 │   ├── space-fault.c
 │   ├── space-fault.h
 │   ├── space-fault-entry.S
+│   ├── space_report.py
+│   ├── test-space-report.py
+│   ├── address-space-profiling.md
 │   ├── spaces-boot.c
 │   ├── mem-pages-boot.c
 │   ├── mem-pages.c

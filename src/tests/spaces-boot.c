@@ -5,15 +5,19 @@
 #include "../kmodules/shared/threads.h"
 #include "probe.h"
 #include "space-fault.h"
+#include "../kmodules/shared/clock.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 static void print(const char *p){while(*p)__asm__ volatile("outb %0,$0xe9"::"a"(*p++));}
+static void number(uint64_t value){char d[24];unsigned n=0;do{d[n++]='0'+value%10;value/=10;}while(value);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(d[--n]));}
+static void samples(const char *name,const uint64_t *values,unsigned n){print("MEASURE spaces ");print(name);for(unsigned i=0;i<n;++i){print(" ");number(values[i]);}print("\n");}
 static bool failure(unsigned line){print("FAIL spaces-boot line ");char d[12];unsigned n=0;do{d[n++]='0'+line%10;line/=10;}while(line);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(d[--n]));print("\n");return false;}
 #define CHECK(x) do{if(!(x))return failure(__LINE__);}while(0)
 static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     kernel_surface_call create=kernel_surface_find(hub,"mem.space_create"),map=kernel_surface_find(hub,"mem.space_map"),unmap=kernel_surface_find(hub,"mem.space_unmap"),protect=kernel_surface_find(hub,"mem.space_protect"),query=kernel_surface_find(hub,"mem.space_query"),info=kernel_surface_find(hub,"mem.space_info"),destroy=kernel_surface_find(hub,"mem.space_destroy");
     kernel_surface_call alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free"),thread=kernel_surface_find(hub,"threads.create"),control=kernel_surface_find(hub,"threads.control"),step=kernel_surface_find(hub,"event.step"),clock=kernel_surface_find(hub,"clock.now_ns"),entry=kernel_surface_find(hub,"probe.space");
     CHECK(create && map && unmap && protect && query && info && destroy && entry);
-    struct mem_space_info a,b,snapshot;struct mem_pages first,second,replacement,code_a,code_b,hole_a,hole_b,canary;
+    CHECK(!kernel_cpu_control(CPU_METRICS_RESET,0,0,0,0,0).status);
+    struct mem_space_info a,b,idle,snapshot;struct mem_pages first,second,replacement,code_a,code_b,hole_a,hole_b,canary;
     CHECK(!CALL(create,101,&a,0).status && !CALL(create,102,&b,0).status && a.id!=b.id);
     CHECK(!CALL(alloc,1,101,&first).status && !CALL(alloc,1,102,&second).status && !CALL(alloc,1,101,&replacement).status);
     *(uint64_t *)first.address=0x1111;*(uint64_t *)second.address=0x2222;*(uint64_t *)replacement.address=0x3333;
@@ -23,6 +27,7 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     const uint64_t va=0x400000;
     CHECK(!map(a.id,101,va+4096,code_a.physical,0,0).status && !map(b.id,102,va+4096,code_b.physical,0,0).status && !map(a.id,101,va+8192,hole_a.physical,0,0).status && !map(b.id,102,va+8192,hole_b.physical,0,0).status);
     CHECK(!map(a.id,101,va,first.physical,MEM_SPACE_WRITE,0).status && !map(b.id,102,va,second.physical,MEM_SPACE_WRITE,0).status);
+    CHECK(!CALL(create,101,&idle,0).status && !map(idle.id,101,va,first.physical,0,0).status);
     CHECK(map(a.id,102,va+4096,second.physical,1,0).status && map(a.id,101,0,first.physical,1,0).status && map(a.id,101,va+4096,first.physical,3,0).status && map(a.id,101,KERNEL_SURFACES_ADDRESS,first.physical,1,0).status);
     struct mem_space_mapping mapping;CHECK(!query(a.id,101,va,(uintptr_t)&mapping,0,0).status && mapping.physical==first.physical && mapping.flags==1);
     CHECK(CALL(free,first.id,101,0).status && CALL(destroy,a.id,102,0).status);
@@ -30,7 +35,7 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     for(unsigned i=256;i<512;++i)CHECK(at[i]==master[i] && bt[i]==master[i] && !(at[i]&4));
     const struct kernel_hub_table *cpus=kernel_hub_find_table(hub,"smp.cpus");CHECK(cpus);
     unsigned count=cpus->count>1?3:2;uint64_t ids[3];struct probe_space probes[3]={{.root=a.root,.address=va,.expected=0x1111,.next=0x3333},{.root=b.root,.address=va,.expected=0x2222,.next=0x2222},{.root=a.root,.address=va,.expected=0x1111,.next=0x3333,.hold_preemption=1}};
-    for(unsigned i=0;i<count;++i){struct thread_request r={.abi=2,.cpu=i==2?1:0,.process_id=i==1?102:101,.address_space=i==1?b.id:a.id,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};r.payload.arguments[0]=(uintptr_t)&probes[i];struct kernel_surface_result created=CALL(thread,&r,0,0);CHECK(!created.status);ids[i]=created.value;}
+    for(unsigned i=0;i<count;++i){probes[i].id=i==1?b.id:a.id;probes[i].owner=i==1?102:101;struct thread_request r={.abi=2,.cpu=i==2?1:0,.process_id=i==1?102:101,.address_space=i==1?b.id:a.id,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};r.payload.arguments[0]=(uintptr_t)&probes[i];struct kernel_surface_result created=CALL(thread,&r,0,0);CHECK(!created.status);ids[i]=created.value;}
     struct thread_request wrong={.abi=2,.cpu=0,.process_id=102,.address_space=a.id,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};CHECK(CALL(thread,&wrong,0,0).status);
     __asm__ volatile("sti":::"memory");CHECK(CALL(kernel_surface_find(hub,"mem.space_switch"),a.id,101,0).status);
     uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(15000000000);
@@ -38,14 +43,17 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     CHECK(kernel_cpu_space()==0);uintptr_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));CHECK(cr3==pages->kernel_root);
     CHECK(!CALL(info,a.id,101,&snapshot).status && snapshot.leases==count-1 && snapshot.active<=count-1);
     struct cpu_record *cpu=(void *)cpus->address;
-    if(count==3){
-        /* Freeze root transitions under the same lock as map/protect. Sampling
-         * active counters without this can catch a legitimate timer transition. */
-        uint64_t held;
-        for(;;){held=kernel_cpu_enter();if(__atomic_load_n(&cpu[1].address_space,__ATOMIC_ACQUIRE)==a.id)break;kernel_cpu_leave(held);CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
-        uint64_t ack=__atomic_load_n(&cpu[1].tlb_ack,__ATOMIC_ACQUIRE);
-        CHECK(!protect(a.id,101,va,0,0,0).status && __atomic_load_n(&cpu[1].tlb_ack,__ATOMIC_ACQUIRE)>ack);kernel_cpu_leave(held);
-    }else CHECK(!protect(a.id,101,va,0,0,0).status);
+    uint64_t remote[SPACE_SAMPLES],inactive[SPACE_SAMPLES],bracket[SPACE_SAMPLES];
+    for(unsigned i=0;i<SPACE_SAMPLES;++i){
+        uint64_t held=kernel_cpu_enter();CHECK(count!=3 || __atomic_load_n(&cpu[1].address_space,__ATOMIC_ACQUIRE)==a.id);
+        uint64_t ack=count==3?__atomic_load_n(&cpu[1].tlb_ack,__ATOMIC_ACQUIRE):0;
+        struct kernel_surface_result begin=CALL(clock,0,0,0),end=CALL(clock,0,0,0);CHECK(!begin.status && !end.status && end.value>=begin.value);bracket[i]=end.value-begin.value;
+        begin=CALL(clock,0,0,0);CHECK(!protect(idle.id,101,va,i&1,0,0).status);end=CALL(clock,0,0,0);CHECK(!begin.status && !end.status && end.value>=begin.value);inactive[i]=end.value-begin.value;
+        begin=CALL(clock,0,0,0);CHECK(!protect(a.id,101,va,(i&1)?0:1,0,0).status);end=CALL(clock,0,0,0);CHECK(!begin.status && !end.status && end.value>=begin.value);remote[i]=end.value-begin.value;
+        CHECK(count!=3 || __atomic_load_n(&cpu[1].tlb_ack,__ATOMIC_ACQUIRE)>ack);kernel_cpu_leave(held);
+    }
+    CHECK(!CALL(destroy,idle.id,101,0).status);
+    samples("protect_clock_bracket_ns",bracket,SPACE_SAMPLES);samples("inactive_protect_ns",inactive,SPACE_SAMPLES);samples(count==3?"remote_protect_ns":"no_active_protect_ns",remote,SPACE_SAMPLES);
     CHECK(!query(a.id,101,va,(uintptr_t)&mapping,0,0).status && !mapping.flags && CALL(destroy,a.id,101,0).status);
     CHECK(!protect(b.id,102,va,0,0,0).status && !protect(a.id,101,va+4096,MEM_SPACE_EXEC,0,0).status && !protect(b.id,102,va+4096,MEM_SPACE_EXEC,0,0).status);
     for(unsigned i=0;i<count;++i)__atomic_store_n(&probes[i].command,1,__ATOMIC_RELEASE);
@@ -70,11 +78,35 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     CHECK(!CALL(free,second.id,102,0).status && !CALL(free,replacement.id,101,0).status && kernel_cpu_space()==0);
     CHECK(!CALL(free,code_a.id,101,0).status && !CALL(free,code_b.id,102,0).status && !CALL(free,canary.id,999,0).status);
     struct mem_space_info fresh;CHECK(!CALL(create,101,&fresh,0).status && fresh.id>a.id && !CALL(destroy,fresh.id,101,0).status);
+    for(unsigned i=0;i<count;++i){uint64_t worker[]={i==2?1:0,probes[i].id,probes[i].owner};samples("worker",worker,3);samples("switch_clock_bracket_ns",probes[i].timings[0],SPACE_SAMPLES);samples("same_root_pair_ns",probes[i].timings[1],SPACE_SAMPLES);samples("root_roundtrip_ns",probes[i].timings[2],SPACE_SAMPLES);samples("yield_roundtrip_ns",probes[i].timings[3],SPACE_SAMPLES);}
+    struct cpu_metrics metrics;CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status);samples("cycle_max_hold_ns",&metrics.max_hold_ns,1);samples("cycle_max_irq_off_ns",&metrics.max_irq_off_ns,1);
     /* Completed a cycle; the outer test checks allocation and fault totals. */
     return true;
 }
 
 static uint64_t owned_count(struct boot_pages *pages){uint64_t n=0;for(struct boot_reservation_chunk *c=pages->reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i){unsigned kind=c->entries[i].kind;if(kind==BOOT_RES_SPACE_TABLE || kind==BOOT_RES_PAGES || kind==BOOT_RES_STACK)++n;}return n;}
+static uint64_t private_tables(struct boot_pages *pages){uint64_t n=0;for(struct boot_reservation_chunk *c=pages->reservations.first;c;c=c->next)for(size_t i=0;i<c->count;++i)n+=c->entries[i].kind==BOOT_RES_SPACE_TABLE;return n;}
+static bool teardown_profile(const struct kernel_surfaces *hub,struct boot_pages *pages){
+    kernel_surface_call create=kernel_surface_find(hub,"mem.space_create"),map=kernel_surface_find(hub,"mem.space_map"),destroy=kernel_surface_find(hub,"mem.space_destroy"),alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free"),clock=kernel_surface_find(hub,"clock.now_ns");
+    const unsigned sizes[]={32,512,128};
+    for(unsigned shape=0;shape<3;++shape){
+        uint64_t elapsed[10],populate[10],tables[10],hold[10],irq_off[10];
+        for(unsigned trial=0;trial<10;++trial){uint64_t baseline=owned_count(pages),before_tables=private_tables(pages);struct mem_space_info space;struct mem_pages data;
+            CHECK(!CALL(create,700,&space,0).status && !CALL(alloc,sizes[shape],700,&data).status);
+            struct kernel_surface_result begin=CALL(clock,0,0,0),end;
+            for(unsigned i=0;i<sizes[shape];++i)CHECK(!map(space.id,700,UINT64_C(0x400000)+(uint64_t)i*(shape==2?UINT64_C(0x200000):4096),data.physical+(uint64_t)i*4096,0,0).status);
+            end=CALL(clock,0,0,0);CHECK(!begin.status && !end.status && end.value>=begin.value);populate[trial]=end.value-begin.value;tables[trial]=private_tables(pages)-before_tables;
+            CHECK(!kernel_cpu_control(CPU_METRICS_RESET,0,0,0,0,0).status);
+            begin=CALL(clock,0,0,0);CHECK(!CALL(destroy,space.id,700,0).status);end=CALL(clock,0,0,0);
+            CHECK(!begin.status && !end.status && end.value>=begin.value);elapsed[trial]=end.value-begin.value;
+            struct cpu_metrics metrics;CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status);hold[trial]=metrics.max_hold_ns;irq_off[trial]=metrics.max_irq_off_ns;
+            CHECK(!CALL(free,data.id,700,0).status && owned_count(pages)==baseline);
+        }
+        const char *total[]={"teardown_dense_32_ns","teardown_dense_512_ns","teardown_sparse_128_ns"},*build[]={"populate_dense_32_ns","populate_dense_512_ns","populate_sparse_128_ns"},*table_names[]={"dense_32_table_pages","dense_512_table_pages","sparse_128_table_pages"},*hold_names[]={"teardown_dense_32_hold_ns","teardown_dense_512_hold_ns","teardown_sparse_128_hold_ns"},*irq_names[]={"teardown_dense_32_irq_off_ns","teardown_dense_512_irq_off_ns","teardown_sparse_128_irq_off_ns"};
+        samples(total[shape],elapsed,10);samples(build[shape],populate,10);samples(table_names[shape],tables,10);samples(hold_names[shape],hold,10);samples(irq_names[shape],irq_off,10);
+    }
+    return true;
+}
 bool kernel_spaces_test(const struct kernel_surfaces *hub,struct boot_pages *pages){
     const struct kernel_hub_table *cpus=kernel_hub_find_table(hub,"smp.cpus");CHECK(cpus && cpus->count);
     kernel_surface_call configure=kernel_surface_find(hub,"probe.space_fault_config");CHECK(configure);
@@ -84,9 +116,15 @@ bool kernel_spaces_test(const struct kernel_surfaces *hub,struct boot_pages *pag
     /* event.step lazily creates two permanent deferred-worker stacks. Warm it
      * before the test allocation baseline, rather than misclassifying them. */
     CHECK(!CALL(kernel_surface_find(hub,"event.step"),1,0,0).status);
+    struct clock_info initial,final;kernel_surface_call clock_info=kernel_surface_find(hub,"clock.info");CHECK(clock_info && !CALL(clock_info,&initial,0,0).status);
+    uint64_t source_begin[]={initial.source,initial.flags,initial.hpet_period_fs,initial.tsc_hz};samples("clock_begin",source_begin,4);uint64_t cr4;__asm__ volatile("mov %%cr4,%0":"=r"(cr4));uint64_t root_mode[]={!!(cr4&128),!!(cr4&(1u<<17))};samples("root_mode",root_mode,2);
     uint64_t baseline=owned_count(pages);
     for(unsigned i=0;i<8;++i){CHECK(cycle(hub,pages));CHECK(owned_count(pages)==baseline);}
     uint64_t faults=0;for(uint64_t i=0;i<cpus->count;++i){CHECK(!slots[i].armed);faults+=slots[i].seen;}
     CHECK(faults==8*5*(cpus->count>1?3:2) && !CALL(configure,0,0,0).status && !CALL(page_free,storage.id,998,0).status);
+    samples("fault_events",&faults,1);uint64_t cycles=8;samples("cycles",&cycles,1);
+    CHECK(teardown_profile(hub,pages) && !CALL(clock_info,&final,0,0).status);
+    uint64_t source_end[]={final.source,final.flags,final.hpet_period_fs,final.tsc_hz};samples("clock_end",source_end,4);
+    print("PASS address-space profiling: paired root controls, active/inactive protection, scheduling and 30 dense/sparse teardown trials\n");
     print("PASS address spaces: 8 cycles; exact RO/NX/unmapped faults, restored CPU-local gates, active SMP revocation, reuse, preemption and zero owned-page/table/stack leaks\n");return true;
 }
