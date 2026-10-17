@@ -227,6 +227,46 @@ reference/lease checks and owned-reservation baseline restoration all pass.
 The requested performance sequence is complete; further instrumentation tuning
 or architectural work requires a separate decision.
 
+## Qualified statistics and peak attribution follow-up
+
+The next authorized follow-up separates statistics from watchdog timekeeping.
+Clock policy now publishes a qualified profiling rate only after local/shared
+TSC selection and invalidates it before recalibration and on fallback/error.
+Uncontended statistics use ordered local TSC rather than repeated HPET MMIO;
+HPET is retained when no qualified rate exists. Samples crossing epoch/rate
+changes are counted as unavailable rather than converted incorrectly. A regression
+seen by profiling quarantines that epoch globally and reaches clock policy on its
+next read, selecting HPET. Watchdog deadlines still use independent HPET on actual
+lock contention and every existing IPI/TLB wait path.
+
+Every outer acquisition remains measured. wait_peak/hold_peak/irq_peak retain
+CPU, method ID/name, domain, caller PC, profiling epoch/source, address-space ID
+and both duration units. Explicit dispatcher/event/timer transitions provide
+caller attribution. These identify where a peak was recorded, not whether its
+cause was a host pause or another owner. Existing multi-ms observations are not
+retroactively attributed. Reports retain 114 peak records plus 38 sample-quality
+records for BSP cycles/teardown, and fail if attribution is missing, duplicated
+or disagrees with the scalar maximum. Historical references without profiling
+sources receive an explicit comparison warning. No blanket correction is applied.
+
+Host checks cover conversion overflow, regression and mixed epochs, and clock
+tests check both clock-observed and profiling-observed fallback. The isolated
+guest forces a synthetic rate solely to exercise the fast mechanism, local
+fallback and mixed-epoch rejection, then restores real policy before all timings.
+The deliberate stuck-owner probe forces fast statistics and must still reach the
+HPET timeout. This test rate is neither calibration evidence nor a candidate setting.
+Fresh KVM performance confirmation remains pending; use the unchanged collection
+entry point with --runs 3 to compare against 20261017T202426.499405Z.
+
+Local acceptance lives under bin/tests/profile-boundary/acceptance: one-CPU run
+d59ffeee6a4040a48cfec27b0c37f653, four-CPU AMD-Vi run
+f45232f23786495293890ff6965601f6 and four-CPU Intel VT-d run
+f8f2b7eaad7d41a68f32210a41ab073b. All pass hardware fault/revocation/owned-reservation
+checks and contain 114 matching peak records. The forced-fast watchdog reaches
+its independent HPET timeout and stack dump. Host conversion/clock checks and
+nine reporter/eleven comparison tests pass. These TCG checks validate mechanics
+and fallback, not the native performance of qualified statistics.
+
 Focused local acceptance: AMD RDTSCP four-CPU run
 7bdedaf162144d50a7caeca271c632d4; AMD double-CPUID fallback one-CPU run
 b1c4787248294dba9bcab8b6675453ae; Intel LFENCE four-CPU run

@@ -26,6 +26,11 @@ def fixture():
                     f'teardown_{shape}_hold_ns', f'teardown_{shape}_irq_off_ns'):
             row(key, 10, 10)
         row(f'{shape}_table_pages', 10, pages)
+    for scope,n in ((0,8),(1,10),(2,10),(3,10)):
+        for trial in range(n):
+            for kind in ('wait','hold','irq'):
+                rows.append(f'ATTR spaces {kind} {scope} {trial} 10 20 0 1 0 123 2 1 0 clock.now_ns')
+            rows.append(f'MEASURE spaces profile_quality {scope} {trial} 100 0 0')
     return '\n'.join(rows)
 
 
@@ -63,6 +68,13 @@ class Reports(unittest.TestCase):
         result = distribution(raw)
         self.assertEqual((result['min'], result['median'], result['p95'], result['max']), (1, 4, 7, 7))
         self.assertEqual(raw, [7, 1, 5, 3])
+
+    def test_peak_context_and_corrupted_attribution(self):
+        r = parse_spaces(fixture(),1)
+        self.assertEqual(len(r['peak_attribution']),114)
+        self.assertEqual(r['peak_attribution'][0]['method'],'clock.now_ns')
+        for bad in (fixture().replace('ATTR spaces hold 0 0 10','ATTR spaces hold 0 0 11'),fixture().replace('ATTR spaces wait 0 0','MISSING wait 0 0'),fixture().replace('20 0 1 0 123 2 1 0 clock.now_ns','20 4 1 0 123 2 1 0 clock.now_ns')):
+            with self.assertRaises(ValueError):parse_spaces(bad,1)
 
     def test_independent_instrumentation_and_incomplete_rejection(self):
         report = parse_spaces(fixture(), 1)['instrumentation']

@@ -39,11 +39,12 @@ static struct kernel_surface_result physical_read(MODULE_ARGS) {
 }
 int clock_hpet_read(uintptr_t address,uint64_t *out) {(void)address;struct kernel_surface_result r=CALL(read_mmio,0,0xf0,8);*out=r.value;return !r.status;}
 static uintptr_t test_cpu;static void *clock_memory;
-static struct kernel_surface_result cpu_call(MODULE_ARGS) {MODULE_UNUSED();assert(a==CPU_CURRENT);return module_result(test_cpu,1);}
+static uint64_t profiling_hz;static int profiling_fault;
+static struct kernel_surface_result cpu_call(MODULE_ARGS) {MODULE_UNUSED();if(a==CPU_PROFILE_CLOCK){if(b==UINT64_MAX)return module_result(profiling_fault,1);profiling_hz=b;return module_result(1,1);}assert(a==CPU_CURRENT);return module_result(test_cpu,1);}
 static struct kernel_surface_result clock_alloc(MODULE_ARGS) {MODULE_UNUSED();assert(a==1 && b==2 && c==8);clock_memory=calloc(b,c);return module_result((uintptr_t)clock_memory,clock_memory!=NULL);}
 int main(int argc,char **argv) {
     const char *mode=argc>1?argv[1]:"tsc";
-    bool health_case=!strcmp(mode,"shared-tsc-drift"),smp_case=!strcmp(mode,"shared-tsc") || health_case;
+    bool profile_case=!strcmp(mode,"shared-tsc-profile-fault"),health_case=!strcmp(mode,"shared-tsc-drift"),smp_case=!strcmp(mode,"shared-tsc") || health_case || profile_case;
     bool absent=!strcmp(mode,"enumerated"),enumerated=absent || !strcmp(mode,"stalled-enumerated"),fallback=!strcmp(mode,"hpet"),assumed=!strcmp(mode,"no-century");
     no_rtc=!strcmp(mode,"no-rtc");no_century=assumed;stalled=!strcmp(mode,"stalled-enumerated");
     cpu=(struct clock_cpu){.flags=CLOCK_TSC_PRESENT|(fallback?0:CLOCK_TSC_INVARIANT),
@@ -166,13 +167,15 @@ int main(int argc,char **argv) {
         uint64_t saved=ticks,anchor=previous_read+(last_read-previous_read)/2;
         test_cpu=1;ticks=anchor-tsc_step-1;assert(!CALL(clock_surface_now_ns,0,0,0).status);
         CALL(clock_surface_info,&info,0,0);assert(info.source==CLOCK_TSC);
+        assert(profiling_hz==info.tsc_hz);
         test_cpu=0;ticks=saved;
         previous=CALL(clock_surface_now_ns,0,0,0).value;
         test_cpu=1;ticks-=100;assert(CALL(clock_surface_now_ns,0,0,0).value>=previous);
         CALL(clock_surface_info,&info,0,0);assert(info.source==CLOCK_TSC && !(info.flags&CLOCK_TSC_UNSTABLE));
-        test_cpu=0;if(health_case)ticks+=3000000000;else ticks=0;
+        test_cpu=0;if(profile_case)profiling_fault=1;else if(health_case)ticks+=3000000000;else ticks=0;
         assert(!CALL(clock_surface_now_ns,0,0,0).status);
         CALL(clock_surface_info,&info,0,0);assert(info.source==CLOCK_HPET && (info.flags&CLOCK_TSC_UNSTABLE));
+        assert(!profiling_hz);
         assert(!CALL(clock_surface_shared,0,0,0).status && CALL(clock_surface_smp_tsc,2,1,&proof).status);
         free(clock_memory);
     }

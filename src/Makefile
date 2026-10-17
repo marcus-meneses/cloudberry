@@ -199,7 +199,7 @@ test-hwenum:
 test-hwenum-boot: test-mem-boot
 
 MODULE_CFLAGS = $(filter-out -fno-pic -fno-pie -mcmodel=kernel,$(CFLAGS)) -fPIE -fvisibility=hidden -mcmodel=small -fno-strict-aliasing
-MODULE_HEADERS = kmodules/shared/module.h kernel/surfaces.h boot/memory.h
+MODULE_HEADERS = kmodules/shared/module.h kernel/surfaces.h boot/memory.h kernel/cpu.h kernel/cpu-profile.h
 
 $(BUILD)/src-mediate.o: kernel/mediate.S
 	@mkdir -p $(@D)
@@ -316,7 +316,7 @@ test-clock:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined \
 	    tests/clock.c kmodules/shared/clock.c -o $(BUILD)/tests/src-clock
-	@for mode in tsc hpet enumerated stalled-enumerated no-rtc no-century shared-tsc shared-tsc-drift; do $(BUILD)/tests/src-clock $$mode || exit $$?; done
+	@for mode in tsc hpet enumerated stalled-enumerated no-rtc no-century shared-tsc shared-tsc-drift shared-tsc-profile-fault; do $(BUILD)/tests/src-clock $$mode || exit $$?; done
 
 test-clock-boot: test-mem-boot
 
@@ -386,7 +386,7 @@ $(BUILD)/tests/src-stack-call.o: tests/stack-call.S
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/src-cpu.o: kernel/cpu.c kernel/cpu.h
+$(BUILD)/src-cpu.o: kernel/cpu.c kernel/cpu.h kernel/cpu-profile.h
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -531,7 +531,11 @@ $(ISO): $(BACKENDS) $(BUILD)/kmodules/xstate.kmod
 $(BUILD)/kmodules/xstate.elf: $(BUILD)/kmodules/xstate-pic.o $(BUILD)/kmodules/xstate.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
-.PHONY: test-portability test-cpu-topology test-cpu-tsc test-cpu-ordering _test-portability
+.PHONY: test-portability test-cpu-topology test-cpu-tsc test-cpu-ordering test-cpu-profile _test-portability
+test-cpu-profile:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/cpu-profile.c -o $(BUILD)/tests/src-cpu-profile
+	$(BUILD)/tests/src-cpu-profile
 test-cpu-ordering:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -DTEST_CPU_ORDERING tests/cpu-tsc.c kmodules/shared/cpu-tsc.c kmodules/shared/cpu-topology.c kmodules/amd/cpu-amd.c -o $(BUILD)/tests/src-cpu-ordering

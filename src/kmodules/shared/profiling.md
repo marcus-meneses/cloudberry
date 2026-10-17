@@ -2,7 +2,7 @@
 
 cpu.control exposes METRICS(out,cpu_index), METRICS_RESET(), IRQ_BEGIN(flags) and
 IRQ_END(flags). Structures and opcodes are in kernel/cpu.h. smp.cpus also contains
-live per-CPU counters. The max-hold attribution pair is sequence-protected; other cumulative fields
+live per-CPU counters. Nanosecond peak records and max-hold attribution are sequence-protected; cumulative fields
 are individually atomic and may reflect adjacent instants. METRICS can fail during
 an attribution/reset update;
 retry it. Reset affects only the calling CPU, outside a lock with IRQs enabled.
@@ -18,11 +18,36 @@ stable for the boot. Counts include instrumentation overhead.
 
 Recursive entries into an already held domain with IF clear start no new sample
 and perform no timestamp/HPET reads. The outer hold still covers their execution.
-An IF-enabled lock entry reuses its initial ordered TSC/HPET pair to start IRQ-off
+An IF-enabled lock entry reuses its initial ordered sample to start IRQ-off
 tracking; acquisition and release retain independent hold/wait measurements.
-HPET watchdogs, acknowledgement ordering and IRQ-enabled contention waits remain
-unchanged. HPET maxima are still collected on every outer acquisition: this is
-not sampled or disabled instrumentation.
+Every outer acquisition remains measured; this is not sampled instrumentation.
+
+Clock policy publishes a statistics rate through CPU_PROFILE_CLOCK only while
+holding clock domain 1. Successful local TSC selection or shared-clock qualification
+enables local ordered-TSC conversion. Calibration invalidates the rate first;
+shared HPET selection, regression/drift fallback and failed clock reads disable
+it. Per-CPU samples carry rate/epoch; mixed-epoch/rate or regressed TSC durations
+are not converted. unavailable_ns_samples makes this lost coverage explicit.
+Raw tick counters/attribution remain available. A profiling-observed regression
+quarantines that epoch on all CPUs; the next clock read sees the fault and falls
+back to HPET. Resetting counters does not clear this quarantine. A fresh qualified
+epoch is required to resume fast statistics.
+
+Without a qualified rate, or during a clock update, durations use direct HPET.
+tsc_ns_samples/hpet_ns_samples record which conversion actually succeeded. The
+fast path performs no HPET MMIO for statistics on an uncontended lock. Independent
+HPET watchdog references start on actual contention and remain in lock/IPI/TLB
+wait loops, with the existing five-second deadline, iteration fallback and IRQ
+policy. Clock health still uses HPET independently. Faster statistics do not
+replace watchdog timekeeping or weaken acknowledgement ordering.
+
+wait_peak/hold_peak/irq_peak carry nanoseconds, local ticks, CPU index, hub method
+index+1, lock domain, caller PC, profiling epoch, source and address-space ID.
+Domain 2 denotes an explicitly instrumented IRQ-off transition rather than a
+lock; method zero denotes an untagged path. Direct kernel lock callers retain
+their call-site PC. Dispatcher/event/timer adapters supply transition attribution.
+The caller identifies the measured path, not proof that it caused the delay.
+These raw PCs are trusted diagnostics, not application error-trace fields.
 
 The isolated address-space benchmark separately brackets batches of 16 ordered
 CPU reads, the old double-CPUID sequence, clock calls, ordinary locks, recursive
@@ -88,7 +113,7 @@ claim. The subsequent policy below moves bulk physical sanitization outside
 metadata locks and adds finite managed wait watchdogs; other critical work still
 has no hard real-time guarantee.
 
-Current managed latency policy adds HPET nanosecond wait/hold/IRQ-off maxima,
+Current managed latency policy adds source-labelled nanosecond wait/hold/IRQ-off maxima,
 IRQ-enabled waiting-window counts, explicit IPI IRQ-off intervals and notices for managed IRQ-off spans above
 2 ms. cpu.control(CPU_LATENCY,out) reports the five-second lock/IPI/TLB wait
 watchdog and notice threshold. Waits also retain a finite iteration fallback for

@@ -18,6 +18,10 @@ static struct {
     uint8_t century;
     int configured,initialized,rtc_allowed,shared;
 } state;
+static void profiling_clock(uint64_t hz){
+    if(!state.cpu_control && state.hub)state.cpu_control=kernel_surface_find_version(state.hub,"cpu.control",1,0);
+    if(state.cpu_control)CALL(state.cpu_control,CPU_PROFILE_CLOCK,hz,0);
+}
 /* Exact quotient/remainder conversion avoids 128-bit runtime dependencies. */
 static int scale(uint64_t ticks,uint64_t numerator,uint64_t denominator,uint64_t *out) {
     uint64_t q=ticks/denominator,r=ticks%denominator;
@@ -40,8 +44,10 @@ static int now(uint64_t *out) {
         ticks=clock_cpu_ticks();
         uint64_t *previous=&state.last_tsc;
         if(state.smp_tsc) {size_t cpu=CALL(state.cpu_control,CPU_CURRENT,0,0).value;if(cpu>=state.cpu_count)return 0;previous=&state.cpu_last[cpu];}
-        if (ticks<*previous || (state.smp_tsc && *previous && ticks==*previous)) {
+        int profile_fault=state.cpu_control && CALL(state.cpu_control,CPU_PROFILE_CLOCK,UINT64_MAX,0).value;
+        if (profile_fault || ticks<*previous || (state.smp_tsc && *previous && ticks==*previous)) {
             state.info.flags|=CLOCK_TSC_UNSTABLE;state.tsc_reason=TSC_REASON_REGRESSION;
+            profiling_clock(0);
             if (!(state.info.flags&CLOCK_HPET_AVAILABLE)) return 0;
             state.info.source=CLOCK_HPET;
         } else {
@@ -61,7 +67,7 @@ static int now(uint64_t *out) {
         if(!hpet_ticks(&reference) || reference<state.hpet_anchor || !hpet_ns(reference-state.hpet_anchor,&reference_elapsed) || reference_elapsed>UINT64_MAX-state.base_ns)return 0;
         reference=state.base_ns+reference_elapsed;
         uint64_t difference=reference>value?reference-value:value-reference;
-        if(difference>1000000) {state.tsc_reason=TSC_REASON_DRIFT;state.info.flags|=CLOCK_TSC_UNSTABLE;state.info.source=CLOCK_HPET;value=reference<state.last_ns?state.last_ns:reference;}
+        if(difference>1000000) {profiling_clock(0);state.tsc_reason=TSC_REASON_DRIFT;state.info.flags|=CLOCK_TSC_UNSTABLE;state.info.source=CLOCK_HPET;value=reference<state.last_ns?state.last_ns:reference;}
         state.health_ns=value;state.health_reads=0;
     }
     state.last_ns=value;*out=value;return 1;
@@ -131,6 +137,7 @@ static void rtc_detect(const struct kernel_surfaces *hub) {
 }
 struct kernel_surface_result clock_surface_calibrate(MODULE_ARGS) {
     MODULE_UNUSED();if (!state.configured) return module_result(0,0);
+    profiling_clock(0);
     uint64_t frequency=0,hpet=0,tsc=0,base=0;
     if(!(state.cpu.flags&CLOCK_TSC_PRESENT))state.tsc_reason=TSC_REASON_MISSING_TSC;
     else if(!(state.cpu.flags&CLOCK_TSC_INVARIANT))state.tsc_reason=TSC_REASON_MISSING_INVARIANT;
@@ -188,6 +195,7 @@ struct kernel_surface_result clock_surface_calibrate(MODULE_ARGS) {
     if (frequency) state.info.flags&=~CLOCK_TSC_UNSTABLE;
     if (frequency && (state.info.flags&CLOCK_HPET_AVAILABLE)) state.info.flags|=CLOCK_TSC_CALIBRATED;
     ++state.info.calibrations;state.initialized=1;
+    if(state.info.source==CLOCK_TSC)profiling_clock(state.info.tsc_hz);
     return module_result(state.info.source,1);
 }
 struct kernel_surface_result clock_surface_init(MODULE_ARGS) {
@@ -225,9 +233,10 @@ struct kernel_surface_result clock_surface_init(MODULE_ARGS) {
     }
     return calibrated;
 }
-struct kernel_surface_result clock_surface_now_ns(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=now(&value);return module_result(value,ok);}
-struct kernel_surface_result clock_surface_now_us(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=now(&value);return module_result(value/1000,ok);}
-struct kernel_surface_result clock_surface_now_ms(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=now(&value);return module_result(value/1000000,ok);}
+static int checked_now(uint64_t *value){int ok=now(value);if(!ok)profiling_clock(0);return ok;}
+struct kernel_surface_result clock_surface_now_ns(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=checked_now(&value);return module_result(value,ok);}
+struct kernel_surface_result clock_surface_now_us(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=checked_now(&value);return module_result(value/1000,ok);}
+struct kernel_surface_result clock_surface_now_ms(MODULE_ARGS) {MODULE_UNUSED();uint64_t value=0;int ok=checked_now(&value);return module_result(value/1000000,ok);}
 struct kernel_surface_result clock_surface_info(MODULE_ARGS) {
     MODULE_UNUSED();if (!state.initialized || !a) return module_result(0,0);
     *(struct clock_info *)a=state.info;return module_result(1,1);
@@ -294,6 +303,7 @@ struct kernel_surface_result clock_surface_smp_tsc(MODULE_ARGS) {
     if(last<first || hpet<state.hpet_anchor || !hpet_ns(hpet-state.hpet_anchor,&elapsed) || elapsed>UINT64_MAX-state.base_ns)return module_result(0,0);
     state.base_ns+=elapsed;if(state.base_ns<state.last_ns)state.base_ns=state.last_ns;
     state.hpet_anchor=hpet;state.tsc_anchor=first+(last-first)/2;state.cpu_last=(void *)memory.value;state.cpu_count=a;state.smp_tsc=1;state.health_ns=state.base_ns;state.health_reads=0;state.info.source=CLOCK_TSC;
+    profiling_clock(state.info.tsc_hz);
     return module_result(1,1);
 }
 

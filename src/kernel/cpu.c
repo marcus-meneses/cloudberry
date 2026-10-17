@@ -94,72 +94,108 @@ static uint64_t ticks(void) {
 }
 static void metric_add(uint64_t *at,uint64_t value) {__atomic_add_fetch(at,value,__ATOMIC_RELAXED);}
 static void metric_max(uint64_t *at,uint64_t value) {uint64_t old=__atomic_load_n(at,__ATOMIC_RELAXED);while(old<value && !__atomic_compare_exchange_n(at,&old,value,0,__ATOMIC_RELAXED,__ATOMIC_RELAXED)) {}}
-static uint64_t elapsed(struct cpu_record *cpu,uint64_t begin,uint64_t end) {
-    if(end<begin) {metric_add(&cpu->metrics.clock_regressions,1);return 0;}return end-begin;
+/* Clock writers hold domain 1. Readers never wait for a writer: an incomplete
+ * snapshot uses HPET, avoiding lock inversion or allocation in instrumentation. */
+static uint64_t profile_epoch,profile_hz,profile_fault_epoch;
+static struct cpu_profile_stamp stamp(struct cpu_record *cpu,const struct cpu_profile_stamp *begin){
+    uint64_t epoch=__atomic_load_n(&profile_epoch,__ATOMIC_ACQUIRE);
+    uint64_t hz=__atomic_load_n(&profile_hz,__ATOMIC_RELAXED);
+    struct cpu_profile_stamp out={.ticks=ticks(),.epoch=epoch,.hz=hz};
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if((epoch&1) || !hz || cpu->profile_fault_epoch==epoch || __atomic_load_n(&profile_fault_epoch,__ATOMIC_ACQUIRE)==epoch || (begin && !begin->hz) ||
+       epoch!=__atomic_load_n(&profile_epoch,__ATOMIC_ACQUIRE)){
+        out.hz=0;out.epoch=0;out.reference=watchdog_now();
+    }
+    return out;
 }
-static void irq_begin(struct cpu_record *cpu,uint64_t flags) {if(flags&512) {cpu->irq_begin=ticks();cpu->irq_hpet=watchdog_now();}}
-static void irq_end(struct cpu_record *cpu,uint64_t flags) {
-    if(flags&512) {uint64_t span=elapsed(cpu,cpu->irq_begin,ticks());metric_add(&cpu->metrics.irq_off_ticks,span);metric_max(&cpu->metrics.max_irq_off_ticks,span);uint64_t ns=watchdog_ns(cpu->irq_hpet,watchdog_now());metric_max(&cpu->metrics.max_irq_off_ns,ns);if(ns>CRITICAL_NOTICE_NS)metric_add(&cpu->metrics.critical_overruns,1);}
+static struct cpu_profile_span duration(struct cpu_record *cpu,struct cpu_profile_stamp begin,struct cpu_profile_stamp end){
+    struct cpu_profile_span out=cpu_profile_difference(begin,end,config.hpet_period_fs);
+    if(out.regression){metric_add(&cpu->metrics.clock_regressions,1);if(begin.hz){cpu->profile_fault_epoch=begin.epoch;__atomic_store_n(&profile_fault_epoch,begin.epoch,__ATOMIC_RELEASE);}}
+    if(out.source==CPU_PROFILE_TSC)metric_add(&cpu->metrics.tsc_ns_samples,1);
+    else if(out.source==CPU_PROFILE_HPET)metric_add(&cpu->metrics.hpet_ns_samples,1);
+    else metric_add(&cpu->metrics.unavailable_ns_samples,1);
+    return out;
 }
-uint64_t kernel_cpu_enter(void) {return kernel_cpu_enter_tag(0);}
-uint64_t kernel_cpu_enter_tag(uint64_t method) {return kernel_cpu_enter_domain(0,method);}
-uint64_t kernel_cpu_enter_domain(unsigned domain,uint64_t method) {
+static void metrics_begin(struct cpu_record *cpu){if(!cpu->metrics_depth++)__atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_ACQ_REL);}
+static void metrics_end(struct cpu_record *cpu){if(!--cpu->metrics_depth)__atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_RELEASE);}
+static void peak(struct cpu_record *cpu,struct cpu_profile_peak *out,struct cpu_profile_span span,struct cpu_profile_stamp begin,uint64_t method,unsigned domain,uintptr_t caller){
+    if(!span.source || span.ns<=__atomic_load_n(&out->ns,__ATOMIC_RELAXED))return;
+    struct cpu_profile_peak value={span.ns,span.ticks,cpu->index,method,domain,caller,begin.epoch,span.source,kernel_cpu_space()};
+    const uint64_t *in=(const void *)&value;uint64_t *at=(void *)out;
+    for(size_t i=0;i<sizeof(value)/8;++i)__atomic_store_n(at+i,in[i],__ATOMIC_RELAXED);
+}
+static void irq_begin(struct cpu_record *cpu,uint64_t flags){
+    if(flags&512){cpu->irq_stamp=stamp(cpu,NULL);cpu->irq_method=0;cpu->irq_domain=2;cpu->irq_caller=(uintptr_t)__builtin_return_address(0);}
+}
+static void irq_end(struct cpu_record *cpu,uint64_t flags){
+    if(flags&512){
+        struct cpu_profile_stamp end=stamp(cpu,&cpu->irq_stamp);metrics_begin(cpu);
+        struct cpu_profile_span span=duration(cpu,cpu->irq_stamp,end);
+        metric_add(&cpu->metrics.irq_off_ticks,span.ticks);metric_max(&cpu->metrics.max_irq_off_ticks,span.ticks);
+        if(span.source){metric_max(&cpu->metrics.max_irq_off_ns,span.ns);if(span.ns>CRITICAL_NOTICE_NS)metric_add(&cpu->metrics.critical_overruns,1);}
+        peak(cpu,&cpu->metrics.irq_peak,span,cpu->irq_stamp,cpu->irq_method,cpu->irq_domain,cpu->irq_caller);metrics_end(cpu);
+    }
+}
+static uint64_t enter(unsigned domain,uint64_t method,uintptr_t caller){
     uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");
     struct cpu_record *cpu=current();if(domain>1 || (domain==0 && cpu->lock_depth[1] && !cpu->lock_depth[0]))panic("Cloudberry: fatal lock-order inversion\n");
-    uint32_t owner=cpu->index+1;uint64_t begin=(cpu->lock_depth[domain] && !(flags&512))?0:ticks();
-    /* A recursive entry owns this domain already, starts no wait/hold sample,
-     * and cannot have IF set. Its enclosing acquisition retains instrumentation
-     * and watchdog coverage; do not issue unused HPET MMIO reads here. */
-    if(cpu->lock_depth[domain] && !(flags&512)) {
+    uint32_t owner=cpu->index+1;
+    if(cpu->lock_depth[domain] && !(flags&512)){
         ++cpu->lock_depth[domain];__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);return flags;
     }
-    uint64_t started_hpet=watchdog_now();unsigned spins=0;int contended=0;
-    /* IRQ delivery is safe while waiting, but switching into a dispatcher which
-     * needs this same lock would simply move the IRQ-disabled wait there. */
+    struct cpu_profile_stamp begin=stamp(cpu,NULL);
+    uint64_t started_hpet=0;unsigned spins=0;int contended=0;
     int waiting_guard=(flags&512)!=0;if(waiting_guard)__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
-    if(flags&512) {cpu->irq_begin=begin;cpu->irq_hpet=started_hpet;}
-    if(__atomic_load_n(&lock_owner[domain],__ATOMIC_RELAXED)!=owner) {
-        for(;;) {uint32_t empty=0;if(__atomic_compare_exchange_n(&lock_owner[domain],&empty,owner,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)) break;
-            contended=1;flush_local(cpu);
-            watchdog_check(started_hpet,++spins,"Cloudberry: fatal lock acquisition timeout\n");
-            /* A waiter owns no protected state. Service timers/device IRQs and
-             * keep hardware delivery live when the caller allowed interrupts.
-             * Thread switching stays inhibited until acquisition completes.
-             * Nested acquisitions retain their parent's IF policy. */
-            if(flags&512) {
+    if(flags&512){cpu->irq_stamp=begin;cpu->irq_method=method;cpu->irq_domain=domain;cpu->irq_caller=caller;}
+    if(__atomic_load_n(&lock_owner[domain],__ATOMIC_RELAXED)!=owner){
+        for(;;){uint32_t empty=0;if(__atomic_compare_exchange_n(&lock_owner[domain],&empty,owner,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED))break;
+            /* Start an independent HPET deadline on actual contention, never
+             * paying for an unused watchdog reference on an uncontended lock. */
+            if(!contended){started_hpet=watchdog_now();contended=1;}
+            flush_local(cpu);watchdog_check(started_hpet,++spins,"Cloudberry: fatal lock acquisition timeout\n");
+            if(flags&512){
                 irq_end(cpu,flags);metric_add(&cpu->metrics.irq_enabled_waits,1);
                 __asm__ volatile("sti":::"memory");
-                do {
-                    watchdog_check(started_hpet,++spins,"Cloudberry: fatal lock acquisition timeout\n");
-                    __asm__ volatile("pause");
-                } while(__atomic_load_n(&lock_owner[domain],__ATOMIC_RELAXED));
-                __asm__ volatile("cli":::"memory");irq_begin(cpu,flags);
-            } else __asm__ volatile("pause");
+                do{watchdog_check(started_hpet,++spins,"Cloudberry: fatal lock acquisition timeout\n");__asm__ volatile("pause");}
+                while(__atomic_load_n(&lock_owner[domain],__ATOMIC_RELAXED));
+                __asm__ volatile("cli":::"memory");irq_begin(cpu,flags);cpu->irq_method=method;cpu->irq_domain=domain;cpu->irq_caller=caller;
+            }else __asm__ volatile("pause");
         }
     }
-    if(!cpu->lock_depth[domain]) {
-        uint64_t acquired=ticks(),wait=elapsed(cpu,begin,acquired);cpu->lock_begin[domain]=acquired;cpu->lock_hpet[domain]=watchdog_now();metric_max(&cpu->metrics.max_wait_ns,watchdog_ns(started_hpet,cpu->lock_hpet[domain]));cpu->lock_method[domain]=method;
-        metric_add(&cpu->metrics.domain_acquisitions[domain],1);metric_add(&cpu->metrics.domain_contended[domain],contended);metric_add(&cpu->metrics.domain_wait_ticks[domain],wait);
-        metric_add(&cpu->metrics.acquisitions,1);metric_add(&cpu->metrics.contended,contended);metric_add(&cpu->metrics.wait_ticks,wait);metric_max(&cpu->metrics.max_wait_ticks,wait);
+    if(!cpu->lock_depth[domain]){
+        struct cpu_profile_stamp acquired=stamp(cpu,&begin);metrics_begin(cpu);
+        struct cpu_profile_span wait=duration(cpu,begin,acquired);
+        cpu->lock_stamp[domain]=acquired;cpu->lock_method[domain]=method;cpu->lock_caller[domain]=caller;
+        if(wait.source)metric_max(&cpu->metrics.max_wait_ns,wait.ns);
+        peak(cpu,&cpu->metrics.wait_peak,wait,begin,method,domain,caller);
+        metric_add(&cpu->metrics.domain_acquisitions[domain],1);metric_add(&cpu->metrics.domain_contended[domain],contended);metric_add(&cpu->metrics.domain_wait_ticks[domain],wait.ticks);
+        metric_add(&cpu->metrics.acquisitions,1);metric_add(&cpu->metrics.contended,contended);metric_add(&cpu->metrics.wait_ticks,wait.ticks);metric_max(&cpu->metrics.max_wait_ticks,wait.ticks);metrics_end(cpu);
     }
     ++cpu->lock_depth[domain];__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
     if(waiting_guard)__atomic_sub_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
     return flags;
 }
-void kernel_cpu_leave(uint64_t flags) {kernel_cpu_leave_domain(0,flags);}
-void kernel_cpu_leave_domain(unsigned domain,uint64_t flags) {
+__attribute__((noinline)) uint64_t kernel_cpu_enter(void){return enter(0,0,(uintptr_t)__builtin_return_address(0));}
+__attribute__((noinline)) uint64_t kernel_cpu_enter_tag(uint64_t method){return enter(0,method,(uintptr_t)__builtin_return_address(0));}
+__attribute__((noinline)) uint64_t kernel_cpu_enter_domain(unsigned domain,uint64_t method){return enter(domain,method,(uintptr_t)__builtin_return_address(0));}
+void kernel_cpu_leave(uint64_t flags){kernel_cpu_leave_domain(0,flags);}
+void kernel_cpu_leave_domain(unsigned domain,uint64_t flags){
     struct cpu_record *cpu=current();
     if(domain>1 || !cpu->lock_depth[domain] || !__atomic_load_n(&cpu->depth,__ATOMIC_RELAXED))panic("Cloudberry: fatal critical-section underflow\n");
-    int outer=cpu->lock_depth[domain]==1;if(outer)__atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_ACQ_REL);
+    int outer=cpu->lock_depth[domain]==1;if(outer)metrics_begin(cpu);
     __atomic_sub_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
-    if(!--cpu->lock_depth[domain]) {
-        metric_max(&cpu->metrics.max_hold_ns,watchdog_ns(cpu->lock_hpet[domain],watchdog_now()));
-        uint64_t held=elapsed(cpu,cpu->lock_begin[domain],ticks());metric_add(&cpu->metrics.hold_ticks,held);metric_add(&cpu->metrics.domain_hold_ticks[domain],held);
-        if(held>__atomic_load_n(&cpu->metrics.max_hold_ticks,__ATOMIC_RELAXED)) {__atomic_store_n(&cpu->metrics.max_hold_ticks,held,__ATOMIC_RELAXED);__atomic_store_n(&cpu->metrics.max_hold_method,cpu->lock_method[domain],__ATOMIC_RELAXED);__atomic_store_n(&cpu->metrics.max_hold_domain,domain,__ATOMIC_RELAXED);}
+    if(!--cpu->lock_depth[domain]){
+        struct cpu_profile_stamp end=stamp(cpu,&cpu->lock_stamp[domain]);
+        struct cpu_profile_span held=duration(cpu,cpu->lock_stamp[domain],end);
+        if(held.source)metric_max(&cpu->metrics.max_hold_ns,held.ns);
+        peak(cpu,&cpu->metrics.hold_peak,held,cpu->lock_stamp[domain],cpu->lock_method[domain],domain,cpu->lock_caller[domain]);
+        metric_add(&cpu->metrics.hold_ticks,held.ticks);metric_add(&cpu->metrics.domain_hold_ticks[domain],held.ticks);
+        if(held.ticks>__atomic_load_n(&cpu->metrics.max_hold_ticks,__ATOMIC_RELAXED)){
+            __atomic_store_n(&cpu->metrics.max_hold_ticks,held.ticks,__ATOMIC_RELAXED);__atomic_store_n(&cpu->metrics.max_hold_method,cpu->lock_method[domain],__ATOMIC_RELAXED);__atomic_store_n(&cpu->metrics.max_hold_domain,domain,__ATOMIC_RELAXED);
+        }
         __atomic_store_n(&lock_owner[domain],0,__ATOMIC_RELEASE);
     }
-    irq_end(cpu,flags);
-    if(outer)__atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_RELEASE);
+    irq_end(cpu,flags);if(outer)metrics_end(cpu);
     __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");
 }
 void kernel_cpu_flush(void){kernel_cpu_flush_space(0);}
@@ -176,6 +212,17 @@ void kernel_cpu_flush_space(uint64_t id) {
 }
 struct kernel_surface_result kernel_cpu_control(MODULE_ARGS) {
     MODULE_UNUSED();
+    if(a==CPU_PROFILE_CLOCK){
+        /* Only the serialized clock policy publishes a qualified rate. Zero
+         * invalidates it before calibration/requalification or HPET fallback. */
+        if(!current()->lock_depth[1])return module_result(0,0);
+        if(b==UINT64_MAX)return module_result(profile_hz && __atomic_load_n(&profile_fault_epoch,__ATOMIC_ACQUIRE)==profile_epoch,1);
+        if(b && (b<1000000 || b>UINT64_C(10000000000)))return module_result(0,0);
+        if(profile_epoch>UINT64_MAX-2){__atomic_store_n(&profile_hz,0,__ATOMIC_RELAXED);__atomic_store_n(&profile_epoch,UINT64_MAX,__ATOMIC_RELEASE);return module_result(0,0);}
+        __atomic_add_fetch(&profile_epoch,1,__ATOMIC_ACQ_REL);
+        __atomic_store_n(&profile_hz,b,__ATOMIC_RELAXED);
+        __atomic_add_fetch(&profile_epoch,1,__ATOMIC_RELEASE);return module_result(1,1);
+    }
     if(a==CPU_LATENCY && b) {*(struct cpu_latency_policy *)b=(struct cpu_latency_policy){WAIT_BUDGET_NS,CRITICAL_NOTICE_NS,config.watchdog_hpet!=0,0};return module_result(1,1);}
     if(a==CPU_METRICS && b && c<config.count) {
         struct cpu_record *target=&config.records[c];const uint64_t *source=(const void *)&target->metrics;
@@ -195,7 +242,7 @@ struct kernel_surface_result kernel_cpu_control(MODULE_ARGS) {
         __atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_RELEASE);
         __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");return module_result(1,1);
     }
-    if(a==CPU_IRQ_BEGIN) {irq_begin(current(),b);return module_result(1,1);}
+    if(a==CPU_IRQ_BEGIN) {irq_begin(current(),b);if((b&512) && c)current()->irq_caller=c;return module_result(1,1);}
     if(a==CPU_IRQ_END) {irq_end(current(),b);return module_result(1,1);}
     if(a==CPU_CURRENT) return module_result(current()->index,1);
     if(a==CPU_ENTER) return module_result(kernel_cpu_enter(),1);

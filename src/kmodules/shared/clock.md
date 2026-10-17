@@ -143,6 +143,13 @@ documents MFENCE before RDTSCP when prior stores must be globally visible.
 
 ## CPU discovery and rejection diagnostics
 
+Clock policy also controls the CPU statistics timebase. Successful local/shared
+TSC qualification publishes its rate through CPU_PROFILE_CLOCK; calibration
+invalidates that rate before sampling, and fallback/failure removes it. Profiling
+samples reject mixed epochs, and a regression observed by the profiler causes
+clock to select HPET on its next read. Clock's HPET health checks and independent
+HPET lock/IPI/TLB watchdogs remain enabled. See [profiling](profiling.md).
+
 Clock policy remains shared: both vendors use the architectural TSC and HPET.
 `clock-x86.c` obtains capabilities through the selected CPU backend's `cpu.tsc`
 surface instead of interpreting CPUID itself. Intel/AMD adapters supply ordered

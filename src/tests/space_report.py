@@ -22,8 +22,16 @@ def distribution(values):
 
 
 def parse_spaces(text, cpus):
-    groups, workers, current = {}, [], None
+    groups, workers, current, attribution = {}, [], None, []
     for line in text.splitlines():
+        if line.startswith('ATTR spaces '):
+            match = re.fullmatch(r'ATTR spaces (wait|hold|irq)((?: [0-9]+){11}) ([a-z0-9_.-]+)', line)
+            if not match:raise ValueError('malformed peak attribution')
+            kind, data, method = match.groups()
+            fields = dict(zip(('scope','trial','ns','ticks','cpu','method_id','domain','caller','clock_epoch','source','address_space'),map(int,data.split())))
+            if fields['cpu']>=cpus or fields['source'] not in (0,1,2) or fields['domain'] not in ((0,1,2) if kind=='irq' else (0,1)) or (fields['ns'] and not fields['source']) or (fields['method_id'] and method=='kernel'):
+                raise ValueError('invalid peak identity/source')
+            attribution.append(dict(kind=kind,method=method,**fields));continue
         if not line.startswith('MEASURE spaces '):
             continue
         match = re.fullmatch(r'MEASURE spaces ([a-z0-9_]+)((?: [0-9]+)+)', line)
@@ -55,6 +63,19 @@ def parse_spaces(text, cpus):
         require(key, 256)
     for key in ('cycle_max_hold_ns', 'cycle_max_irq_off_ns'):
         require(key, 8)
+    expected = {(kind,scope,trial) for scope,n in ((0,8),(1,10),(2,10),(3,10)) for trial in range(n) for kind in ('wait','hold','irq')}
+    if len(attribution)!=len(expected) or {(a['kind'],a['scope'],a['trial']) for a in attribution}!=expected:
+        raise ValueError('missing/duplicate peak attribution')
+    require('profile_quality', 38*5)
+    quality = [dict(zip(('scope','trial','tsc_ns_samples','hpet_ns_samples','unavailable_ns_samples'),groups['profile_quality'][i:i+5])) for i in range(0,38*5,5)]
+    if {(q['scope'],q['trial']) for q in quality}!={(s,t) for _,s,t in expected}:
+        raise ValueError('missing/duplicate profiling quality')
+    if any(not (q['tsc_ns_samples']+q['hpet_ns_samples']) for q in quality):
+        raise ValueError('no valid profiling samples in a measured scope')
+    for a in attribution:
+        if a['kind']=='wait':continue
+        metric = ('cycle_max_hold_ns' if a['kind']=='hold' else 'cycle_max_irq_off_ns') if a['scope']==0 else f"teardown_{SHAPES[a['scope']-1]}_{'hold' if a['kind']=='hold' else 'irq_off'}_ns"
+        if a['ns']!=groups[metric][a['trial']]:raise ValueError('peak attribution disagrees with measured maximum')
     for key in ('clock_begin', 'clock_end'):
         require(key, 4)
         if groups[key][0] not in (1, 2):
@@ -94,6 +115,7 @@ def parse_spaces(text, cpus):
                                      operations_per_sample=batch, samples=samples,
                                      estimated_ns_per_operation={key: distribution([(a-b)/batch for a,b in zip(groups[key],groups[INSTRUMENTATION[0]])]) for key in INSTRUMENTATION[1:]}),
                 distributions=raw, derived=derived,
+                peak_attribution=attribution, profiling_quality=quality,
                 notes=['All raw samples retained; p95 uses nearest rank.',
                        'Nanoseconds are guest-clock elapsed time, including virtualization and waits.',
                        'Root roundtrip covers two mediated selections with IF=0; excludes FP/stack switching.',

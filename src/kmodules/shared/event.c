@@ -68,7 +68,7 @@ static struct kernel_surface_result step(size_t budget) {
     /* IF stays clear from pending consumption through queue inspection and arm.
      * STI's interrupt shadow covers HLT, avoiding a lost interrupt before idle. */
     __asm__ volatile("pushfq;pop %0;cli":"=r"(irq_flags)::"memory");
-    if(state.cpu)CALL(state.cpu,CPU_IRQ_BEGIN,irq_flags,0);
+    if(state.cpu)CALL(state.cpu,CPU_IRQ_BEGIN,irq_flags,(uintptr_t)step);
     struct kernel_surface_result pending=CALL(state.take,0,0,0);
     if (pending.status) goto fail;
     diagnostic_add(&state.info.notifications,pending.value);

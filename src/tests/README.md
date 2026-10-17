@@ -76,6 +76,23 @@ session for a separate native-comparison.md/.json. Host checks for timestamp
 selection/AP agreement are available through `test-cpu-tsc test-cpu-ordering`.
 User-mode execution and a handler invocation boundary are not tested or supplied.
 
+The profiling follow-up adds test-cpu-profile host checks for rate/epoch changes,
+regression, HPET fallback and saturating conversion. test-clock verifies a
+profiling-observed fault disables TSC statistics and selects HPET. The isolated
+space boot briefly forces a synthetic statistics rate solely to test TSC-only
+samples, local fallback and mixed-epoch rejection, then restores actual clock
+policy before measuring. The watchdog failure probe forces fast statistics while
+verifying the independent HPET timeout still fires. Synthetic rates never become
+calibration data, candidate configuration or benchmark samples.
+
+Address-space reports now retain 114 peak-attribution records (wait/hold/IRQ for
+eight cycles and thirty geometry trials), with CPU, method/name, domain, caller,
+source/epoch and address-space identity. Thirty-eight quality records expose TSC,
+HPET and unavailable sample counts. Missing, duplicate or inconsistent peak
+records fail reporting. Native comparisons warn if the reference used different
+or unrecorded profiling sources. Coverage remains managed BSP instrumentation;
+raw CLI fault guards and unrelated AP intervals are not included.
+
 Runtime module initialization and startup now both reject discovery, captured
 stubs, callback leases and table publication. `test-hub` checks concurrent gate
 rejection; `test-module-disk-boot` checks ABI2 private lookup, hidden hooks,

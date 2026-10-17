@@ -94,7 +94,7 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
     struct local *cpu=&state.cpus[current_cpu()];if(cpu->dispatching) return module_result(0,0);cpu->dispatching=1;
     size_t done=0;while(done<a) {
         uint64_t saved;__asm__ volatile("pushfq;pop %0;cli":"=r"(saved)::"memory");
-        call(state.cpu,CPU_IRQ_BEGIN,512,0);
+        call(state.cpu,CPU_IRQ_BEGIN,512,(uintptr_t)threads_surface_run);
         uint64_t flags=enter();struct kernel_surface_result time=call(state.now,0,0,0);
         if(time.status) {leave(flags);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");cpu->dispatching=0;return module_result(0,0);}
         wake_due(time.value);struct thread *t=state.head,*prev=NULL;
@@ -109,7 +109,7 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         else ++cpu->timing.clock_failures;
         call(state.cpu,CPU_IRQ_END,512,0);
         switch_context(&cpu->dispatcher,&t->context);
-        call(state.cpu,CPU_IRQ_BEGIN,512,0);
+        call(state.cpu,CPU_IRQ_BEGIN,512,(uintptr_t)threads_surface_run);
         struct kernel_surface_result ready_time=call(state.now,0,0,0);
         t->ready_ns=ready_time.value;t->ready_valid=!ready_time.status;
         uint64_t transition=enter();

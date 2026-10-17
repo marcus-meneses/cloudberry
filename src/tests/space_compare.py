@@ -11,7 +11,7 @@ def guest_fingerprint(root):
     src = Path(root) / 'src'
     suffixes = {'.c', '.h', '.S', '.ld', '.json', '.cnf', '.conf'}
     paths = {src / 'Makefile', src / 'assets/cloudberry.png'}
-    for directory in ('kernel', 'boot', 'kmodules'):
+    for directory in ('kernel', 'boot', 'kmodules', 'interfaces', 'handlers'):
         paths.update(p for p in (src / directory).rglob('*') if p.suffix in suffixes)
     paths.update(p for p in (src / 'tests').glob('*') if p.suffix in suffixes)
     paths.update((src / 'tools').glob('*.py'))
@@ -59,6 +59,7 @@ def load_native_reference(session):
         first = series[0]['address_spaces']
         cases[key] = dict(clock_begin=first['clock_begin'], pge=first['pge'], pcid=first['pcid'],
                           run_ids=[r['run_id'] for r in series],
+                          profiling_sources=sorted({a['source'] for r in series for a in r['address_spaces'].get('peak_attribution',[]) if a['source']}),
                           distributions={name: distribution([v for r in series for v in r['address_spaces']['distributions'][name]['samples']]) for name in first['distributions']})
     return dict(guest_source_sha256=identity['guest_source_sha256'], cases=cases,
                 session=str(session), host=json.loads((session/'host.json').read_text()))
@@ -88,6 +89,9 @@ def compare(baseline, reports, fingerprint, reference_kind='tcg'):
         mode = next(iter(modes))
         expected = (reference['clock_begin'][0], reference['pge'], reference['pcid'])
         warnings = []
+        profiling_sources = sorted({a['source'] for r in series for a in r['address_spaces'].get('peak_attribution',[]) if a['source']})
+        if profiling_sources and profiling_sources!=reference.get('profiling_sources',[]):
+            warnings.append('Profiling sources differ or were unrecorded in the reference; latency maxima include instrumentation changes.')
         if mode != expected:
             warnings.append(f'Clock source or paging mode differs from {label}; ratios include that difference.')
         if fingerprint != baseline['guest_source_sha256']:
@@ -104,7 +108,7 @@ def compare(baseline, reports, fingerprint, reference_kind='tcg'):
             metrics[metric] = {reference_kind:old, 'kvm':new,
                               reference_kind+'_over_kvm_median':old['median']/new['median'] if new['median'] else None,
                               'per_boot_kvm_medians':[r['address_spaces']['distributions'][metric]['median'] for r in series]}
-        cases[key] = dict(run_ids=[r['run_id'] for r in series], native_clock=series[0]['address_spaces']['clock_begin'],
+        cases[key] = dict(run_ids=[r['run_id'] for r in series], native_clock=series[0]['address_spaces']['clock_begin'],profiling_sources=profiling_sources,
                           pge=mode[1], pcid=mode[2], warnings=warnings, metrics=metrics)
     return dict(schema=1, reference_kind=reference_kind, guest_source_sha256=fingerprint,
                 baseline_guest_source_sha256=baseline['guest_source_sha256'],

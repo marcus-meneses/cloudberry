@@ -333,6 +333,17 @@ Completed performance sequence (native acceptance 2026-10-17):
 
 See tests/address-space-profiling.md for collection commands and interpretation.
 
+Follow-up requested after that acceptance:
+
+1. Closed documentation drift for automatic bootstrap storage selection, boot
+   provenance, runtime module loading and private-space metadata.
+2. Implemented qualified local-TSC statistics, epoch/rate invalidation, global
+   regression quarantine, explicit unavailable-sample accounting and HPET fallback.
+   Independent HPET lock/IPI/TLB watchdogs remain active. Reports retain CPU,
+   method/name, lock domain, caller PC, clock source/epoch and address-space identity
+   for wait/hold/IRQ peaks. Focused host and guest validation is recorded in tests;
+   fresh native performance acceptance requires the existing KVM collection script.
+
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
 qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI
 INTx routing also remain deferred until required by a consumer.

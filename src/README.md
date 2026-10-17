@@ -311,6 +311,7 @@ src/
 ├── kernel/
 │   ├── cpu.c
 │   ├── cpu.h
+│   ├── cpu-profile.h
 │   ├── hub.md
 │   ├── main.c
 │   ├── mediate.S
@@ -529,6 +530,7 @@ src/
 │   ├── config.c
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
+│   ├── cpu-profile.c
 │   ├── future.c / future.json / future-fail.c / future-fail.json (disk-only fixtures)
 │   ├── events-boot.c
 │   ├── ext4-runtime.c

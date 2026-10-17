@@ -20,6 +20,6 @@ void timer_register_write(uint32_t offset,uint32_t value) {
     else {__asm__ volatile("" ::: "memory");*(volatile uint32_t *)(apic+offset)=value;}
 }
 uint64_t timer_irq_save(void) {
-    uint64_t flags;__asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");if(cpu_control)cpu_control(CPU_IRQ_BEGIN,flags,0,0,0,0);return flags;
+    uint64_t flags;__asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");if(cpu_control)cpu_control(CPU_IRQ_BEGIN,flags,(uintptr_t)__builtin_return_address(0),0,0,0);return flags;
 }
 void timer_irq_restore(uint64_t flags) {if(cpu_control)cpu_control(CPU_IRQ_END,flags,0,0,0,0);__asm__ volatile("pushq %0; popfq" :: "r"(flags) : "memory","cc");}

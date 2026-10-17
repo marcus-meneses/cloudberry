@@ -92,6 +92,12 @@ class Comparison(unittest.TestCase):
         self.assertEqual(len(result['cases']['1cpu-none']['warnings']), 2)
         self.assertIsNone(result['cases']['1cpu-none']['metrics']['root_roundtrip_ns']['tcg_over_kvm_median'])
 
+    def test_profiling_source_changes_are_visible(self):
+        inputs=reports();inputs['1cpu-none'][0]['address_spaces']['peak_attribution']=[dict(source=1)]
+        result=compare(BASELINE,inputs,BASELINE['guest_source_sha256'])
+        self.assertEqual(result['cases']['1cpu-none']['profiling_sources'],[1])
+        self.assertTrue(any('Profiling sources' in w for w in result['cases']['1cpu-none']['warnings']))
+
     def test_guest_identity_tracks_code_and_ignores_documentation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary);self.prepare_root(root)

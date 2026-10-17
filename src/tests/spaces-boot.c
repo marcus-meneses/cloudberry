@@ -12,9 +12,46 @@
 static void print(const char *p){while(*p)__asm__ volatile("outb %0,$0xe9"::"a"(*p++));}
 static void number(uint64_t value){char d[24];unsigned n=0;do{d[n++]='0'+value%10;value/=10;}while(value);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(d[--n]));}
 static void samples(const char *name,const uint64_t *values,unsigned n){print("MEASURE spaces ");print(name);for(unsigned i=0;i<n;++i){print(" ");number(values[i]);}print("\n");}
+static void attribution(const struct kernel_surfaces *hub,const struct cpu_metrics *metrics,unsigned scope,unsigned trial){
+    const struct cpu_profile_peak *peaks[]={&metrics->wait_peak,&metrics->hold_peak,&metrics->irq_peak};
+    const char *kinds[]={"wait","hold","irq"};
+    for(unsigned i=0;i<3;++i){
+        const struct cpu_profile_peak *p=peaks[i];const char *method="kernel";
+        if(p->method && p->method<=kernel_surface_count(hub))method=kernel_surface_entries(hub)[p->method-1].name;
+        print("ATTR spaces ");print(kinds[i]);
+        print(" ");number(scope);print(" ");number(trial);
+        const uint64_t *fields=(const void *)p;for(unsigned k=0;k<sizeof(*p)/8;++k){print(" ");number(fields[k]);}
+        print(" ");print(method);print("\n");
+    }
+    uint64_t quality[]={scope,trial,metrics->tsc_ns_samples,metrics->hpet_ns_samples,metrics->unavailable_ns_samples};samples("profile_quality",quality,5);
+}
 static bool failure(unsigned line){print("FAIL spaces-boot line ");char d[12];unsigned n=0;do{d[n++]='0'+line%10;line/=10;}while(line);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(d[--n]));print("\n");return false;}
 #define CHECK(x) do{if(!(x))return failure(__LINE__);}while(0)
-static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
+static bool profile_contract_test(const struct kernel_surfaces *hub){
+    CHECK(kernel_cpu_control(CPU_PROFILE_CLOCK,1000000000,0,0,0,0).status);
+    uint64_t held=kernel_cpu_enter_domain(1,0);CHECK(!kernel_cpu_control(CPU_PROFILE_CLOCK,1000000000,0,0,0,0).status);kernel_cpu_leave_domain(1,held);
+    CHECK(!kernel_cpu_control(CPU_METRICS_RESET,0,0,0,0,0).status);
+    uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");
+    held=kernel_cpu_enter();kernel_cpu_leave(held);
+    struct cpu_metrics metrics;CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status);
+    CHECK(metrics.tsc_ns_samples==2 && !metrics.hpet_ns_samples && metrics.hold_peak.source==CPU_PROFILE_TSC);
+    const struct kernel_hub_table *cpus=kernel_hub_find_table(hub,"smp.cpus");CHECK(cpus);
+    struct cpu_record *records=(void *)cpus->address;records[0].profile_fault_epoch=metrics.hold_peak.clock_epoch;
+    held=kernel_cpu_enter();kernel_cpu_leave(held);
+    CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status && metrics.hpet_ns_samples==2);
+    /* A rate/epoch transition invalidates in-flight TSC conversion. */
+    held=kernel_cpu_enter_domain(1,0);CHECK(!kernel_cpu_control(CPU_PROFILE_CLOCK,1000000000,0,0,0,0).status);kernel_cpu_leave_domain(1,held);
+    held=kernel_cpu_enter();uint64_t clock_lock=kernel_cpu_enter_domain(1,0);CHECK(!kernel_cpu_control(CPU_PROFILE_CLOCK,0,0,0,0,0).status);kernel_cpu_leave_domain(1,clock_lock);kernel_cpu_leave(held);
+    CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status && metrics.unavailable_ns_samples>=2);
+    /* This is a synthetic rate for mechanism testing, never calibration data.
+     * Restore actual clock policy while holding its serialization domain. */
+    clock_lock=kernel_cpu_enter_domain(1,0);struct clock_info current;
+    CHECK(!CALL(kernel_surface_find(hub,"clock.info"),&current,0,0).status);
+    CHECK(!kernel_cpu_control(CPU_PROFILE_CLOCK,current.source==CLOCK_TSC?current.tsc_hz:0,0,0,0,0).status);kernel_cpu_leave_domain(1,clock_lock);
+    __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");
+    print("PASS profiling mechanism: serialized rate publication, TSC-only samples, local HPET fallback and mixed-epoch rejection; real clock policy restored\n");return true;
+}
+static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages,unsigned trial){
     kernel_surface_call create=kernel_surface_find(hub,"mem.space_create"),map=kernel_surface_find(hub,"mem.space_map"),unmap=kernel_surface_find(hub,"mem.space_unmap"),protect=kernel_surface_find(hub,"mem.space_protect"),query=kernel_surface_find(hub,"mem.space_query"),info=kernel_surface_find(hub,"mem.space_info"),destroy=kernel_surface_find(hub,"mem.space_destroy");
     kernel_surface_call alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free"),thread=kernel_surface_find(hub,"threads.create"),control=kernel_surface_find(hub,"threads.control"),step=kernel_surface_find(hub,"event.step"),clock=kernel_surface_find(hub,"clock.now_ns"),entry=kernel_surface_find(hub,"probe.space");
     CHECK(create && map && unmap && protect && query && info && destroy && entry);
@@ -82,6 +119,7 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages){
     struct mem_space_info fresh;CHECK(!CALL(create,101,&fresh,0).status && fresh.id>a.id && !CALL(destroy,fresh.id,101,0).status);
     for(unsigned i=0;i<count;++i){uint64_t worker[]={i==2?1:0,probes[i].id,probes[i].owner};samples("worker",worker,3);samples("switch_clock_bracket_ns",probes[i].timings[0],SPACE_SAMPLES);samples("same_root_pair_ns",probes[i].timings[1],SPACE_SAMPLES);samples("root_roundtrip_ns",probes[i].timings[2],SPACE_SAMPLES);samples("yield_roundtrip_ns",probes[i].timings[3],SPACE_SAMPLES);}
     struct cpu_metrics metrics;CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status);samples("cycle_max_hold_ns",&metrics.max_hold_ns,1);samples("cycle_max_irq_off_ns",&metrics.max_irq_off_ns,1);
+    attribution(hub,&metrics,0,trial);
     /* Completed a cycle; the outer test checks allocation and fault totals. */
     return true;
 }
@@ -144,6 +182,7 @@ static bool teardown_profile(const struct kernel_surfaces *hub,struct boot_pages
             begin=CALL(clock,0,0,0);CHECK(!CALL(destroy,space.id,700,0).status);end=CALL(clock,0,0,0);
             CHECK(!begin.status && !end.status && end.value>=begin.value);elapsed[trial]=end.value-begin.value;
             struct cpu_metrics metrics;CHECK(!kernel_cpu_control(CPU_METRICS,(uintptr_t)&metrics,0,0,0,0).status);hold[trial]=metrics.max_hold_ns;irq_off[trial]=metrics.max_irq_off_ns;
+            attribution(hub,&metrics,shape+1,trial);
             CHECK(!CALL(free,data.id,700,0).status && owned_count(pages)==baseline);
         }
         const char *total[]={"teardown_dense_32_ns","teardown_dense_512_ns","teardown_sparse_128_ns"},*build[]={"populate_dense_32_ns","populate_dense_512_ns","populate_sparse_128_ns"},*table_names[]={"dense_32_table_pages","dense_512_table_pages","sparse_128_table_pages"},*hold_names[]={"teardown_dense_32_hold_ns","teardown_dense_512_hold_ns","teardown_sparse_128_hold_ns"},*irq_names[]={"teardown_dense_32_irq_off_ns","teardown_dense_512_irq_off_ns","teardown_sparse_128_irq_off_ns"};
@@ -161,10 +200,11 @@ bool kernel_spaces_test(const struct kernel_surfaces *hub,struct boot_pages *pag
      * before the test allocation baseline, rather than misclassifying them. */
     CHECK(!CALL(kernel_surface_find(hub,"event.step"),1,0,0).status);
     struct clock_info initial,final;kernel_surface_call clock_info=kernel_surface_find(hub,"clock.info");CHECK(clock_info && !CALL(clock_info,&initial,0,0).status);
+    CHECK(profile_contract_test(hub));
     uint64_t source_begin[]={initial.source,initial.flags,initial.hpet_period_fs,initial.tsc_hz};samples("clock_begin",source_begin,4);uint64_t cr4;__asm__ volatile("mov %%cr4,%0":"=r"(cr4));uint64_t root_mode[]={!!(cr4&128),!!(cr4&(1u<<17))};samples("root_mode",root_mode,2);
     CHECK(instrumentation_profile(hub,initial.hpet_period_fs));
     uint64_t baseline=owned_count(pages);
-    for(unsigned i=0;i<8;++i){CHECK(cycle(hub,pages));CHECK(owned_count(pages)==baseline);}
+    for(unsigned i=0;i<8;++i){CHECK(cycle(hub,pages,i));CHECK(owned_count(pages)==baseline);}
     uint64_t faults=0;for(uint64_t i=0;i<cpus->count;++i){CHECK(!slots[i].armed);faults+=slots[i].seen;}
     CHECK(faults==8*5*(cpus->count>1?3:2) && !CALL(configure,0,0,0).status && !CALL(page_free,storage.id,998,0).status);
     samples("fault_events",&faults,1);uint64_t cycles=8;samples("cycles",&cycles,1);
