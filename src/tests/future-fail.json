@@ -1,0 +1,17 @@
+{
+  "name": "future-fail",
+  "exports": [
+    {
+      "name": "future_fail.init",
+      "symbol": "future_fail_init"
+    },
+    {
+      "name": "future_fail.value",
+      "symbol": "future_fail_value"
+    },
+    {
+      "name": "future_fail.start",
+      "symbol": "future_fail_start"
+    }
+  ]
+}

@@ -6,3 +6,6 @@ storage.timeout_ms=1000
 # GPT identity shared by the image builder and the boot configuration.
 drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
 # Driver selection remains caller-owned; storage timeout bounds USB BOT commands.
+
+# Explicit future module basenames, in dependency order; empty loads none.
+drivers.modules=

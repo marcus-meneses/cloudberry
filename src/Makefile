@@ -10,6 +10,7 @@ CC := $(CROSS_PREFIX)gcc
 KERNEL := $(BUILD)/kernel.elf
 ISO := $(BUILD)/cloudberry.iso
 BOOT_DRIVERS_MIB ?= 512
+BOOT_DRIVERS_SOURCE ?=
 # Distinct object/staging names keep archived implementation artifacts out.
 STORAGE_WRITE_TEST ?= 0
 STORAGE_TEST ?= 0
@@ -131,7 +132,7 @@ $(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER
 	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
-	python3 tools/build-boot-image.py "$(STAGE)" "$@" --drivers-mib=$(BOOT_DRIVERS_MIB)
+	python3 tools/build-boot-image.py "$(STAGE)" "$@" --drivers-mib=$(BOOT_DRIVERS_MIB) $(if $(strip $(BOOT_DRIVERS_SOURCE)),--drivers-source="$(BOOT_DRIVERS_SOURCE)",)
 
 # Sparse, blank 1 GiB media, created once; no filesystem or boot-time formatting.
 $(NVME_DISK) $(SATA_DISK):
@@ -809,7 +810,7 @@ test-hub-boot:
 _test-hub-boot: $(ISO) $(BUILD)/tests/src-hub-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=nvme --hub-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
-$(BUILD)/kmodules/bootstrap.elf: $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+$(BUILD)/kmodules/bootstrap.elf: $(BUILD)/kmodules/bootstrap-load-pic.o $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld tools/check-module-pic.py
 	python3 tools/check-module-pic.py $(filter %.o,$^)
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
@@ -827,3 +828,29 @@ test-bootstrap-boot:
 _test-bootstrap-boot: $(ISO) $(BUILD)/tests/src-bootstrap-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --bootstrap --backend=$(BOOTSTRAP_BACKEND) $(if $(filter 1,$(BLOCK_MULTI)),--multi,) $(if $(filter 1,$(BOOTSTRAP_DUPLICATE)),--duplicate,) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 BOOTSTRAP_BACKEND ?= usb
+
+# Explicit disk-only test images; excluded from candidate prerequisites/staging.
+$(BUILD)/kmodules/future-pic.o: tests/future.c kmodules/shared/module-load.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/future-fail-pic.o: tests/future-fail.c kmodules/shared/module-load.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/future.exports.S: tests/future.json tools/module-exports.py
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/future-fail.exports.S: tests/future-fail.json tools/module-exports.py
+	python3 tools/module-exports.py $< $@
+$(BUILD)/kmodules/future.elf: $(BUILD)/kmodules/future-pic.o $(BUILD)/kmodules/future.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/kmodules/future-fail.elf: $(BUILD)/kmodules/future-fail-pic.o $(BUILD)/kmodules/future-fail.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+.PHONY: test-module-disk-boot _test-module-disk-boot
+test-module-disk-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-module-disk-boot
+_test-module-disk-boot: $(ISO) $(BUILD)/tests/src-bootstrap-kernel.elf $(BUILD)/kmodules/probe.kmod $(BUILD)/kmodules/future.kmod $(BUILD)/kmodules/future-fail.kmod
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --bootstrap --disk-modules $(if $(filter 1,$(DISK_MODULES_SUCCESS)),--disk-success,) --backend=usb --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+.PHONY: test-driver-manifest
+test-driver-manifest:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/bootstrap-load.c -Wl,--gc-sections -o $(TEST_BUILD)/tests/src-driver-manifest
+	$(TEST_BUILD)/tests/src-driver-manifest

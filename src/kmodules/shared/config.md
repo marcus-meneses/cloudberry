@@ -79,3 +79,9 @@ Limine data handoff, typed hub references and actual batch-publication rollback.
 Negative boots reject missing/duplicate data modules and an invalid config
 version with a source-line diagnostic. One-CPU and four-CPU Intel/IOMMU TCG
 acceptance pass; no candidate VM or persistent development disk is used.
+
+`drivers.modules` is a UTF-8 string, default empty. Bootstrap interprets it as an
+explicit comma-separated list of future module basenames in dependency order;
+only those `.driver`/`.kmod` pairs are read from the selected ext4 directory.
+The config module copies/publishes the string; selection and manifest validation
+belong to bootstrap. All current modules remain boot-loaded.

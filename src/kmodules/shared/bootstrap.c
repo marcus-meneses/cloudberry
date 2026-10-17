@@ -1,4 +1,5 @@
 #include "bootstrap.h"
+#include "bootstrap-load.h"
 #include "boot-origin.h"
 #include "block-util.h"
 #include "config.h"
@@ -98,7 +99,7 @@ done:
     for(struct candidate *p=state.first;p;p=p->next)if(p!=chosen){unsigned retry=0;while(!discard(p) && retry++<128)CALL(state.thread,THREAD_YIELD,0,0);if(p->cookie || p->part.cookie)fail(BOOTSTRAP_TRANSPORT);}
     /* Keep selected and uncertain cleanup records; free completed bookkeeping. */
     struct candidate **link=&state.first;while(*link){struct candidate *p=*link;if(p==chosen || p->cookie || p->part.cookie){link=&p->next;continue;}*link=p->next;CALL(state.free,state.heap,p,0);}
-    flags=lock();state.info.state=state.info.error?BOOTSTRAP_FAILED:BOOTSTRAP_READY;unlock(flags);report();return module_result(state.info.error,!state.info.error);
+    flags=lock();state.info.state=state.info.error?BOOTSTRAP_FAILED:BOOTSTRAP_READY;unlock(flags);report();if(!state.info.error)(void)bootstrap_surface_load(0,0,0,0,0,0);return module_result(state.info.error,!state.info.error);
 }
 struct kernel_surface_result bootstrap_surface_init(MODULE_ARGS){
     MODULE_UNUSED();const struct kernel_surfaces *hub=(void *)a;if(state.hub)return module_result(1,hub==state.hub && b==state.heap);if(!hub || hub->magic!=KERNEL_SURFACES_MAGIC || !b)return module_result(0,0);
@@ -107,7 +108,7 @@ struct kernel_surface_result bootstrap_surface_init(MODULE_ARGS){
 #undef BIND
     const char required[][32]={"nvme.open","nvme.block","nvme.next","nvme.close","sata.open","sata.ports","sata.close","usb.interface","usb_storage.open","usb_storage.close","usb.ready","usb_hub.ready","threads.create"};
     for(size_t i=0;i<sizeof(required)/sizeof(required[0]);++i){uint16_t minor=i==0 || i==1 || i==4?2:0;if(!kernel_surface_find_version(hub,required[i],1,minor))return module_result(0,0);}
-    state.hub=hub;state.heap=b;struct kernel_hub_table table={.name="bootstrap.volume",.address=(uintptr_t)&state.info,.bytes=sizeof(state.info),.count=1,.entry_bytes=sizeof(state.info),.owner=kernel_surface_owner(hub,"bootstrap.init")};kernel_surface_call publish=kernel_surface_find(hub,"hub.publish_table");return publish?CALL(publish,&table,0,0):module_result(0,0);
+    state.hub=hub;state.heap=b;struct kernel_hub_table table={.name="bootstrap.volume",.address=(uintptr_t)&state.info,.bytes=sizeof(state.info),.count=1,.entry_bytes=sizeof(state.info),.owner=kernel_surface_owner(hub,"bootstrap.init")};kernel_surface_call publish=kernel_surface_find(hub,"hub.publish_table");if(!publish || CALL(publish,&table,0,0).status || !bootstrap_loader_init(hub,b))return module_result(0,0);return module_result(1,1);
 }
 struct kernel_surface_result bootstrap_surface_start(MODULE_ARGS){
     MODULE_UNUSED();if(!state.hub || CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);if(state.worker || state.info.state!=BOOTSTRAP_IDLE)return module_result(state.worker,1);

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
 import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
 if not build.is_relative_to(root/'bin/tests'):raise SystemExit('isolated build required')
 if args.accel=='kvm':subprocess.run([sys.executable,str(root/'src/tests/native-check.py')],check=True)
-test=build/'tests'/f'{"hub" if args.hub_only else ("bootstrap-" if args.bootstrap else "block-")+args.backend+("-multi" if args.multi else "")+("-duplicate" if args.duplicate else "")}-{args.cpus}cpu-{args.iommu}';test.mkdir(parents=True,exist_ok=True)
+test=build/'tests'/f'{"hub" if args.hub_only else ("bootstrap-" if args.bootstrap else "block-")+args.backend+("-multi" if args.multi else "")+("-duplicate" if args.duplicate else "")+("-modules-success" if args.disk_success else "-modules" if args.disk_modules else "")}-{args.cpus}cpu-{args.iommu}';test.mkdir(parents=True,exist_ok=True)
 lock=(test/'run.lock').open('a')
 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 except BlockingIOError:raise SystemExit('this isolated test is already running; refusing to overwrite its media')
@@ -18,6 +18,11 @@ try:
     shutil.copy2(build/('tests/src-bootstrap-kernel.elf' if args.bootstrap else 'tests/src-hub-kernel.elf' if args.hub_only else 'tests/src-block-kernel.elf'),stage/'boot/kernel.elf');shutil.copy2(build/'kmodules/probe.kmod',stage/'boot/kmodules/probe.kmod')
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
+    if args.disk_modules:
+        config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
+        for name in ('future','future-fail'):shutil.copy2(build/f'kmodules/{name}.kmod',fixture/f'{name}.kmod')
+        (fixture/'future.driver').write_text('version=1\nmodule=future\ninit=future.init\nstart=future.start\nrequires=clock.now_ns@1.0\npci.class=030000\n')
+        (fixture/'future-fail.driver').write_text('version=1\nmodule=future-fail\ninit=future_fail.init\nrequires=future.value@1.2\nmatch=always\n')
     image=test/'boot.img';subprocess.run([sys.executable,str(root/'src/tools/build-boot-image.py'),str(stage),str(image),'--drivers-source',str(fixture)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     cmd=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',args.accel,'-cpu',args.cpu,'-smp',str(args.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,bus=xhci.0','-drive',f'if=none,id=bootmedia,format=raw,file={image}','-device',('nvme,drive=bootmedia,serial=CLOUDBERRYTEST,bootindex=1' if args.backend=='nvme' else 'usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1' if args.backend=='usb' else 'ide-hd,bus=ide.0,drive=bootmedia,bootindex=1'),'-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-no-reboot','-no-shutdown']
     if args.duplicate:
@@ -52,6 +57,7 @@ try:
             process.terminate()
             try:process.wait(timeout=5)
             except subprocess.TimeoutExpired:process.kill();process.wait()
+    if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')
     if args.bootstrap and not args.duplicate and 'PASS bootstrap unique GUID' not in log.read_text():raise RuntimeError('unique volume was not selected')
     subprocess.run([sys.executable,str(root/'src/tests/boot-image.py'),str(image)],check=True)

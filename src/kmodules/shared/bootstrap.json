@@ -16,6 +16,14 @@
     {
       "name": "bootstrap.info",
       "symbol": "bootstrap_surface_info"
+    },
+    {
+      "name": "bootstrap.load",
+      "symbol": "bootstrap_surface_load"
+    },
+    {
+      "name": "bootstrap.driver_info",
+      "symbol": "bootstrap_surface_driver_info"
     }
   ]
 }

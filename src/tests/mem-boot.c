@@ -94,7 +94,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     if (r.status || !r.value) return test_failure(__LINE__);
     if (CALL(release, &heap, r.value, 0).status) return test_failure(__LINE__);
     kernel_surface_call config_info=find(page,"config.info"),batch=find(page,"hub.publish_tables");struct config_info configured;
-    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=5)return test_failure(__LINE__);
+    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=6)return test_failure(__LINE__);
     const struct kernel_hub_table *config_version=kernel_hub_find_table(page,"config.version"),*directory=kernel_hub_find_table(page,"config.drivers.directory");
     const struct kernel_hub_table *partition=kernel_hub_find_table(page,"config.drivers.partition_guid");
     if(!config_version || !directory || !partition)return test_failure(__LINE__);
@@ -104,7 +104,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     if(identity->major!=1 || identity->type!=CONFIG_GUID || identity->bytes!=sizeof(struct config_guid) || !identity->data)return test_failure(__LINE__);
     const unsigned char *guid=identity->data;unsigned nonzero=0;for(unsigned i=0;i<sizeof(struct config_guid);++i)nonzero|=guid[i];
     if(!nonzero)return test_failure(__LINE__);
-    uint32_t expected_tables=11+configured.count;
+    uint32_t expected_tables=kernel_hub_table_count(page);
     struct kernel_hub_table transaction[2]={*config_version,*directory};
     const char fresh[]="test.config.atomic";for(unsigned i=0;i<sizeof(fresh);++i)transaction[0].name[i]=fresh[i];
     if(CALL(batch,transaction,2,0).status!=KERNEL_SURFACE_FAILED || kernel_hub_find_table(page,fresh) || page->table_count!=expected_tables)return test_failure(__LINE__);

@@ -4,6 +4,8 @@
 #include "../boot/limine.h"
 #include "../kmodules/shared/hwenum.h"
 #include "../kmodules/shared/config.h"
+#include "../kmodules/shared/module-load.h"
+#include "../kmodules/shared/threads.h"
 #define HUB_BYTES KERNEL_HUB_BYTES
 #define STUB_BYTES KERNEL_MEDIATION_STUB_BYTES
 static struct kernel_surfaces *hub_writable;
@@ -16,6 +18,12 @@ static struct hub_range method_range={.address=KERNEL_METHODS_ADDRESS,.kind=BOOT
     metadata_range={.address=KERNEL_METADATA_ADDRESS,.kind=BOOT_RES_HUB},
     stub_range={.address=KERNEL_MEDIATION_ADDRESS,.kind=BOOT_RES_MEDIATION,.executable=1};
 static unsigned hub_writer;
+static uintptr_t module_heap;
+static unsigned module_loading;
+struct dependency_lease {struct dependency_lease *next;uint64_t owner,count;uint64_t providers[];};
+static struct dependency_lease *dependency_leases;
+static void release_dependencies(uint64_t owner);
+static struct kernel_surface_result load_runtime(MODULE_ARGS);
 static int writer_begin(void){return !__atomic_exchange_n(&hub_writer,1,__ATOMIC_ACQUIRE);}
 static void writer_end(void){__atomic_store_n(&hub_writer,0,__ATOMIC_RELEASE);}
 static void *writable(const struct hub_range *r){return (void *)(r->address+KERNEL_HUB_ALIAS_DELTA);}
@@ -98,7 +106,7 @@ static void write_surface(size_t index,const char *name,kernel_surface_call call
     if(prefix(name,"clock.") && !kernel_hub_name_equal(name,"clock.sample")) {
         meta->mode=(kernel_hub_name_equal(name,"clock.init") || kernel_hub_name_equal(name,"clock.rtc") || kernel_hub_name_equal(name,"clock.smp_tsc") || kernel_hub_name_equal(name,"clock.refine"))?3:2;
     }
-    const char *unlocked[]={"memory.reserve","memory.release","mem.malloc","mem.calloc","mem.realloc","mem.aligned_alloc","mem.free","mem.usable_size","mem.pages_alloc","mem.pages_free","pci.dma_alloc","pci.dma_free","pci.release","hub.publish_table","hub.publish_tables","hub.owner_info","hub.owner_pin","hub.owner_control"};
+    const char *unlocked[]={"kernel.module_load","memory.reserve","memory.release","mem.malloc","mem.calloc","mem.realloc","mem.aligned_alloc","mem.free","mem.usable_size","mem.pages_alloc","mem.pages_free","pci.dma_alloc","pci.dma_free","pci.release","hub.publish_table","hub.publish_tables","hub.owner_info","hub.owner_pin","hub.owner_control"};
     for(size_t i=0;i<sizeof(unlocked)/sizeof(unlocked[0]);++i)if(kernel_hub_name_equal(name,unlocked[i]))meta->mode=0;
     if(kernel_hub_name_equal(name,"cpu.control")) meta->mode=0;
     {
@@ -148,9 +156,9 @@ static struct kernel_surface_result owner_control(MODULE_ARGS){
         uint32_t status=__atomic_load_n(&o->state,__ATOMIC_SEQ_CST);
         if(b==HUB_OWNER_DRAIN && (status==HUB_OWNER_LIVE || status==HUB_OWNER_DRAINING)){__atomic_store_n(&o->state,HUB_OWNER_DRAINING,__ATOMIC_SEQ_CST);ok=1;}
         if(b==HUB_OWNER_RESUME && status==HUB_OWNER_DRAINING){__atomic_store_n(&o->state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);ok=1;}
-        if(b==HUB_OWNER_RETIRE && status==HUB_OWNER_DRAINING && !__atomic_load_n(&o->active,__ATOMIC_SEQ_CST) && !__atomic_load_n(&o->pins,__ATOMIC_SEQ_CST)){__atomic_store_n(&o->state,HUB_OWNER_RETIRED,__ATOMIC_SEQ_CST);ok=1;}
+        if(b==HUB_OWNER_RETIRE && (status==HUB_OWNER_DRAINING || status==HUB_OWNER_FAILED) && !__atomic_load_n(&o->active,__ATOMIC_SEQ_CST) && !__atomic_load_n(&o->pins,__ATOMIC_SEQ_CST)){__atomic_store_n(&o->state,HUB_OWNER_RETIRED,__ATOMIC_SEQ_CST);ok=1;}
     }
-    writer_end();return module_result(ok,ok);
+    writer_end();if(ok && b==HUB_OWNER_RETIRE)release_dependencies(a);return module_result(ok,ok);
 }
 static void debug(const char *message) {
     while (*message) __asm__ volatile("outb %0,$0xe9" :: "a"((uint8_t)*message++));
@@ -310,6 +318,7 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     if(!add_surface(map_batch_name,map_batch,1,0,0))return NULL;
     const char batch_name[32]="memory.unmap_batch";
     if(!add_surface(batch_name,unmap_batch,1,0,0))return NULL;
+    if(!add_surface("kernel.module_load",load_runtime,1,0,0))return NULL;
     if(!add_surface("hardware.framebuffer_map",framebuffer_map,1,0,0))return NULL;
     if(!add_surface("hardware.firmware_map",firmware_map,1,0,0) || !add_surface("hardware.port_read",port_read,1,0,0) ||
        !add_surface("hardware.port_write",port_write,1,0,0) || !add_surface("hardware.log",log_text,1,0,0))return NULL;
@@ -327,7 +336,7 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     if (publish_table((uintptr_t)&ledger, 0, 0, 0, 0, 0).status) return NULL;
     return (const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
 }
-static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,const char *name,uint32_t flags) {
+static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,const char *name,uint32_t flags,uint32_t initial_state) {
     if (!hub_writable || !image || bytes < sizeof(struct kmodule_image) || flags&~HUB_OWNER_BOOT_PINNED) return false;
     const struct kmodule_image *h = image;
     if (h->magic != KMODULE_MAGIC || h->format != KMODULE_FORMAT || h->header_bytes != sizeof(*h) ||
@@ -361,7 +370,7 @@ static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,c
     for(size_t i=0;i<h->memory_bytes;i+=4096){int writable_page=i>=h->writable_offset;irqflags=kernel_cpu_enter();int ok=boot_map_page(pages,address+i,physical+i,writable_page,!writable_page);kernel_cpu_leave(irqflags);if(!ok)return false;}
     kernel_cpu_flush();
     struct kernel_hub_owner *record=&((struct kernel_hub_owner *)writable(&owner_range))[owner];
-    *record=(struct kernel_hub_owner){.id=owner,.image=address,.bytes=h->memory_bytes,.state=HUB_OWNER_LIVE,.flags=flags,.methods=h->exports_count};
+    *record=(struct kernel_hub_owner){.id=owner,.image=address,.bytes=h->memory_bytes,.state=initial_state,.flags=flags,.methods=h->exports_count};
     for(unsigned i=0;i<31 && name[i];++i)record->name[i]=name[i];
     for(size_t i=0;i<h->exports_count;++i)write_surface(first+i,exports[i].name,(kernel_surface_call)(address+exports[i].offset),exports[i].major,exports[i].minor,1,owner);
     uint32_t serial=0;__asm__ volatile("cpuid":"+a"(serial)::"rbx","rcx","rdx","memory");
@@ -374,7 +383,7 @@ static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,c
 }
 bool kernel_module_load_owned(struct boot_pages *pages,const void *image,size_t bytes,const char *name,uint32_t flags){
     if(!writer_begin())return false;
-    bool ok=load_owned(pages,image,bytes,name,flags);writer_end();return ok;
+    bool ok=load_owned(pages,image,bytes,name,flags,HUB_OWNER_LIVE);writer_end();return ok;
 }
 bool kernel_module_load(struct boot_pages *pages,const void *image,size_t bytes,const char *name){return kernel_module_load_owned(pages,image,bytes,name,HUB_OWNER_BOOT_PINNED);}
 /* Boot supplies both variants; only selected images are executable mappings.
@@ -453,7 +462,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     hub_writable->mem_context_bytes=info->bytes;hub_writable->mem_context_alignment=info->alignment;
     uint64_t context=boot_pages_reserve(pages,(info->bytes+4095)/4096,BOOT_RES_CONTEXT,0);
     if (!context) return startup_failure("memory.context","exhausted");
-    uintptr_t heap=(uintptr_t)boot_physical_pointer(pages,context);
+    uintptr_t heap=(uintptr_t)boot_physical_pointer(pages,context);module_heap=heap;
     uint64_t arena=boot_pages_reserve(pages,1,BOOT_RES_HEAP,heap);
     if (!arena) return startup_failure("memory.heap","exhausted");
     START("mem.init",calls[2](heap,(uintptr_t)boot_physical_pointer(pages,arena),4096,0,0,0));
@@ -501,4 +510,53 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     kernel_surface_call bootstrap=kernel_surface_find(hub,"bootstrap.init");if(!bootstrap)return startup_failure("bootstrap.init","missing");
     START("bootstrap.init",bootstrap((uintptr_t)hub,heap,0,0,0,0));
     return true;
+}
+
+static void free_dependency_record(struct dependency_lease *p){
+    for(uint64_t i=0;i<p->count;++i)(void)owner_pin(p->providers[i],0,0,0,0,0);
+    kernel_surface_call free=kernel_surface_find(hub_writable,"mem.free");if(free)free(module_heap,(uintptr_t)p,0,0,0,0);
+}
+static void release_dependencies(uint64_t owner){
+    /* CPU0 runtime loading/retirement serializes this list. The hub writer has
+     * already ended, so provider lease releases cannot deadlock publication. */
+    uint64_t flags=kernel_cpu_enter();struct dependency_lease **at=&dependency_leases;while(*at && (*at)->owner!=owner)at=&(*at)->next;
+    struct dependency_lease *p=*at;if(p)*at=p->next;kernel_cpu_leave(flags);if(p)free_dependency_record(p);
+}
+static kernel_surface_call own_entry(uint64_t owner,const char *name){
+    const struct kernel_surface *entries=kernel_surface_entries(hub_writable);
+    for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(entries[i].owner==owner && entries[i].major==1 && kernel_hub_name_equal(entries[i].name,name))return ((const struct method_metadata *)writable(&metadata_range))[i].implementation;
+    return NULL;
+}
+static struct kernel_surface_result load_runtime(MODULE_ARGS){
+    MODULE_UNUSED();struct module_load_result result={.owner=UINT64_MAX,.error=MODULE_LOAD_ARGUMENT};
+    uint64_t interrupts;__asm__ volatile("pushfq;pop %0":"=r"(interrupts));
+    kernel_surface_call thread=hub_writable?kernel_surface_find(hub_writable,"threads.control"):NULL,irq=hub_writable?kernel_surface_find(hub_writable,"irq.context"):NULL;
+    if(!a || !b || !module_heap || !thread || !irq || kernel_cpu_control(CPU_CURRENT,0,0,0,0,0).value || kernel_cpu_control(CPU_DEPTH,0,0,0,0,0).value || !(interrupts&512) || thread(THREAD_CURRENT,0,0,0,0,0).value==0 || irq(0,0,0,0,0,0).value || __atomic_exchange_n(&module_loading,1,__ATOMIC_ACQUIRE)){if(b)*(struct module_load_result *)b=result;return module_result(result.error,0);}
+    const struct module_load_request request=*(const struct module_load_request *)a;struct dependency_lease *leases=NULL;uint64_t owner=UINT64_MAX;
+    if(request.abi!=1 || request.reserved || !request.image || request.bytes<sizeof(struct kmodule_image) || request.bytes>SIZE_MAX || (uintptr_t)request.image>UINTPTR_MAX-request.bytes || !valid_name(request.name) || !valid_name(request.init) || (request.start[0] && !valid_name(request.start)) || request.requirement_count>(SIZE_MAX-sizeof(*leases))/sizeof(uint64_t) || request.requirement_count>SIZE_MAX/sizeof(struct module_requirement) || (uintptr_t)request.requirements>UINTPTR_MAX-request.requirement_count*sizeof(struct module_requirement) || (request.requirement_count && !request.requirements) || request.device_count>SIZE_MAX/sizeof(uint64_t) || (uintptr_t)request.devices>UINTPTR_MAX-request.device_count*sizeof(uint64_t) || (request.device_count && !request.devices))goto done;
+    /* Entry signatures must exist in the validated input image. No publication
+     * occurs if dependency versions or initializer contracts are missing. */
+    const struct kmodule_image *image=request.image;
+    if(image->exports_offset>request.bytes || image->export_bytes!=sizeof(struct kmodule_export) || image->exports_count>(request.bytes-image->exports_offset)/sizeof(struct kmodule_export)){result.error=MODULE_LOAD_IMAGE;goto done;}
+    const struct kmodule_export *exports=(const void *)((uintptr_t)request.image+image->exports_offset);int init_found=0,start_found=!request.start[0];
+    for(uint32_t i=0;i<image->exports_count;++i){if(!valid_name(exports[i].name)){result.error=MODULE_LOAD_IMAGE;goto done;}if(exports[i].major==1){if(kernel_hub_name_equal(exports[i].name,request.init))init_found=1;if(request.start[0] && kernel_hub_name_equal(exports[i].name,request.start))start_found=1;}}
+    if(!init_found || !start_found){result.error=MODULE_LOAD_IMAGE;goto done;}
+    kernel_surface_call alloc=kernel_surface_find(hub_writable,"mem.calloc");struct kernel_surface_result memory=alloc?alloc(module_heap,1,sizeof(*leases)+request.requirement_count*sizeof(uint64_t),0,0,0):module_result(0,0);
+    if(memory.status){result.error=MODULE_LOAD_MEMORY;goto done;}leases=(void *)memory.value;
+    for(uint64_t i=0;i<request.requirement_count;++i){const struct module_requirement *r=&request.requirements[i];if(!valid_name(r->name) || !r->major || r->reserved || !kernel_surface_find_version(hub_writable,r->name,r->major,r->minor)){result.error=MODULE_LOAD_DEPENDENCY;result.detail=i;goto done;}
+        uint64_t provider=kernel_surface_owner(hub_writable,r->name);if(owner_pin(provider,1,0,0,0,0).status){result.error=MODULE_LOAD_DEPENDENCY;result.detail=i;goto done;}leases->providers[leases->count++]=provider;}
+    result.error=MODULE_LOAD_IMAGE;if(!writer_begin())goto done;owner=hub_writable->owner_count;int loaded=load_owned(hub_pages,request.image,request.bytes,request.name,0,HUB_OWNER_INITIALIZING);writer_end();if(!loaded){owner=UINT64_MAX;goto done;}
+    result.owner=owner;leases->owner=owner;uint64_t lease_flags=kernel_cpu_enter();leases->next=dependency_leases;dependency_leases=leases;kernel_cpu_leave(lease_flags);leases=NULL;
+    struct module_init_context context={.abi=1,.hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS,.heap=module_heap,.owner=owner,.devices=request.devices,.device_count=request.device_count};
+    __atomic_add_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);
+    struct kernel_surface_result initialized=own_entry(owner,request.init)((uintptr_t)&context,0,0,0,0,0);
+    __atomic_sub_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);
+    if(initialized.status){result.error=MODULE_LOAD_INIT;result.detail=initialized.value;__atomic_store_n(&owner_write(owner)->state,HUB_OWNER_FAILED,__ATOMIC_SEQ_CST);goto done;}
+    __atomic_store_n(&owner_write(owner)->state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);
+    if(request.start[0]){__atomic_add_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);initialized=own_entry(owner,request.start)((uintptr_t)&context,0,0,0,0,0);__atomic_sub_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);if(initialized.status){result.error=MODULE_LOAD_START;result.detail=initialized.value;__atomic_store_n(&owner_write(owner)->state,HUB_OWNER_FAILED,__ATOMIC_SEQ_CST);goto done;}}
+    result.error=MODULE_LOAD_OK;
+done:
+    if(leases)free_dependency_record(leases);
+    if(owner!=UINT64_MAX)result.state=__atomic_load_n(&owner_write(owner)->state,__ATOMIC_SEQ_CST);
+    *(struct module_load_result *)b=result;__atomic_store_n(&module_loading,0,__ATOMIC_RELEASE);return module_result(result.owner,result.error==MODULE_LOAD_OK);
 }

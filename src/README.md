@@ -68,7 +68,9 @@ mounts it read-only. Blank disks are skipped; corrupt GPT, failed transports and
 duplicate matches fail selection. Copied Limine boot identity is correlated when
 available; identifying a configured partition does not itself prove boot provenance.
 Current modules stay in the Limine boot partition. The ext4 directory is reserved
-for explicitly selected future modules; disk loading is not implemented yet.
+for explicitly selected future modules, loaded through the
+[mediated kernel loader](kmodules/shared/module-load.md). `drivers.modules` defaults
+to empty; all existing modules remain in Limine.
 
 ```sh
 make -C src test-block-boot BLOCK_BACKEND=nvme QEMU_CPUS=4 QEMU_IOMMU=amd
@@ -89,8 +91,9 @@ starts Limine, and GPT partition 4 is a separate 512 MiB ext4 filesystem named
 `Cloudberry drivers`. Xorriso also describes gap partitions around these regions.
 The ext4 root contains the configured `/boot/system/drivers` directory, currently
 empty. Limine 10 reads FAT/ISO9660, not ext4. The boot-loaded `usb-storage`,
-`partition` and `ext4-fs` modules provide guest access and explicitly requested journaled writes; disk-loaded
-drivers remain future work.
+`partition` and `ext4-fs` modules provide guest access and explicitly requested
+journaled writes. Bootstrap selects the unique driver volume and can load
+explicit future modules; the default image selects none.
 
 `tools/build-boot-image.py` formats only generated regular files during image
 building and assigns the partition GUID from `boot/cloudberry.cnf`. The packaged
@@ -208,7 +211,7 @@ follow process isolation and safe boundary transfer.
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
-| Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; table withdrawal, disk loading, dependency-driven selection and executable reclamation remain future work |
+| Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies; table withdrawal and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
 stop/start reclaims existing hubs while USB core and root attachment identity
@@ -352,6 +355,8 @@ src/
 │   │   ├── apic.md
 │   │   ├── block-util.h
 │   │   ├── boot-origin.h
+│   │   ├── bootstrap-load.c
+│   │   ├── bootstrap-load.h
 │   │   ├── bootstrap.c
 │   │   ├── bootstrap.h
 │   │   ├── bootstrap.json
@@ -411,6 +416,8 @@ src/
 │   │   ├── mmio.h
 │   │   ├── mmio.json
 │   │   ├── mmio.md
+│   │   ├── module-load.h
+│   │   ├── module-load.md
 │   │   ├── module.h
 │   │   ├── module.ld
 │   │   ├── nvme.c
@@ -500,6 +507,7 @@ src/
 │   ├── backend-contracts.py
 │   ├── block-boot.c
 │   ├── bootstrap-boot.c
+│   ├── bootstrap-load.c
 │   ├── block-boot.py
 │   ├── boot-image.py
 │   ├── clock-boot.c
@@ -507,6 +515,7 @@ src/
 │   ├── config.c
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
+│   ├── future.c / future.json / future-fail.c / future-fail.json (disk-only fixtures)
 │   ├── events-boot.c
 │   ├── ext4-runtime.c
 │   ├── ext4-write.c
@@ -630,8 +639,8 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are loading selected future modules from disk and
-process isolation; see [roadmap](ROADMAP.md#next-priorities).
+The selected disk-module loading milestone is complete. The next architectural
+phase is process isolation and privilege boundaries; see [roadmap](ROADMAP.md#next-priorities).
 
 
 [xHCI transport](kmodules/shared/xhci.md) is loaded/initialized by the kernel and
@@ -639,20 +648,20 @@ publishes the owned `xhci.controllers` registry alongside 17 method surfaces.
 Controller instances use PCI/DMA/IOMMU/IRQ/mem/clock/thread hub facilities. Transfers
 have wake-driven completion waiting; detach generations reject stale tokens.
 Controlled close/reopen supports restart after quiescence; module-image unloading
-and the driver manager remain future work. Isolated tests validate actual QEMU
+remains future work; bootstrap now supplies explicit disk-module selection. Isolated tests validate actual QEMU
 DMA/MSI-X transfers, cancellation and USB unplug/replug with one/four CPUs and
 both emulated IOMMUs. Native/physical xHCI acceptance remains pending.
 
-[USB core](kmodules/shared/usb.md) publishes `usb.devices` and seventeen surfaces.
+[USB core](kmodules/shared/usb.md) publishes `usb.devices` and eighteen surfaces.
 Normal boot starts root enumeration in preemptible BSP workers; workers sleep
 between xHCI change notifications. Interface-scoped ownership and core-owned I/O
 buffers keep class drivers independent of xHCI DMA/context formats.
 The separate usb-storage module implements BOT/SCSI; HID remains deferred.
 
-[USB hub class](kmodules/shared/usb-hub.md) supplies six surfaces and the owned
+[USB hub class](kmodules/shared/usb-hub.md) supplies seven surfaces and the owned
 `usb.hubs` registry. Normal boot starts its manager alongside USB core. External
 hub workers power/reset ports, enumerate nested devices and block on interrupt
 change bitmaps. Subtree disconnect revokes references before postorder slot
 cleanup. Isolated one/four-CPU tests cover child hotplug, pending grandchild I/O,
 upstream removal and reattachment, including both emulated IOMMUs. Native and
-physical hub/USB3 qualification remain pending; disk-loaded drivers remain the next priority.
+physical hub/USB3 qualification remain pending.

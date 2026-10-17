@@ -1,0 +1,25 @@
+{
+  "name": "future",
+  "exports": [
+    {
+      "name": "future.init",
+      "symbol": "future_init"
+    },
+    {
+      "name": "future.start",
+      "symbol": "future_start"
+    },
+    {
+      "name": "future.value",
+      "symbol": "future_value",
+      "version": [
+        1,
+        2
+      ]
+    },
+    {
+      "name": "future.test",
+      "symbol": "future_test"
+    }
+  ]
+}

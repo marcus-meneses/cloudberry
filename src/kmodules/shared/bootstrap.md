@@ -41,7 +41,9 @@ The snapshot call also reaps an exited selection worker when called outside a
 critical section with interrupts enabled. USB removal invalidates the underlying
 mount; `info` then reports DISCONNECTED. No replacement disk inherits the cookies,
 and bootstrap does not silently remount it. Code and registry headers remain
-boot-lifetime. Only explicitly selected future modules will use this mount.
+boot-lifetime. Explicitly selected future modules use this mount through the
+[disk-module loader](module-load.md). Volume readiness and module-load completion
+are separate states; consumers needing selected modules also check driver status.
 
 Focused acceptance uses disposable images below `bin/tests`:
 

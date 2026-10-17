@@ -224,17 +224,26 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     duplicate-GUID and multi-controller/multi-namespace guest acceptance pass.
     USB multi-LUN multiplexing/UAS and unsupported hardware remain explicit limits.
 
+25. Closed: explicit `drivers.modules` basenames select `.driver` manifests and
+    format3 images from the readonly ext4 driver volume. Bootstrap validates the
+    whole opt-in list, matches PCI inventory classes and preserves dependency
+    order; the kernel mediates image validation, dependency-version leases,
+    hidden initialization and optional live startup. Failures preserve owner/
+    error details, reject new calls and retain active/leased/table-backed state;
+    safe retirement releases dependency leases. All existing modules remain
+    Limine-loaded. Four-CPU AMD-Vi failure-path and Intel VT-d success-path guest
+    tests load disk-only fixtures, reject version/image/init/start failures,
+    prove unselected images remain unloaded and check retirement/stale gates.
+    Focused manifest/config/hub host checks pass. General unload/executable
+    reclamation, signature installation policy and hardware activation rollback
+    remain outside this milestone.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
 Multi-instance storage and USB storage-disconnection cleanup are implemented.
-Bootstrap storage selection is implemented; selected future disk modules come next.
-
-1. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
-   resolve hub dependencies and select drivers for discovered devices. Foundational
-   modules, including all existing kmodules, remain Limine-loaded from the boot
-   partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot
-   executable replacement are separate milestones.
+Bootstrap storage selection and selected future disk-module loading are implemented.
+The five requested storage/hub priorities are closed.
 
 After disk loading: establish process address spaces, user/kernel privilege
 separation, safe boundary copying and teardown/ownership cleanup before

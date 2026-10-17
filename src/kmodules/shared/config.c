@@ -7,6 +7,7 @@
 static const struct schema {char key[25],fallback[32];unsigned type,flags;uint64_t min,max;} schemas[]={
     {.key="version",.type=CONFIG_UINT,.flags=REQUIRED,.min=1,.max=1},
     {.key="boot.show_inventory",.fallback="true",.type=CONFIG_BOOL,.flags=DEFAULT},
+    {.key="drivers.modules",.fallback="",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="drivers.directory",.fallback="/boot/system/drivers",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="storage.timeout_ms",.fallback="1000",.type=CONFIG_UINT,.flags=DEFAULT,.min=1,.max=UINT32_MAX},
     {.key="drivers.partition_guid",.type=CONFIG_GUID}
