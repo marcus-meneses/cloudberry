@@ -348,6 +348,11 @@ Follow-up requested after that acceptance:
    method/name, lock domain, caller PC, clock source/epoch and address-space identity
    for wait/hold/IRQ peaks. Focused host and guest validation is recorded in tests;
    fresh native performance acceptance requires the existing KVM collection script.
+   Native session 20261017T211928.519874Z passes three single-CPU runs but times
+   out during the first four-CPU AMD-Vi run. The benchmark's shared-state waits
+   now use nonblocking dispatch rather than event-loop idle, with an explicit
+   remote-only completion regression. The incomplete session is not accepted;
+   native reruns against 20261017T202426.499405Z remain required.
 3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
    contract under interfaces, plus handlers/keyboard's loading/authorization plan.
    /@keyboard is the first handler milestone; C++ object layouts stay out of the

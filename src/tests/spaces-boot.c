@@ -53,8 +53,13 @@ static bool profile_contract_test(const struct kernel_surfaces *hub){
 }
 static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages,unsigned trial){
     kernel_surface_call create=kernel_surface_find(hub,"mem.space_create"),map=kernel_surface_find(hub,"mem.space_map"),unmap=kernel_surface_find(hub,"mem.space_unmap"),protect=kernel_surface_find(hub,"mem.space_protect"),query=kernel_surface_find(hub,"mem.space_query"),info=kernel_surface_find(hub,"mem.space_info"),destroy=kernel_surface_find(hub,"mem.space_destroy");
-    kernel_surface_call alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free"),thread=kernel_surface_find(hub,"threads.create"),control=kernel_surface_find(hub,"threads.control"),step=kernel_surface_find(hub,"event.step"),clock=kernel_surface_find(hub,"clock.now_ns"),entry=kernel_surface_find(hub,"probe.space");
-    CHECK(create && map && unmap && protect && query && info && destroy && entry);
+    kernel_surface_call alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free"),thread=kernel_surface_find(hub,"threads.create"),control=kernel_surface_find(hub,"threads.control"),dispatch=kernel_surface_find(hub,"threads.run"),clock=kernel_surface_find(hub,"clock.now_ns"),entry=kernel_surface_find(hub,"probe.space");
+    /* These rendezvous observe shared probe state, not a scheduler deadline or
+     * a wakeable BSP thread. event.step may stop the local timer and HLT once
+     * only an AP is running; an AP blocking/exiting does not wake the BSP.
+     * Nonblocking dispatch keeps the condition and absolute timeout observable.
+     * Production event-loop idle policy and the measured operations are unchanged. */
+    CHECK(create && map && unmap && protect && query && info && destroy && entry && dispatch && control && clock);
     CHECK(!kernel_cpu_control(CPU_METRICS_RESET,0,0,0,0,0).status);
     struct mem_space_info a,b,idle,snapshot;struct mem_pages first,second,replacement,code_a,code_b,hole_a,hole_b,canary;
     CHECK(!CALL(create,101,&a,0).status && !CALL(create,102,&b,0).status && a.id!=b.id);
@@ -78,7 +83,7 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages,uns
     struct thread_request wrong={.abi=2,.cpu=0,.process_id=102,.address_space=a.id,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};CHECK(CALL(thread,&wrong,0,0).status);
     __asm__ volatile("sti":::"memory");CHECK(CALL(kernel_surface_find(hub,"mem.space_switch"),a.id,101,0).status);
     uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(15000000000);
-    for(;;){unsigned ready=0;for(unsigned i=0;i<count;++i)ready+=__atomic_load_n(&probes[i].phase,__ATOMIC_ACQUIRE)==1;if(ready==count)break;CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    for(;;){unsigned ready=0;for(unsigned i=0;i<count;++i)ready+=__atomic_load_n(&probes[i].phase,__ATOMIC_ACQUIRE)==1;if(ready==count)break;CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
     CHECK(kernel_cpu_space()==0);uintptr_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));CHECK(cr3==pages->kernel_root);
     CHECK(!CALL(info,a.id,101,&snapshot).status && snapshot.leases==count-1 && snapshot.active<=count-1);
     struct cpu_record *cpu=(void *)cpus->address;
@@ -96,20 +101,30 @@ static bool cycle(const struct kernel_surfaces *hub,struct boot_pages *pages,uns
     CHECK(!query(a.id,101,va,(uintptr_t)&mapping,0,0).status && !mapping.flags && CALL(destroy,a.id,101,0).status);
     CHECK(!protect(b.id,102,va,0,0,0).status && !protect(a.id,101,va+4096,MEM_SPACE_EXEC,0,0).status && !protect(b.id,102,va+4096,MEM_SPACE_EXEC,0,0).status);
     for(unsigned i=0;i<count;++i)__atomic_store_n(&probes[i].command,1,__ATOMIC_RELEASE);
-    for(;;){unsigned ready=0;for(unsigned i=0;i<count;++i)ready+=__atomic_load_n(&probes[i].phase,__ATOMIC_ACQUIRE)==2;if(ready==count)break;CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    for(;;){unsigned ready=0;for(unsigned i=0;i<count;++i)ready+=__atomic_load_n(&probes[i].phase,__ATOMIC_ACQUIRE)==2;if(ready==count)break;CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
     /* Revoke an already executed page and remove an already read page while
      * CPU1 still uses this root. Post-change guarded accesses must really fault. */
-    if(count==3){uint64_t held;for(;;){held=kernel_cpu_enter();if(__atomic_load_n(&cpu[1].address_space,__ATOMIC_ACQUIRE)==a.id)break;kernel_cpu_leave(held);CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    if(count==3){uint64_t held;for(;;){held=kernel_cpu_enter();if(__atomic_load_n(&cpu[1].address_space,__ATOMIC_ACQUIRE)==a.id)break;kernel_cpu_leave(held);CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
         CHECK(!protect(a.id,101,va+4096,0,0,0).status && !CALL(unmap,a.id,101,va+8192).status);kernel_cpu_leave(held);
     }else CHECK(!protect(a.id,101,va+4096,0,0,0).status && !CALL(unmap,a.id,101,va+8192).status);
     CHECK(!protect(b.id,102,va+4096,0,0,0).status && !CALL(unmap,b.id,102,va+8192).status);
     CHECK(!CALL(free,hole_a.id,101,0).status && !CALL(free,hole_b.id,102,0).status && !CALL(alloc,1,999,&canary).status);*(uint64_t *)canary.address=0x8888;
     for(unsigned i=0;i<count;++i)__atomic_store_n(&probes[i].command,2,__ATOMIC_RELEASE);
-    for(;;){unsigned blocked=0;for(unsigned i=0;i<count;++i){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[i],&t).status);blocked+=t.state==THREAD_BLOCKED;}if(blocked==count)break;CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    for(;;){unsigned blocked=0;for(unsigned i=0;i<count;++i){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[i],&t).status);blocked+=t.state==THREAD_BLOCKED;}if(blocked==count)break;CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
     CHECK(!CALL(info,a.id,101,&snapshot).status && !snapshot.active && CALL(destroy,a.id,101,0).status);
     CHECK(!CALL(unmap,a.id,101,va).status && !CALL(free,first.id,101,0).status && !map(a.id,101,va,replacement.physical,0,0).status);
-    for(unsigned i=0;i<count;++i)CHECK(!CALL(control,THREAD_WAKE,ids[i],0).status);
-    for(;;){unsigned exited=0;for(unsigned i=0;i<count;++i){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[i],&t).status);exited+=t.state==THREAD_EXITED;}if(exited==count)break;CHECK(!CALL(step,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    if(count==3){
+        /* Regression: finish remote work while every BSP worker is blocked.
+         * There is deliberately no local work/deadline or completion wake IPI.
+         * Dispatch must return even if the AP has not finished yet. */
+        struct kernel_surface_result ready=CALL(control,THREAD_READY,0,0);CHECK(!ready.status && !ready.value);
+        struct kernel_surface_result empty=CALL(dispatch,1,0,0);CHECK(!empty.status && !empty.value);
+        CHECK(!CALL(control,THREAD_WAKE,ids[2],0).status);
+        for(;;){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[2],&t).status);if(t.state==THREAD_EXITED)break;
+            CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
+    }
+    for(unsigned i=0;i<(count==3?2:count);++i)CHECK(!CALL(control,THREAD_WAKE,ids[i],0).status);
+    for(;;){unsigned exited=0;for(unsigned i=0;i<count;++i){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[i],&t).status);exited+=t.state==THREAD_EXITED;}if(exited==count)break;CHECK(!CALL(dispatch,1,0,0).status && CALL(clock,0,0,0).value<deadline);}
     CHECK(CALL(destroy,a.id,101,0).status);
     for(unsigned i=0;i<count;++i){struct thread_info t;CHECK(!CALL(control,THREAD_INFO,ids[i],&t).status && !t.result.status && !probes[i].errors && probes[i].phase==4 && t.switches>20);CHECK(!CALL(control,THREAD_REAP,ids[i],0).status);}
     CHECK(!CALL(info,a.id,101,&snapshot).status && !snapshot.active && !snapshot.leases);

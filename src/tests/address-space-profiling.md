@@ -275,6 +275,41 @@ bin/tests/clock-overhead-validation. The deliberate stuck-owner watchdog also
 passes. Capability/AP-mode host checks and eight report/ten comparison checks
 pass. These results establish guest correctness, not native performance gains.
 
+## Native timeout and rendezvous correction: 2026-10-17
+
+Session `20261017T211928.519874Z` passes all three single-CPU native runs but
+fails its first four-CPU AMD-Vi run at the 90-second runner timeout, after four
+complete cycles and the fifth cycle's protection samples. No fatal guest fault or
+explicit correctness failure is logged; this incomplete session is not accepted
+as a performance baseline.
+
+The test used `event.step` while polling shared AP phase/thread state. Once BSP
+workers block, that call can stop the BSP timer and sleep indefinitely: remote
+block/exit is not a scheduler submission or a wake notification for the BSP.
+Consequently even the test's absolute deadline could not be checked. Rendezvous
+now use nonblocking `threads.run`, keeping both state and deadline observable.
+Every four-CPU cycle also checks that empty dispatch returns with all workers
+blocked, then finishes the AP worker with all BSP workers blocked, explicitly
+exercising remote-only progress. Candidate idle policy, clock policy,
+watchdogs and the runner timeout are unchanged. Microbenchmark operations retain
+the same brackets; scheduling/lock distributions can change with the corrected
+test driver and remote-first completion order, so compare them with that caveat.
+
+Focused TCG validation passes one CPU (run
+`67849e01d6974e0f8c5658f6027a3056`, eight cycles/80 expected faults) and four
+CPUs with AMD-Vi (run `207d8ff57fe74c748cd823375745a94b`, eight cycles/120 expected
+faults, including empty-dispatch and remote-only completion). Both restore all
+owned reservations and pass image integrity checks. Reports live under
+`bin/tests/profile-boundary/tests/spaces-{1cpu-none,4cpu-amd}`. These checks do not
+replace the native rerun.
+
+Fresh native acceptance remains required. Preserve the incomplete logs and use
+an explicitly accepted reference rather than the failed session:
+
+```sh
+./scripts/bench-spaces-kvm.sh --runs 3 --reference-session bin/tests/kvm-spaces/20261017T202426.499405Z
+```
+
 ## Observations: 2026-10-17
 
 These acceptance runs used Q35, 512 MiB, `-cpu max`, TCG and the indicated emulated
