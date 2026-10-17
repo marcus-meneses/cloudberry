@@ -20,6 +20,7 @@ static struct hub_range method_range={.address=KERNEL_METHODS_ADDRESS,.kind=BOOT
 static unsigned hub_writer;
 static uintptr_t module_heap;
 static unsigned module_loading;
+static uint64_t activation_owner=UINT64_MAX,activation_thread;
 struct dependency_lease {struct dependency_lease *next;uint64_t owner,count;uint64_t providers[];};
 static struct dependency_lease *dependency_leases;
 static void release_dependencies(uint64_t owner);
@@ -527,6 +528,17 @@ static kernel_surface_call own_entry(uint64_t owner,const char *name){
     for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(entries[i].owner==owner && entries[i].major==1 && kernel_hub_name_equal(entries[i].name,name))return ((const struct method_metadata *)writable(&metadata_range))[i].implementation;
     return NULL;
 }
+static kernel_surface_call private_resolve(uint64_t owner,const char *name,uint16_t major,uint16_t minor){
+    if(!name || kernel_cpu_control(CPU_CURRENT,0,0,0,0,0).value || owner!=activation_owner || kernel_cpu_control(CPU_DEPTH,0,0,0,0,0).value)return NULL;
+    const struct kernel_hub_owner *provider=kernel_hub_owner(hub_writable,owner);
+    if(!provider || (provider->state!=HUB_OWNER_INITIALIZING && provider->state!=HUB_OWNER_STARTING))return NULL;
+    kernel_surface_call irq=kernel_surface_find(hub_writable,"irq.context");if(!irq || irq(0,0,0,0,0,0).value)return NULL;
+    kernel_surface_call thread=kernel_surface_find(hub_writable,"threads.control");
+    if(!thread || thread(THREAD_CURRENT,0,0,0,0,0).value!=activation_thread)return NULL;
+    const struct kernel_surface *entries=kernel_surface_entries(hub_writable);
+    for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(entries[i].owner==owner && entries[i].major==major && entries[i].minor>=minor && kernel_hub_name_equal(entries[i].name,name))return ((const struct method_metadata *)writable(&metadata_range))[i].implementation;
+    return NULL;
+}
 static struct kernel_surface_result load_runtime(MODULE_ARGS){
     MODULE_UNUSED();struct module_load_result result={.owner=UINT64_MAX,.error=MODULE_LOAD_ARGUMENT};
     uint64_t interrupts;__asm__ volatile("pushfq;pop %0":"=r"(interrupts));
@@ -547,15 +559,18 @@ static struct kernel_surface_result load_runtime(MODULE_ARGS){
         uint64_t provider=kernel_surface_owner(hub_writable,r->name);if(owner_pin(provider,1,0,0,0,0).status){result.error=MODULE_LOAD_DEPENDENCY;result.detail=i;goto done;}leases->providers[leases->count++]=provider;}
     result.error=MODULE_LOAD_IMAGE;if(!writer_begin())goto done;owner=hub_writable->owner_count;int loaded=load_owned(hub_pages,request.image,request.bytes,request.name,0,HUB_OWNER_INITIALIZING);writer_end();if(!loaded){owner=UINT64_MAX;goto done;}
     result.owner=owner;leases->owner=owner;uint64_t lease_flags=kernel_cpu_enter();leases->next=dependency_leases;dependency_leases=leases;kernel_cpu_leave(lease_flags);leases=NULL;
-    struct module_init_context context={.abi=1,.hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS,.heap=module_heap,.owner=owner,.devices=request.devices,.device_count=request.device_count};
+    activation_owner=owner;activation_thread=thread(THREAD_CURRENT,0,0,0,0,0).value;
+    struct module_init_context context={.abi=2,.resolve=private_resolve,.hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS,.heap=module_heap,.owner=owner,.devices=request.devices,.device_count=request.device_count};
     __atomic_add_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);
     struct kernel_surface_result initialized=own_entry(owner,request.init)((uintptr_t)&context,0,0,0,0,0);
     __atomic_sub_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);
     if(initialized.status){result.error=MODULE_LOAD_INIT;result.detail=initialized.value;__atomic_store_n(&owner_write(owner)->state,HUB_OWNER_FAILED,__ATOMIC_SEQ_CST);goto done;}
-    __atomic_store_n(&owner_write(owner)->state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);
+    __atomic_store_n(&owner_write(owner)->state,HUB_OWNER_STARTING,__ATOMIC_SEQ_CST);
     if(request.start[0]){__atomic_add_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);initialized=own_entry(owner,request.start)((uintptr_t)&context,0,0,0,0,0);__atomic_sub_fetch(&owner_write(owner)->active,1,__ATOMIC_SEQ_CST);if(initialized.status){result.error=MODULE_LOAD_START;result.detail=initialized.value;__atomic_store_n(&owner_write(owner)->state,HUB_OWNER_FAILED,__ATOMIC_SEQ_CST);goto done;}}
+    __atomic_store_n(&owner_write(owner)->state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);
     result.error=MODULE_LOAD_OK;
 done:
+    activation_owner=UINT64_MAX;activation_thread=0;
     if(leases)free_dependency_record(leases);
     if(owner!=UINT64_MAX)result.state=__atomic_load_n(&owner_write(owner)->state,__ATOMIC_SEQ_CST);
     *(struct module_load_result *)b=result;__atomic_store_n(&module_loading,0,__ATOMIC_RELEASE);return module_result(result.owner,result.error==MODULE_LOAD_OK);

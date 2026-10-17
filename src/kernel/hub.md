@@ -144,9 +144,10 @@ validates late real module loading, old-format rejection, RO/RX guest page flags
 on isolated four-CPU QEMU. No candidate VM or persistent developer disk is used.
 
 Disk-selected future modules can begin INITIALIZING, with lookup and mediation
-blocked until init succeeds. FAILED init/start owners reject all new calls and
+blocked throughout init and optional STARTING hooks. Only successful completion
+publishes LIVE exports. FAILED init/start owners reject all new calls and
 cannot resume; safe retirement requires no active calls, leases or table pins.
 `kernel.module_load` validates/pins versioned dependencies, retains their leases
 until owner retirement, and reuses the image mapper. Init/private preparation and
-optional live start are defined in [the loader contract](../kmodules/shared/module-load.md).
+optional hidden start are defined in [the loader contract](../kmodules/shared/module-load.md).
 All current boot modules remain boot-pinned and Limine-loaded.

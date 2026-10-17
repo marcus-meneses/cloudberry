@@ -4,14 +4,19 @@
 static struct module_init_context copied;
 static uint64_t hardware;static unsigned ready;
 struct kernel_surface_result future_init(MODULE_ARGS){
-    MODULE_UNUSED();const struct module_init_context *ctx=(const void *)a;if(!ctx || ctx->abi!=1 || !ctx->hub || !ctx->heap || ctx->device_count!=1 || !ctx->devices)return module_result(1,0);
+    MODULE_UNUSED();const struct module_init_context *ctx=(const void *)a;if(!ctx || ctx->abi!=2 || !ctx->hub || !ctx->heap || ctx->device_count!=1 || !ctx->devices)return module_result(1,0);
     const struct kernel_hub_owner *owner=kernel_hub_owner(ctx->hub,ctx->owner);
     if(!owner || owner->state!=HUB_OWNER_INITIALIZING || kernel_surface_find(ctx->hub,"future.value") || !kernel_surface_find_version(ctx->hub,"clock.now_ns",1,0))return module_result(2,0);
     const struct kernel_hub_table *hw=kernel_hub_find_table(ctx->hub,HWENUM_TABLE_NAME);if(!hw || ctx->devices[0]>=((const struct hwenum_table *)hw->address)->count)return module_result(3,0);
     hardware=ctx->devices[0];if(((const struct hwenum_table *)hw->address)->entries[hardware].data.pci.class_code!=3)return module_result(4,0);
     copied=*ctx;copied.devices=NULL;return module_result(1,1);
 }
-struct kernel_surface_result future_start(MODULE_ARGS){MODULE_UNUSED();const struct module_init_context *ctx=(const void *)a;if(ctx->owner!=copied.owner || !kernel_surface_find_version(ctx->hub,"future.value",1,2))return module_result(0,0);ready=1;return module_result(1,1);}
+struct kernel_surface_result future_start(MODULE_ARGS){MODULE_UNUSED();const struct module_init_context *ctx=(const void *)a;if(ctx->owner!=copied.owner || kernel_hub_owner(ctx->hub,ctx->owner)->state!=HUB_OWNER_STARTING || kernel_surface_find(ctx->hub,"future.value") || !ctx->resolve || !ctx->resolve(ctx->owner,"future.value",1,2) || ctx->resolve(ctx->owner,"future.value",1,3))return module_result(0,0);
+    /* Even a captured mediation stub must reject calls throughout startup. */
+    const struct kernel_surface *entries=kernel_surface_entries(ctx->hub);
+    for(uint32_t i=0;i<kernel_surface_count(ctx->hub);++i)if(entries[i].owner==ctx->owner && !entries[i].call(0,0,0,0,0,0).status)return module_result(0,0);
+    if(!kernel_surface_find(ctx->hub,"hub.owner_pin")(ctx->owner,1,0,0,0,0).status)return module_result(0,0);
+    ready=1;return module_result(1,1);}
 struct kernel_surface_result future_value(MODULE_ARGS){MODULE_UNUSED();return module_result(hardware+42,ready);}
 
 #include "../kmodules/shared/bootstrap-load.h"

@@ -25,6 +25,7 @@ static struct kernel_surface_result add(MODULE_ARGS){MODULE_UNUSED();return modu
 static struct kernel_surface_result hold(MODULE_ARGS){MODULE_UNUSED();atomic_store(&entered,1);while(!atomic_load(&finish_call))sched_yield();return module_result(77,1);}
 static kernel_surface_call held;
 static void *caller(void *unused){(void)unused;struct kernel_surface_result r=held(0,0,0,0,0,0);assert(!r.status && r.value==77);return NULL;}
+static void *startup_reader(void *arg){kernel_surface_call entry=(kernel_surface_call)arg;for(unsigned i=0;i<10000;++i){assert(entry(0,0,0,0,0,0).status);assert(!kernel_surface_find(&header,"startup.value"));assert(owner_pin(3,1,0,0,0,0).status);}return NULL;}
 static void *reader(void *unused){(void)unused;while(!atomic_load(&stop_readers)){uint32_t count=kernel_surface_count(&header);const struct kernel_surface *entries=kernel_surface_entries(&header);for(uint32_t i=0;i<count;++i){assert(entries[i].call && entries[i].major && entries[i].name[0]);}uint32_t n=kernel_hub_table_count(&header);const struct kernel_hub_table *tables=kernel_hub_tables(&header);for(uint32_t i=0;i<n;++i)assert(tables[i].address && tables[i].bytes);}return NULL;}
 int main(void){
     backing=memfd_create("hub-tests",0);assert(backing>=0 && !ftruncate(backing,64*1024*1024));
@@ -48,6 +49,11 @@ int main(void){
     assert(!owner_control(1,HUB_OWNER_RESUME,0,0,0,0).status && !owner_pin(1,1,0,0,0,0).status && !owner_control(1,HUB_OWNER_DRAIN,0,0,0,0).status);
     assert(!stale(1,0,0,0,0,0).status && owner_control(1,HUB_OWNER_RETIRE,0,0,0,0).status);
     assert(!owner_pin(1,0,0,0,0,0).status && !owner_control(1,HUB_OWNER_RETIRE,0,0,0,0).status && stale(1,0,0,0,0,0).status && owner_control(1,HUB_OWNER_RESUME,0,0,0,0).status);
+    assert(ensure_methods(603));write_surface(602,"startup.value",add,1,0,1,3);__atomic_store_n(&header.count,603,__ATOMIC_RELEASE);
+    kernel_surface_call startup=kernel_surface_entries(&header)[602].call;
+    unsigned hidden[]={HUB_OWNER_INITIALIZING,HUB_OWNER_STARTING,HUB_OWNER_FAILED};
+    for(unsigned i=0;i<3;++i){__atomic_store_n(&owners[3].state,hidden[i],__ATOMIC_SEQ_CST);pthread_t observer;assert(!pthread_create(&observer,NULL,startup_reader,(void *)startup));pthread_join(observer,NULL);assert(!owners[3].active && !owners[3].pins);}
+    __atomic_store_n(&owners[3].state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);assert(kernel_surface_find(&header,"startup.value") && !startup(37,0,0,0,0,0).status);
     atomic_store(&stop_readers,1);for(unsigned i=0;i<3;++i)pthread_join(readers[i],NULL);
     printf("PASS dynamic hub: %u methods, %u tables, stable RO/RX aliases, OOM/map-failure retry, atomic publication, concurrent readers, active/leased drain, retirement and stale calls (%u physical pages)\n",header.count,header.table_count,claims);close(backing);return 0;
 }

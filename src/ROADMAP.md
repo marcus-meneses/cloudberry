@@ -238,6 +238,14 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     reclamation, signature installation policy and hardware activation rollback
     remain outside this milestone.
 
+26. Closed: runtime modules remain hidden through INITIALIZING and STARTING.
+    Public discovery, captured stubs, callback leases and table publication reject
+    both states. ABI2 initialization contexts provide loading-thread-only private
+    lookup. LIVE is published only after both hooks succeed; failed activation
+    remains non-resumable. Host concurrent gate checks and four-CPU AMD-Vi
+    disk-module init/start failure acceptance pass. Hardware rollback and code
+    reclamation remain deferred.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.

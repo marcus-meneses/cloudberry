@@ -30,7 +30,7 @@ struct kernel_surfaces {
     uint32_t method_capacity,owner_count,owner_capacity,owner_entry_bytes;
     uint64_t mapped_bytes,stub_bytes;
 };
-enum kernel_hub_owner_state {HUB_OWNER_LIVE=1,HUB_OWNER_DRAINING,HUB_OWNER_RETIRED,HUB_OWNER_INITIALIZING,HUB_OWNER_FAILED};
+enum kernel_hub_owner_state {HUB_OWNER_LIVE=1,HUB_OWNER_DRAINING,HUB_OWNER_RETIRED,HUB_OWNER_INITIALIZING,HUB_OWNER_FAILED,HUB_OWNER_STARTING};
 enum kernel_hub_owner_flags {HUB_OWNER_BOOT_PINNED=1};
 enum kernel_hub_owner_op {HUB_OWNER_DRAIN=1,HUB_OWNER_RESUME,HUB_OWNER_RETIRE};
 struct kernel_hub_owner {

@@ -46,7 +46,7 @@ fails. The selection worker logs the result separately from volume readiness.
 ## Kernel boundary and lifetime
 
 `kernel.module_load(request,out result)` is the mediated trusted-kernel surface.
-`module-load.h` defines its C structures and the version-1 initializer context.
+`module-load.h` defines its C structures and the version-2 initializer context.
 It accepts calls only from a CPU0 thread with interrupts enabled, outside critical
 sections and deferred interrupt callbacks. It serializes loading while remaining
 preemptible. The caller owns stable image/manifest/device buffers until return;
@@ -61,16 +61,21 @@ receives the public hub, kernel heap, owner ID and selected inventory indices.
 It must prepare private state and clean its own allocations on failure. It must
 not publish tables or queue asynchronous callbacks before becoming live.
 
-After successful init, the owner becomes LIVE. Optional start may then resolve
-its own surfaces, claim hardware and create IRQ/thread/scheduler work. Exported
-methods must reject premature operations until the module marks itself ready.
-This is not an atomic hardware activation transaction. If start fails, FAILED
-immediately hides/rejects new calls; already admitted calls finish. Queued leases,
-published tables and uncertain device state retain safe lifetimes. The loader
-does not forcibly unwind callbacks, reset arbitrary hardware or free unknown
-private allocations. A trusted caller may retire a failed owner only after its
-active calls, leases and table pins have drained. Failed init/start details remain
-available, and names are not reused during this boot.
+After successful init, optional start runs in STARTING. Discovery, captured
+mediation stubs, callback leases and table publication remain blocked throughout
+both hooks. Only successful completion transitions the owner to LIVE. The ABI2
+context provides `resolve(owner,name,major,minor)` for synchronous private setup;
+it returns an implementation only on the loading CPU/thread, during its hooks.
+These borrowed private pointers must not escape setup or become callbacks.
+Neither hook may queue asynchronous work or publish tables. Once loading returns,
+a caller can explicitly invoke a live surface to start asynchronous activity.
+
+Start can perform synchronous hardware preparation, but this is not an atomic
+hardware transaction. On failure, FAILED rejects all public calls and cannot
+resume. Private allocations and uncertain hardware state still require the
+module's own cleanup; the loader does not forcibly reset hardware or unmap code.
+Safe retirement requires no active calls, leases or table pins. Diagnostics and
+names remain available until reboot.
 
 Dependency leases last through the provider owner's retirement. Retirement
 releases them after draining; image mappings and mediation stubs remain reserved
@@ -89,7 +94,7 @@ make -C src test-module-disk-boot DISK_MODULES_SUCCESS=1 QEMU_CPUS=4 QEMU_IOMMU=
 
 Disk-only test fixtures never enter Limine's list or candidate prerequisites. The
 guest loads a fixture solely from ext4, matches the VGA inventory, verifies hidden
-init and activation, rejects dependency versions and malformed images, exercises
+init/start, captured-stub and lease rejection, private setup lookup and activation, rejects dependency versions and malformed images, exercises
 init/start failures, releases dependency leases, retires providers and rejects
 captured stale stubs. The success variant leaves an unselected image unexecuted.
 Host UBSan checks cover manifest syntax/types/duplicates, 40 dependencies and OOM
