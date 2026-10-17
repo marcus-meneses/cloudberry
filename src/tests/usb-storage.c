@@ -39,7 +39,7 @@ int main(void){
     unsigned calls=cbw_count;assert(usb_storage_surface_read(1,16,1,(uintptr_t)data,512,0).status);assert(usb_storage_surface_read(1,0,9,(uintptr_t)data,512,0).status);assert(usb_storage_surface_read(1,0,1,(uintptr_t)data,511,0).status);assert(cbw_count==calls);
     mode=1;memset(data,0xcc,sizeof(data));assert(usb_storage_surface_read(1,0,1,(uintptr_t)data,512,0).status && data[0]==0xcc);
     mode=9;s.record.failed=0;assert(usb_storage_surface_read(1,0,1,(uintptr_t)data,512,0).status && s.record.error==STORAGE_DISCONNECTED);
-    s.record.failed=0;s.busy=1;assert(usb_storage_surface_control(1,BLOCK_RETAIN,0,0,0,0).status);s.busy=0;
+    s.record.failed=0;s.busy=1;assert(usb_storage_surface_control(1,BLOCK_RETAIN,0,0,0,0).status);s.busy=0;assert(usb_storage_surface_control(1,BLOCK_RETAIN,0,0,0,0).status);mode=0;
     assert(!usb_storage_surface_control(1,BLOCK_RETAIN,0,0,0,0).status && s.refs==1);assert(usb_storage_surface_close(1,0,0,0,0,0).status);assert(!usb_storage_surface_control(1,BLOCK_RELEASE,0,0,0,0).status && !s.refs);assert(usb_storage_surface_control(1,BLOCK_RELEASE,0,0,0,0).status);
     mode=0;phase=0;s.record.failed=0;s.record.block.minor=1;s.record.block.flags=0;s.record.block.write=usb_storage_surface_write;s.record.block.flush=usb_storage_surface_flush;memset(data,0x69,sizeof(data));
     assert(!usb_storage_surface_write(1,2,1,(uintptr_t)data,512,0).status && opcode==0x2a && data[0]==0x69);

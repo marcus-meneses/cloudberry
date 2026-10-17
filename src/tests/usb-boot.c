@@ -18,7 +18,7 @@ bool kernel_usb_test(const struct kernel_surfaces *hub) {
     job.write=1;
 #endif
 #ifdef USB_HOTPLUG_TEST
-    job.hotplug=1;
+    job.hotplug=USB_HOTPLUG_TEST;
 #endif
     struct thread_request request={.abi=1,.cpu=0,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};request.payload.arguments[0]=(uintptr_t)&job;
     struct kernel_surface_result created=CALL(create,&request,0,0);if(created.status)return false;

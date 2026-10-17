@@ -123,6 +123,7 @@ int ext4_device_register(struct ext4_blockdev *bd,
  * @param   dev_name Block device name.
  *
  * @return  Standard error code.*/
+int ext4_device_forget(const char *name);
 int ext4_device_unregister(const char *dev_name);
 
 /**@brief   Un-register all block devices.

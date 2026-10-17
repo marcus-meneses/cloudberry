@@ -28,6 +28,7 @@ usb_hotplug = '--usb-hotplug' in sys.argv[2:]
 usb_hubs = '--usb-hubs' in sys.argv[2:]
 storage = '--storage' in sys.argv[2:]
 storage_write = '--storage-write' in sys.argv[2:]
+storage_nested = '--storage-nested' in sys.argv[2:]
 storage_hotplug = '--storage-hotplug' in sys.argv[2:]
 hotplug = xhci_hotplug or usb_hotplug or usb_hubs or storage_hotplug
 cpus = next((int(arg.split('=')[1]) for arg in sys.argv[2:] if arg.startswith('--cpus=')), 1)
@@ -48,6 +49,7 @@ if usb_hubs: suffix += '-usb-hubs'
 if storage: suffix += '-storage'
 if storage_write: suffix += '-write'
 if storage_hotplug: suffix += '-hotplug'
+if storage_nested: suffix += '-nested'
 test = build / ('tests/config-'+config_error if config_error else 'tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
 test.mkdir(parents=True, exist_ok=True)
 # A failed rerun must never leave an older successful report looking current.
@@ -105,7 +107,7 @@ plan = subprocess.check_output(['make', '-s', '-n', '-C', str(root / 'src'), 'ru
     f'NVME_DISK={test}/nvme.img', f'SATA_DISK={test}/sata.img'], text=True)
 command = next(line for line in plan.splitlines() if line.startswith('bash boot/run-qemu.sh'))
 if storage_write:
-    assert storage and not storage_hotplug
+    assert storage
     command=command.replace('id=bootmedia,format=raw,readonly=on,','id=bootmedia,format=raw,')
 command = command.replace('id=nvmedisk,format=raw,', 'id=nvmedisk,format=raw,readonly=on,')
 if '--xhci-trace' in sys.argv[2:]:
@@ -119,6 +121,13 @@ if usb_hubs:
     command += ' -device usb-hub,id=testhub,bus=xhci.0,port=4 -device usb-kbd,id=hub-child,bus=xhci.0,port=4.1 -device usb-hub,id=nestedhub,bus=xhci.0,port=4.2 -device usb-mouse,id=hub-grandchild,bus=xhci.0,port=4.2.1'
 if storage_hotplug:
     command=command.replace('-device usb-storage,bus=xhci.0', '-device usb-storage,id=storage-test,bus=xhci.0')
+if storage_nested:
+    # OVMF's boot-time USB stack does not reliably boot through two virtual hubs.
+    # A disposable AHCI copy boots the test; the writable target stays downstream.
+    shutil.copyfile(iso,test/'sata.img')
+    command=command.replace(',drive=bootmedia,bootindex=1',',drive=bootmedia')
+    command=command.replace('-device ide-hd,bus=ide.0,drive=satadisk','-device ide-hd,bus=ide.0,drive=satadisk,bootindex=1')
+    command=command.replace('-device usb-storage,id=storage-test,bus=xhci.0','-device usb-hub,id=storage-hub,bus=xhci.0,port=4 -device usb-hub,id=storage-inner,bus=xhci.0,port=4.2 -device usb-storage,id=storage-test,bus=xhci.0,port=4.2.1')
 log = test / 'boot.log'
 if hotplug:
     command = command.replace('-device usb-kbd,bus=xhci.0', '-device usb-kbd,id=xhci-test-keyboard,bus=xhci.0,port=1')
@@ -151,11 +160,15 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
             if xhci_hotplug and 'WAIT XHCI ADD' in content and not added:
                 qmp_call('device_add', {'driver':'usb-kbd','id':'xhci-test-keyboard','bus':'xhci.0','port':'1'}); added = True
             if storage_hotplug and 'WAIT STORAGE REMOVE' in content and not storage_removed:
-                qmp_call('device_del', {'id':'storage-test'});storage_removed=True
+                qmp_call('device_del', {'id':'storage-hub' if storage_nested else 'storage-test'});storage_removed=True
             if storage_hotplug and 'WAIT STORAGE ADD' in content and not storage_added:
                 # QEMU deletes the legacy -drive backend with its USB device.
-                qmp_call('blockdev-add', {'driver':'raw','node-name':'storage-replug','read-only':True,'file':{'driver':'file','filename':str(iso)}})
-                qmp_call('device_add', {'driver':'usb-storage','id':'storage-test','bus':'xhci.0','drive':'storage-replug'});storage_added=True
+                qmp_call('blockdev-add', {'driver':'raw','node-name':'storage-replug','read-only':not storage_write,'file':{'driver':'file','filename':str(iso)}})
+                if storage_nested:
+                    # Removing the outer hub detaches the whole downstream tree.
+                    qmp_call('device_add', {'driver':'usb-hub','id':'storage-hub','bus':'xhci.0','port':'4'})
+                    qmp_call('device_add', {'driver':'usb-hub','id':'storage-inner','bus':'xhci.0','port':'4.2'})
+                qmp_call('device_add', {'driver':'usb-storage','id':'storage-test','bus':'xhci.0','drive':'storage-replug',**({'port':'4.2.1'} if storage_nested else {})});storage_added=True
             if usb_hotplug and 'WAIT USB REMOVE' in content and not usb_removed:
                 qmp_call('device_del', {'id':'xhci-test-keyboard'}); usb_removed = True
             if usb_hotplug and 'WAIT USB ADD' in content and not usb_added:

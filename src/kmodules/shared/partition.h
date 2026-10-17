@@ -13,4 +13,7 @@ struct kernel_surface_result partition_surface_control(MODULE_ARGS);
 struct kernel_surface_result partition_surface_close(MODULE_ARGS);
 struct kernel_surface_result partition_surface_write(MODULE_ARGS);
 struct kernel_surface_result partition_surface_flush(MODULE_ARGS);
+/* disconnect(root read surface,root cookie): invalidate then drain/abort without writes.
+ * Retry busy cleanup; stale identities never reconnect. */
+struct kernel_surface_result partition_surface_disconnect(MODULE_ARGS);
 #endif

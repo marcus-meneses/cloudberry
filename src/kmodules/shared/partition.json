@@ -32,6 +32,10 @@
     {
       "name": "partition.flush",
       "symbol": "partition_surface_flush"
+    },
+    {
+      "name": "partition.disconnect",
+      "symbol": "partition_surface_disconnect"
     }
   ]
 }

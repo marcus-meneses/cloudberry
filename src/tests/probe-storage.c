@@ -12,12 +12,14 @@ struct kernel_surface_result probe_storage_call(MODULE_ARGS){
     kernel_surface_call open=kernel_surface_find(hub,"usb_storage.open"),close=kernel_surface_find(hub,"usb_storage.close"),select=kernel_surface_find(hub,"partition.find"),unselect=kernel_surface_find(hub,"partition.close"),mount=kernel_surface_find(hub,"ext4_fs.mount"),unmount=kernel_surface_find(hub,"ext4_fs.unmount"),stat=kernel_surface_find(hub,"ext4_fs.stat"),read=kernel_surface_find(hub,"ext4_fs.read"),list=kernel_surface_find(hub,"ext4_fs.list");
 #define CHECK(x) do{if(!(x)){line=__LINE__;goto failed;}}while(0)
     CHECK(start && stop && info && watch && thread && clock && cpu && open && close && select && unselect && mount && unmount && stat && read && list);
-    CHECK(!CALL(watch,1,0,0).status && !CALL(start,0,0,0).status);uint64_t deadline=CALL(clock,0,0,0).value+10000000000;struct usb_info status;
-    do{CHECK(!CALL(info,&status,0,0).status && !status.failed && CALL(clock,0,0,0).value<deadline);if(status.configured<3)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.configured<3);
+    if(job->hotplug==2)CHECK(!CALL(kernel_surface_find(hub,"usb_hub.start"),0,0,0).status);
+    unsigned expected=job->hotplug==2?5:3;
+    CHECK(!CALL(watch,1,0,0).status && !CALL(start,0,0,0).status && !CALL(kernel_surface_find(hub,"usb_storage.start"),0,0,0).status);uint64_t deadline=CALL(clock,0,0,0).value+10000000000;struct usb_info status;
+    do{CHECK(!CALL(info,&status,0,0).status && !status.failed && CALL(clock,0,0,0).value<deadline);if(status.configured<expected)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.configured<expected);
     const struct kernel_hub_table *usb=kernel_hub_find_table(hub,USB_TABLE_NAME),*guid=kernel_hub_find_table(hub,"config.drivers.partition_guid"),*directory=kernel_hub_find_table(hub,"config.drivers.directory");CHECK(usb && guid && directory);
-    struct usb_ref refs[3];unsigned count=0;uint64_t flags=CALL(cpu,1,0,0).value;for(const struct usb_device *p=((const struct usb_table *)usb->address)->first;p && count<3;p=p->next)refs[count++]=(struct usb_ref){p->identity.id,p->identity.generation};CALL(cpu,2,flags,0);
+    struct usb_ref refs[5];unsigned count=0;uint64_t flags=CALL(cpu,1,0,0).value;for(const struct usb_device *p=((const struct usb_table *)usb->address)->first;p && count<expected;p=p->next)refs[count++]=(struct usb_ref){p->identity.id,p->identity.generation};CALL(cpu,2,flags,0);
     kernel_surface_call device=kernel_surface_find(hub,"usb.device"),interface=kernel_surface_find(hub,"usb.interface");CHECK(device && interface);struct usb_storage_open request={0};
-    for(unsigned n=0;n<count;++n){struct usb_device dev;CHECK(!CALL(device,&refs[n],&dev,0).status);for(unsigned i=0;i<dev.interfaces;++i){struct usb_interface intf;CHECK(!CALL(interface,&refs[n],i,&intf).status);if(intf.class_code==8 && intf.subclass==6 && intf.protocol==0x50){CHECK(!request.device.id);request.device=refs[n];request.interface=intf.number;}}}
+    for(unsigned n=0;n<count;++n){struct usb_device dev;CHECK(!CALL(device,&refs[n],&dev,0).status);if(dev.hub || dev.class_code==9)continue;for(unsigned i=0;i<dev.interfaces;++i){struct usb_interface intf;CHECK(!CALL(interface,&refs[n],i,&intf).status);if(intf.class_code==8 && intf.subclass==6 && intf.protocol==0x50){CHECK(!request.device.id);request.device=refs[n];request.interface=intf.number;}}}
     CHECK(request.device.id);struct block_device disk,part;struct kernel_surface_result opened=CALL(open,&request,&disk,sizeof(disk));
     if(opened.status){print("FAIL storage open error ");char digit='0'+opened.value;__asm__ volatile("outb %0,$0xe9"::"a"(digit));print("\n");}CHECK(!opened.status && block_valid(&disk));
     struct block_device refused;CHECK(CALL(open,&request,&refused,sizeof(refused)).status);
@@ -49,23 +51,35 @@ struct kernel_surface_result probe_storage_call(MODULE_ARGS){
         print("PASS writable USB/ext4: write/flush, create/grow/append/truncate/delete, journal sync and read-only remount\n");
     }
     if(job->hotplug){
+        CHECK(!CALL(part.control,part.cookie,BLOCK_RETAIN,0).status);
+        if(job->write)CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(mount,&part,&fs,EXT4_MOUNT_WRITE).status);
         print("WAIT STORAGE REMOVE\n");deadline=CALL(clock,0,0,0).value+5000000000;
         do{CHECK(!CALL(info,&status,0,0).status && CALL(clock,0,0,0).value<deadline);if(status.configured!=2)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.configured!=2);
         for(unsigned n=0;n<sizeof(bytes);++n)bytes[n]=0xcc;
         CHECK(read(fs.cookie,(uintptr_t)path,0,(uintptr_t)bytes,sizeof(bytes),0).status && bytes[0]==0xcc);
         CHECK(CALL(open,&request,&refused,sizeof(refused)).status);
     }
-    CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(unselect,part.cookie,0,0).status && !CALL(close,disk.cookie,0,0).status);
+    if(job->hotplug){
+        kernel_surface_call fsinfo=kernel_surface_find(hub,"ext4_fs.info"),storage_info=kernel_surface_find(hub,"usb_storage.info");struct ext4_info fi;struct usb_storage_record sr;
+        deadline=CALL(clock,0,0,0).value+5000000000;
+        while(!CALL(fsinfo,fs.cookie,&fi,0).status){CHECK(CALL(clock,0,0,0).value<deadline);CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+10000000,0).status);}
+        CHECK(part.read(part.cookie,0,1,(uintptr_t)bytes,sizeof(bytes),0).status && CALL(part.control,part.cookie,BLOCK_RETAIN,0).status);
+        CHECK(!CALL(part.control,part.cookie,BLOCK_RELEASE,0).status);
+        while(!CALL(storage_info,disk.cookie,&sr,0).status){CHECK(CALL(clock,0,0,0).value<deadline);CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+10000000,0).status);}
+        CHECK(CALL(unmount,fs.cookie,0,0).status && CALL(unselect,part.cookie,0,0).status);
+        print("PASS disconnected mount/slice/storage reclaimed; stale references fail\n");
+    }else CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(unselect,part.cookie,0,0).status && !CALL(close,disk.cookie,0,0).status);
     CHECK(disk.read(disk.cookie,0,1,(uintptr_t)bytes,sizeof(bytes),0).status);
     if(job->hotplug){
         print("WAIT STORAGE ADD\n");deadline=CALL(clock,0,0,0).value+5000000000;
-        do{CHECK(!CALL(info,&status,0,0).status && CALL(clock,0,0,0).value<deadline);if(status.configured!=3)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.configured!=3);
-        struct usb_ref old=request.device;count=0;flags=CALL(cpu,1,0,0).value;for(const struct usb_device *p=((const struct usb_table *)usb->address)->first;p && count<3;p=p->next)if(p->state==USB_CONFIGURED)refs[count++]=(struct usb_ref){p->identity.id,p->identity.generation};CALL(cpu,2,flags,0);
-        for(unsigned n=0;n<count;++n){struct usb_interface intf;CHECK(!CALL(interface,&refs[n],0,&intf).status);if(intf.class_code==8){request.device=refs[n];request.interface=intf.number;}}
+        do{CHECK(!CALL(info,&status,0,0).status && CALL(clock,0,0,0).value<deadline);if(status.configured!=expected)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.configured!=expected);
+        struct usb_ref old=request.device;count=0;flags=CALL(cpu,1,0,0).value;for(const struct usb_device *p=((const struct usb_table *)usb->address)->first;p && count<expected;p=p->next)if(p->state==USB_CONFIGURED)refs[count++]=(struct usb_ref){p->identity.id,p->identity.generation};CALL(cpu,2,flags,0);
+        for(unsigned n=0;n<count;++n){struct usb_device dev;CHECK(!CALL(device,&refs[n],&dev,0).status);if(dev.hub || dev.class_code==9)continue;struct usb_interface intf;CHECK(!CALL(interface,&refs[n],0,&intf).status);if(intf.class_code==8){request.device=refs[n];request.interface=intf.number;}}
         CHECK(request.device.id!=old.id || request.device.generation!=old.generation);
     }
     opened=CALL(open,&request,&disk,sizeof(disk));
     if(opened.status){print("FAIL storage reopen error ");char digit='0'+opened.value;__asm__ volatile("outb %0,$0xe9"::"a"(digit));print("\n");}CHECK(!opened.status);
+    if(job->hotplug){uint64_t old=fs.cookie;CHECK(!select((uintptr_t)&disk,(uintptr_t)g->data,(uintptr_t)&part,sizeof(part),0,0).status && !CALL(mount,&part,&fs,job->write?EXT4_MOUNT_WRITE:0).status && fs.cookie!=old);CHECK(!CALL(stat,fs.cookie,path,&st).status);CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(unselect,part.cookie,0,0).status);}
     CHECK(!CALL(close,disk.cookie,0,0).status);
     CHECK(!CALL(stop,0,0,0).status);deadline=CALL(clock,0,0,0).value+5000000000;
     do{CHECK(!CALL(info,&status,0,0).status && CALL(clock,0,0,0).value<deadline);if(status.running)CHECK(!CALL(thread,THREAD_BLOCK_UNTIL,deadline,0).status);}while(status.running);

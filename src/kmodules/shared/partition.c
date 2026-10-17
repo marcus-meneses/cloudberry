@@ -3,7 +3,7 @@
 #include "threads.h"
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
-struct slice {struct slice *next;struct block_device parent,block;uint64_t start,refs;unsigned busy;uint64_t cached;uint8_t scratch[4096],entries[4096];};
+struct slice {struct slice *next;struct block_device parent,block;uint64_t start,refs;unsigned busy,disconnected;uint64_t cached;uint8_t scratch[4096],entries[4096];};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct slice *first;kernel_surface_call cpu,thread,irq,alloc,free;} state;
 static int foreground(void){uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));return (flags&512) && state.hub && !CALL(state.cpu,CPU_CURRENT,0,0).value && !CALL(state.cpu,CPU_DEPTH,0,0).value && !CALL(state.irq,0,0,0).value && CALL(state.thread,THREAD_CURRENT,0,0).value;
 }
@@ -74,22 +74,24 @@ struct kernel_surface_result partition_surface_find(MODULE_ARGS){
 }
 struct kernel_surface_result partition_surface_read(MODULE_ARGS){
     MODULE_UNUSED();if(!foreground())return module_result(0,0);
-    uint64_t flags=lock();struct slice *s=find(a);if(!s || s->busy || b>s->block.blocks || c>s->block.blocks-b || c>s->block.max_transfer_bytes/s->block.block_bytes || e<c*s->block.block_bytes || (c && !d)){unlock(flags);return module_result(0,0);
+    uint64_t flags=lock();struct slice *s=find(a);if(!s || s->disconnected || s->busy || b>s->block.blocks || c>s->block.blocks-b || c>s->block.max_transfer_bytes/s->block.block_bytes || e<c*s->block.block_bytes || (c && !d)){unlock(flags);return module_result(0,0);
     }s->busy=1;unlock(flags);
     struct kernel_surface_result r=s->parent.read(s->parent.cookie,s->start+b,c,d,e,0);flags=lock();s->busy=0;unlock(flags);return r;
 }
 struct kernel_surface_result partition_surface_write(MODULE_ARGS){
     MODULE_UNUSED();if(!foreground())return module_result(0,0);
-    uint64_t flags=lock();struct slice *s=find(a);if(!s || s->busy || !block_writable(&s->block) || b>s->block.blocks || c>s->block.blocks-b || c>s->block.max_transfer_bytes/s->block.block_bytes || e<c*s->block.block_bytes || (c && !d)){unlock(flags);return module_result(0,0);}
+    uint64_t flags=lock();struct slice *s=find(a);if(!s || s->disconnected || s->busy || !block_writable(&s->block) || b>s->block.blocks || c>s->block.blocks-b || c>s->block.max_transfer_bytes/s->block.block_bytes || e<c*s->block.block_bytes || (c && !d)){unlock(flags);return module_result(0,0);}
     s->busy=1;unlock(flags);struct kernel_surface_result r=s->parent.write(s->parent.cookie,s->start+b,c,d,e,0);flags=lock();s->busy=0;unlock(flags);return r;
 }
 struct kernel_surface_result partition_surface_flush(MODULE_ARGS){
-    MODULE_UNUSED();if(!foreground())return module_result(0,0);uint64_t flags=lock();struct slice *s=find(a);if(!s || s->busy || !block_writable(&s->block)){unlock(flags);return module_result(0,0);}
+    MODULE_UNUSED();if(!foreground())return module_result(0,0);uint64_t flags=lock();struct slice *s=find(a);if(!s || s->disconnected || s->busy || !block_writable(&s->block)){unlock(flags);return module_result(0,0);}
     s->busy=1;unlock(flags);struct kernel_surface_result r=s->parent.flush(s->parent.cookie,0,0,0,0,0);flags=lock();s->busy=0;unlock(flags);return r;
 }
 struct kernel_surface_result partition_surface_control(MODULE_ARGS){
     MODULE_UNUSED();if(!foreground())return module_result(0,0);
-    uint64_t flags=lock();struct slice *s=find(a);int ok=s && (b==BLOCK_RETAIN?(!s->busy && s->refs<UINT64_MAX):b==BLOCK_RELEASE && s->refs);if(ok){if(b==BLOCK_RETAIN)++s->refs;else --s->refs;}unlock(flags);return module_result(1,ok);
+    uint64_t flags=lock();struct slice *s=find(a);int ok=s && (b==BLOCK_RETAIN?(!s->disconnected && !s->busy && s->refs<UINT64_MAX):b==BLOCK_RELEASE && s->refs);if(ok){if(b==BLOCK_RETAIN)++s->refs;else --s->refs;}int reap=ok && b==BLOCK_RELEASE && !s->refs && !s->busy && s->disconnected;uint64_t cookie=s?s->block.cookie:0;unlock(flags);
+    if(reap)(void)partition_surface_close(cookie,0,0,0,0,0);
+    return module_result(1,ok);
 }
 struct kernel_surface_result partition_surface_close(MODULE_ARGS){
     MODULE_UNUSED();if(!foreground())return module_result(0,0);
@@ -97,4 +99,13 @@ struct kernel_surface_result partition_surface_close(MODULE_ARGS){
     }s->busy=1;unlock(flags);
     if(s->parent.control(s->parent.cookie,BLOCK_RELEASE,0,0,0,0).status){flags=lock();s->busy=0;unlock(flags);return module_result(0,0);
     }flags=lock();struct slice **p=&state.first;while(*p!=s)p=&(*p)->next;*p=s->next;unlock(flags);CALL(state.free,state.heap,s,0);return module_result(1,1);
+}
+
+struct kernel_surface_result partition_surface_disconnect(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || !a || !b)return module_result(0,0);uint64_t removed=0;int ok=1;
+    uint64_t flags=lock();for(struct slice *s=state.first;s;s=s->next)if((uintptr_t)s->block.root_read==a && s->block.root_cookie==b)s->disconnected=1;unlock(flags);
+    for(;;){flags=lock();struct slice *s=state.first;while(s && (!s->disconnected || (uintptr_t)s->block.root_read!=a || s->block.root_cookie!=b || s->refs || s->busy))s=s->next;
+        if(!s){for(s=state.first;s;s=s->next)if(s->disconnected && (uintptr_t)s->block.root_read==a && s->block.root_cookie==b && s->busy)ok=0;unlock(flags);break;}uint64_t cookie=s->block.cookie;unlock(flags);
+        if(partition_surface_close(cookie,0,0,0,0,0).status){ok=0;break;}++removed;
+    }return module_result(removed,ok);
 }

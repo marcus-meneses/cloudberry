@@ -7,7 +7,9 @@
 #include <ext4_inode.h>
 #include <ext4_oflags.h>
 #include <string.h>
+struct allocation;
 struct ext4_engine {
+    struct allocation *allocations;
     struct block_device device;
     struct ext4_blockdev disk;
     struct ext4_blockdev_iface interface;
@@ -25,10 +27,35 @@ int ext4_engine_setup(const struct kernel_surfaces *hub,uintptr_t h){
 }
 int ext4_engine_enter(struct ext4_engine *ctx){if(ctx && ctx->poisoned)return 0;if(__atomic_exchange_n(&busy,1,__ATOMIC_ACQUIRE))return 0;active=ctx;if(ctx)ctx->error=EXT4_OK;return 1;}
 void ext4_engine_leave(void){active=NULL;__atomic_store_n(&busy,0,__ATOMIC_RELEASE);}
-void *ext4_user_calloc(size_t n,size_t size){if(n && size>SIZE_MAX/n)return NULL;struct kernel_surface_result r=CALL(allocate,heap,n,size);return r.status?NULL:(void *)r.value;}
+/* Every library allocation belongs to its mount. No pointer may escape the
+ * synchronous engine call. Abort unlinks registry roots, then discards this
+ * allocation set without traversing damaged cache/journal state or doing I/O. */
+struct allocation {struct allocation *prev,*next;struct ext4_engine *owner;size_t bytes;};
+_Static_assert(sizeof(struct allocation)%16==0,"allocator payload alignment");
+void *ext4_user_calloc(size_t n,size_t size){
+    if(n && size>SIZE_MAX/n)return NULL;
+    size_t bytes=n*size;if(bytes>SIZE_MAX-sizeof(struct allocation))return NULL;
+    struct kernel_surface_result r=CALL(allocate,heap,1,bytes+sizeof(struct allocation));if(r.status)return NULL;
+    struct allocation *p=(void *)r.value;p->bytes=bytes;p->owner=active;if(active){p->next=active->allocations;if(p->next)p->next->prev=p;active->allocations=p;}return p+1;
+}
 void *ext4_user_malloc(size_t size){return ext4_user_calloc(1,size);}
-void *ext4_user_realloc(void *p,size_t size){struct kernel_surface_result r=CALL(resize,heap,p,size);return r.status?NULL:(void *)r.value;}
-void ext4_user_free(void *p){if(p)CALL(release,heap,p,0);}
+void ext4_user_free(void *pointer){if(!pointer)return;struct allocation *p=(struct allocation *)pointer-1;if(p->owner){if(p->prev)p->prev->next=p->next;else p->owner->allocations=p->next;if(p->next)p->next->prev=p->prev;}CALL(release,heap,p,0);}
+void *ext4_user_realloc(void *pointer,size_t size){
+    if(!pointer)return ext4_user_malloc(size);
+    if(!size){ext4_user_free(pointer);return NULL;}
+    if(size>SIZE_MAX-sizeof(struct allocation))return NULL;
+    struct allocation *p=(struct allocation *)pointer-1;
+    struct kernel_surface_result r=CALL(resize,heap,p,size+sizeof(*p));if(r.status)return NULL;p=(void *)r.value;p->bytes=size;
+    if(p->owner){if(p->prev)p->prev->next=p;else p->owner->allocations=p;if(p->next)p->next->prev=p;}return p+1;
+}
+int ext4_engine_abort_enter(struct ext4_engine *ctx){if(__atomic_exchange_n(&busy,1,__ATOMIC_ACQUIRE))return 0;active=ctx;return 1;}
+void ext4_engine_disconnect(struct ext4_engine *ctx){ctx->poisoned=1;ctx->error=EXT4_IO;}
+int ext4_engine_abort(struct ext4_engine *ctx){
+    ctx->poisoned=1;
+    if(ext4_device_forget(ctx->name)!=EOK)return 0;
+    while(ctx->allocations)ext4_user_free(ctx->allocations+1);
+    ext4_user_free(ctx);active=NULL;return 1;
+}
 static unsigned error_code(int r){switch(r){case EOK:return EXT4_OK;case ENOMEM:return EXT4_MEMORY;case ENOENT:return EXT4_NOT_FOUND;case EINVAL:case EFBIG:return EXT4_ARGUMENT;case ENOTSUP:return EXT4_UNSUPPORTED;case EROFS:return EXT4_READ_ONLY;case ENOSPC:return EXT4_NO_SPACE;case EEXIST:return EXT4_EXISTS;case ENOTEMPTY:return EXT4_NOT_EMPTY;case ENOTDIR:case EISDIR:return EXT4_TYPE;default:return EXT4_IO;}}
 void cloudberry_ext4_failure(int error){if(active){active->poisoned=1;active->error=error_code(error);}}
 unsigned ext4_engine_error(struct ext4_engine *ctx){return ctx->error;}
@@ -38,7 +65,7 @@ static int disk_close(struct ext4_blockdev *disk){(void)disk;return EOK;}
 static int disk_io(struct ext4_blockdev *disk,void *buffer,uint64_t block,uint32_t count,int writing){
     struct ext4_engine *ctx=disk->bdif->p_user;const struct block_device *d=&ctx->device;
     if(ctx->poisoned || (writing && ctx->readonly) || block>d->blocks || count>d->blocks-block){cloudberry_ext4_failure(EIO);return EIO;}
-    uint8_t *p=buffer;while(count){uint32_t n=d->max_transfer_bytes/d->block_bytes;if(n>count)n=count;size_t bytes=(size_t)n*d->block_bytes;
+    uint8_t *p=buffer;while(count){if(ctx->poisoned)return EIO;uint32_t n=d->max_transfer_bytes/d->block_bytes;if(n>count)n=count;size_t bytes=(size_t)n*d->block_bytes;
         kernel_surface_call call=writing?d->write:d->read;struct kernel_surface_result r=call(d->cookie,block,n,(uintptr_t)p,bytes,0);
         if(r.status || r.value!=bytes){cloudberry_ext4_failure(EIO);return EIO;}
         /* Conservative first implementation: every write is stable before the

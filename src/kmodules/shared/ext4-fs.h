@@ -32,4 +32,7 @@ struct kernel_surface_result ext4_fs_surface_info(MODULE_ARGS);
 struct kernel_surface_result ext4_fs_surface_write(MODULE_ARGS);
 struct kernel_surface_result ext4_fs_surface_mutate(MODULE_ARGS);
 struct kernel_surface_result ext4_fs_surface_sync(MODULE_ARGS);
+/* disconnect(root read surface,root cookie): invalidate then drain/abort without writes.
+ * Retry busy cleanup; stale identities never reconnect. */
+struct kernel_surface_result ext4_fs_surface_disconnect(MODULE_ARGS);
 #endif

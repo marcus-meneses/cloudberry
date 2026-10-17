@@ -636,7 +636,7 @@ $(BUILD)/kmodules/probe-usb-pic.o: tests/probe-usb.c tests/probe.h kmodules/shar
 	$(CC) $(MODULE_CFLAGS) -c $< -o $@
 $(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST)-storage$(STORAGE_TEST)-write$(STORAGE_WRITE_TEST).o: tests/usb-boot.c tests/probe.h kmodules/shared/usb.h
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $(if $(filter 1,$(USB_HOTPLUG)),-DUSB_HOTPLUG_TEST,) $(if $(filter 1,$(USB_HUB_TEST)),-DUSB_HUB_TEST,) $(if $(filter 1,$(STORAGE_TEST)),-DSTORAGE_TEST,) $(if $(filter 1,$(STORAGE_WRITE_TEST)),-DSTORAGE_WRITE_TEST,) -c $< -o $@
+	$(CC) $(CFLAGS) $(if $(filter 1 2,$(USB_HOTPLUG)),-DUSB_HOTPLUG_TEST=$(USB_HOTPLUG),) $(if $(filter 1,$(USB_HUB_TEST)),-DUSB_HUB_TEST,) $(if $(filter 1,$(STORAGE_TEST)),-DSTORAGE_TEST,) $(if $(filter 1,$(STORAGE_WRITE_TEST)),-DSTORAGE_WRITE_TEST,) -c $< -o $@
 .PHONY: test-usb-boot _test-usb-boot
 test-usb-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" USB_HOTPLUG=1 _test-usb-boot
@@ -720,7 +720,7 @@ $(BUILD)/kmodules/probe-storage-pic.o: tests/probe-storage.c tests/probe.h kmodu
 test-storage-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" STORAGE_TEST=1 _test-storage-boot
 _test-storage-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
-	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage $(if $(filter 1,$(USB_HOTPLUG)),--storage-hotplug,)
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage $(if $(filter 1 2,$(USB_HOTPLUG)),--storage-hotplug,) $(if $(filter 2,$(USB_HOTPLUG)),--storage-nested,)
 
 # Pinned allocation/journal engine, privately linked into ext4-fs.kmod.
 EXT4_VENDOR := kmodules/shared/ext4-fs/vendor/lwext4
@@ -751,7 +751,7 @@ test-ext4-write: $(TEST_BUILD)/tests/src-ext4-write
 test-storage-write-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" STORAGE_TEST=1 STORAGE_WRITE_TEST=1 _test-storage-write-boot
 _test-storage-write-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
-	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage --storage-write
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage --storage-write $(if $(filter 1 2,$(USB_HOTPLUG)),--storage-hotplug,) $(if $(filter 2,$(USB_HOTPLUG)),--storage-nested,)
 
 .PHONY: test-ext4-runtime
 test-ext4-runtime:

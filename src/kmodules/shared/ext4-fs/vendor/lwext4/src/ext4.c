@@ -127,6 +127,15 @@ int ext4_device_unregister(const char *name){
     struct ext4_mountpoint **m=&s_mp;while(*m!=p->mp)m=&(*m)->next;*m=p->mp->next;
     *link=p->next;ext4_free(p->mp);ext4_free(p);return EOK;
 }
+/* Cloudberry disconnect: caller owns all allocation lifetimes and has drained
+ * synchronous users. Unlink only; never flush/checkpoint or invoke callbacks. */
+int ext4_device_forget(const char *name){
+    struct ext4_block_devices **link=&s_bdevices;while(*link && strcmp((*link)->name,name))link=&(*link)->next;
+    if(!*link)return ENOENT;
+    struct ext4_block_devices *p=*link;
+    struct ext4_mountpoint **m=&s_mp;while(*m && *m!=p->mp)m=&(*m)->next;if(!*m)return EINVAL;
+    *m=p->mp->next;*link=p->next;return EOK;
+}
 int ext4_device_unregister_all(void){while(s_bdevices){int r=ext4_device_unregister(s_bdevices->name);if(r)return r;}return EOK;}
 
 /****************************************************************************/

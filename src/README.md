@@ -239,8 +239,11 @@ block write/flush support. The private pinned lwext4 engine runs behind the same
 frontend for writable and ordinary read-only mounts. Explicit checksum-seed layouts
 currently retain the qualified read-only parser and cannot be mounted writable.
 Conservative flush-after-each-write ordering is implemented before batching.
-Dirty transaction/I/O failures poison and retain an instance until reboot; a fresh
-mount replays the journal. See [USB storage](kmodules/shared/usb-storage.md),
+Dirty transaction/I/O failures poison an instance; explicit root disconnect can
+drain and discard it without writes. USB removal automatically tears down mounts,
+slices and unreferenced BOT records. Retained dead slices reject I/O until their
+final release. Replacement devices require fresh cookies and an explicit mount,
+which replays the journal. See [USB storage](kmodules/shared/usb-storage.md),
 [GPT partitions](kmodules/shared/partition.md) and [ext4](kmodules/shared/ext4-fs.md).
 All remain boot-loaded; production initialization selects/mounts no filesystem and
 performs no formatting or migration. Test fixtures never enter the candidate image.
@@ -617,9 +620,8 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are completion of USB device/hub hotplug cleanup, followed
-by bootstrap boot-volume selection, loading selected future modules from disk
-and process isolation; see [roadmap](ROADMAP.md#next-priorities).
+Current next priorities are bootstrap boot-volume selection, loading selected
+future modules from disk and process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 
 [xHCI transport](kmodules/shared/xhci.md) is loaded/initialized by the kernel and

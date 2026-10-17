@@ -49,10 +49,13 @@ Large writes/growth/truncation can span transactions; a failed operation can lea
 an already committed prefix. There is no implicit retry or whole-call rollback.
 
 I/O, barrier or dirty-transaction failure poisons the mounted instance. Further
-operations are refused and owned buffers/parent references are retained until
-reboot, avoiding unsafe rollback through a failed device or allocator. Filesystem
-info remains available. A fresh boot/mount replays the on-disk journal. This is
-fail-closed retention, not automatic provider restart or forced unmount support.
+operations are refused. Normal unmount refuses poisoned state. An explicit
+`disconnect(root_read,root_cookie)` stops new calls, lets an active call drain,
+unlinks library registry roots and discards the mount allocation set without
+I/O, checkpoint, flush or rollback. Busy cleanup is retryable. A USB lifecycle
+worker invokes this on removal, then releases dependent slices. A fresh explicit
+mount replays the on-disk journal; no old cookie reconnects to replacement media.
+Without disconnect/abort, poisoned resources stay retained for safe inspection.
 Failure is not proof that no bytes reached disk.
 
 ## Supported layouts and boundaries
@@ -97,3 +100,9 @@ No formatting, migration or automatic filesystem mount was added to kernel boot.
 
 References: [Linux ext4 format](https://www.kernel.org/doc/html/latest/filesystems/ext4/index.html),
 [lwext4 upstream](https://github.com/gkostka/lwext4).
+
+Disconnect validation injects removal during a journal write for three cycles,
+checks zero abort writes/flushes, keeps a retained slice invalid until final
+release, verifies all allocation/reference counts return to zero, and remounts
+the journal under fresh cookies. The existing 29 crash cuts and six I/O failure
+cases still pass. Guest validation removes/reinserts writable USB storage.

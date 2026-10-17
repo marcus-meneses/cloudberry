@@ -201,29 +201,25 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     cleanup is explicit/retryable. Early splash ensures its framebuffer mapping
     before drawing, covering the NVMe/OVMF direct-map gap found by acceptance.
 
+23. Closed: USB removal propagates root identity invalidation through ext4 mounts
+    and partition views. A boot-lifetime subscribed storage worker stops new I/O,
+    retries busy drains, discards mount cache/journal allocations without writing
+    and releases unretained slices/BOT records. Retained dead views reject I/O and
+    close on final release; replacement devices require fresh identities/mounts.
+    Driver images/controller registries remain boot-lifetime. Existing USB core
+    owns transfer cancellation and xHCI retains uncertain DMA safely. Three host
+    in-flight journal disconnect cycles reclaim every tracked allocation and
+    reference; journal crash/recovery checks still pass. Four-CPU AMD-Vi guest
+    acceptance covers writable removal/reinsertion and nested-hub subtree loss
+    with stale-reference rejection, automatic cleanup and a fresh explicit mount.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
-Multi-instance storage is implemented. Completion of USB hotplug cleanup
-comes next, before bootstrap storage selection and disk-loaded future modules.
-USB enumeration/hotplug already exists; the new priority closes lifecycle and
-storage-disconnection gaps rather than replacing that implementation.
+Multi-instance storage and USB storage-disconnection cleanup are implemented.
+Bootstrap storage selection comes next, before disk-loaded future modules.
 
-1. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
-   AHCI/NVMe controllers and platform devices as boot-lifetime hardware; general
-   PCI/controller removal, rediscovery and kernel-module unloading are excluded.
-   Handle USB attachment, removal and nested hub subtree removal with fresh
-   identities on reattachment. Stop new operations, notify dependants, cancel/fail
-   pending work and drain callbacks/transfers before safe instance reclamation.
-   Include USB-storage transport state, dependent partition views and ext4 mounts:
-   disconnect old views permanently, report uncertain write/flush outcomes, and
-   require a fresh explicit mount after reattachment. Add a filesystem disconnect/
-   abort path that can discard in-memory state without writing to vanished media;
-   retain resources only where outstanding references or uncertain DMA make reuse
-   unsafe. Keep driver code and top-level registry tables loaded. Validate repeated
-   attach/remove cycles, in-flight I/O, nested hub loss, cleanup and stale-reference
-   rejection on disposable media; verify that unrelated devices keep working.
-2. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
+1. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
    now provide the common block read/write/flush contract alongside USB BOT.
    USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
    GUID across available devices without silently accepting duplicates or assuming
@@ -232,7 +228,7 @@ storage-disconnection gaps rather than replacing that implementation.
    or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
    and writes are implemented; optimize barrier batching only after preserving
    commit/checkpoint ordering and repeating crash validation.
-3. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
+2. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
    modules, including all existing kmodules, remain Limine-loaded from the boot
    partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot

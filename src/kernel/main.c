@@ -79,6 +79,8 @@ __attribute__((noreturn)) void kmain(void) {
     kernel_surface_call hub_start=kernel_surface_find_version(kmodule_hub,"usb_hub.start",1,0);
     if(!hub_start || hub_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB hub startup failed\n");halt();}
     if(!usb_start || usb_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB startup failed\n");halt();}
+    kernel_surface_call storage_start=kernel_surface_find(kmodule_hub,"usb_storage.start");
+    if(!storage_start || storage_start(0,0,0,0,0,0).status){debug("Cloudberry v2: storage lifecycle startup failed\n");halt();}
 #endif
     debug("Cloudberry v2: BOOT OK; framebuffer ready; event loop active\n");
     kernel_surface_call event_run=kernel_surface_find_version(kmodule_hub,"smp.run",1,0);

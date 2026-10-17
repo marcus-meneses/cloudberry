@@ -4,9 +4,10 @@
 #undef main
 #include <unistd.h>
 static uint64_t writes,flushes,cut,fail_write,fail_flush;
-static int tracing;
+static int tracing,disconnect_on_write;
 static struct kernel_surface_result write_block(MODULE_ARGS){
     MODULE_UNUSED();assert(a==1 && b<=size/512 && c<=8 && c<=size/512-b && e>=c*512);
+    if(disconnect_on_write && writes>=2){disconnect_on_write=0;assert(ext4_fs_surface_disconnect((uintptr_t)read_block,1,0,0,0,0).status);assert(partition_surface_disconnect((uintptr_t)read_block,1,0,0,0,0).status);return module_result(0,0);}
     if(fail_write && writes+1==fail_write){++writes;return module_result(0,0);}
     assert(!fseeko(image,b*512,SEEK_SET));assert(fwrite((void *)d,512,c,image)==c);++writes;
     if(tracing){const uint8_t *p=(void *)d;unsigned type=p[0]==0xc0 && p[1]==0x3b && p[2]==0x39 && p[3]==0x98?p[7]:0;printf("WRITE %llu %llu %u\n",(unsigned long long)(flushes+1),(unsigned long long)b,type);fflush(stdout);}
@@ -71,6 +72,25 @@ int main(int argc,char **argv){
         else if(!strcmp(argv[2],"rename")){assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_RENAME,(uintptr_t)path,0,(uintptr_t)"/renamed.bin",0).status);puts("ACK RENAME");fflush(stdout);}
         else {unsigned op=!strcmp(argv[2],"remove")?EXT4_MUTATE_REMOVE:EXT4_MUTATE_TRUNCATE;assert(!ext4_fs_surface_mutate(id,op,(uintptr_t)path,137,0,0).status);puts(op==EXT4_MUTATE_REMOVE?"ACK REMOVE":"ACK TRUNCATE");fflush(stdout);}
         tracing=0;cut=0;
+    }else if(!strcmp(argv[2],"disconnect")){
+        for(unsigned cycle=0;cycle<3;++cycle){
+        assert(!CALL(part.control,part.cookie,BLOCK_RETAIN,0).status);
+        uint64_t old=id,old_part=part.cookie;writes=flushes=0;disconnect_on_write=1;
+        char path[32];snprintf(path,sizeof(path),"/disconnect-%u.bin",cycle);
+        assert(ext4_fs_surface_mutate(id,EXT4_MUTATE_CREATE,(uintptr_t)path,0,0,0).status);
+        uint64_t before_writes=writes,before_flushes=flushes;
+        assert(!ext4_fs_surface_disconnect((uintptr_t)read_block,1,0,0,0,0).status);
+        assert(!partition_surface_disconnect((uintptr_t)read_block,1,0,0,0,0).status);
+        struct ext4_stat st;assert(CALL(ext4_fs_surface_stat,old,"/",&st).status);
+        uint8_t data[512];assert(part.read(old_part,0,1,(uintptr_t)data,sizeof(data),0).status);
+        assert(CALL(part.control,old_part,BLOCK_RETAIN,0).status);
+        assert(writes==before_writes && flushes==before_flushes && refs==1);
+        assert(!CALL(part.control,old_part,BLOCK_RELEASE,0).status && !refs && !live);
+        assert(!fclose(image));setup(argv[1],&part);assert(part.cookie!=old_part);
+        assert(!CALL(ext4_fs_surface_mount,&part,&info,EXT4_MOUNT_WRITE).status && info.cookie!=old);id=info.cookie;
+        assert(CALL(ext4_fs_surface_stat,old,"/",&st).status);
+        }
+        puts("PASS three in-flight disconnect cycles, no abort writes/flushes, retained stale slice, complete allocation reclaim, fresh journal recovery");
     }else if(!strcmp(argv[2],"fail-write") || !strcmp(argv[2],"fail-flush")){
         writes=flushes=0;if(!strcmp(argv[2],"fail-write"))fail_write=strtoull(argv[3],NULL,10);else fail_flush=strtoull(argv[3],NULL,10);
         assert(ext4_fs_surface_mutate(id,EXT4_MUTATE_CREATE,(uintptr_t)"/failure.bin",0,0,0).status);

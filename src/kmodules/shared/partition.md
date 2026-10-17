@@ -26,3 +26,9 @@ Discovery validates a single selected device. The future driver manager must sea
 available devices and reject ambiguous matches across disks, including cloned images
 with identical GUIDs. This module neither performs that policy nor claims to prove
 Limine boot-volume identity. It never changes GPT or writes outside the selected partition.
+
+`disconnect(root_read,root_cookie)` permanently invalidates every matching
+slice. New reads/writes/flushes/retains fail; existing calls drain before freeing.
+Unretained idle views close immediately. Externally retained dead views keep
+only their reference/lifetime chain; their final release closes them and releases
+the transport. Replacement media requires a new GUID selection and new cookie.

@@ -36,6 +36,14 @@
     {
       "name": "usb_storage.flush",
       "symbol": "usb_storage_surface_flush"
+    },
+    {
+      "name": "usb_storage.start",
+      "symbol": "usb_storage_surface_start"
+    },
+    {
+      "name": "usb_storage.worker",
+      "symbol": "usb_storage_surface_worker"
     }
   ]
 }

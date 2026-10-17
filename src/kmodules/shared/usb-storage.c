@@ -3,8 +3,8 @@
 #include "threads.h"
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
-struct storage {struct usb_storage_record record;struct storage *next;uint64_t owner,refs;uint32_t tag;unsigned input,output,busy;unsigned char buffer[4096];};
-static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct storage *first;struct usb_storage_table table;kernel_surface_call cpu,thread,irq,allocate,free,device,interface,endpoint,claim,release,transfer,control,clock;uint64_t timeout;} state;
+struct storage {struct usb_storage_record record;struct storage *next;uint64_t owner,refs;uint32_t tag;unsigned input,output,busy,cleaned;unsigned char buffer[4096];};
+static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct storage *first;struct usb_storage_table table;kernel_surface_call cpu,thread,irq,allocate,free,device,interface,endpoint,claim,release,transfer,control,clock;uint64_t timeout,manager;kernel_surface_call watch,fs_disconnect,partition_disconnect;} state;
 static void copy(void *out,const void *in,size_t n){unsigned char *d=out;const unsigned char *s=in;while(n--)*d++=*s++;}
 static uint32_t le32(const unsigned char *p){return p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
 }
@@ -180,7 +180,7 @@ struct kernel_surface_result usb_storage_surface_flush(MODULE_ARGS){
 }
 struct kernel_surface_result usb_storage_surface_control(MODULE_ARGS) {
     MODULE_UNUSED();if(!foreground())return module_result(0,0);
-    uint64_t flags=lock();struct storage *s=find(a);int ok=s && (b==BLOCK_RETAIN?(!s->busy && !s->record.failed && s->refs<UINT64_MAX):(b==BLOCK_RELEASE && s->refs));if(ok){if(b==BLOCK_RETAIN)++s->refs;else --s->refs;}unlock(flags);return module_result(1,ok);
+    uint64_t flags=lock();struct storage *s=find(a);int ok=s && (b==BLOCK_RETAIN?(!s->busy && !s->record.failed && alive(s) && s->refs<UINT64_MAX):(b==BLOCK_RELEASE && s->refs));if(ok){if(b==BLOCK_RETAIN)++s->refs;else --s->refs;}unlock(flags);if(ok && b==BLOCK_RELEASE && state.manager)CALL(state.thread,THREAD_WAKE,state.manager,0);return module_result(1,ok);
 }
 struct kernel_surface_result usb_storage_surface_info(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !b || CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
@@ -195,4 +195,35 @@ struct kernel_surface_result usb_storage_surface_close(MODULE_ARGS) {
     flags=lock();if(!ok){s->busy=0;unlock(flags);return module_result(0,0);
     }
     struct storage **p=&state.first;struct usb_storage_record **q=&state.table.first;while(*p!=s)p=&(*p)->next;while(*q!=&s->record)q=&(*q)->next;*p=s->next;*q=s->record.next;--state.table.count;unlock(flags);CALL(state.free,state.heap,s,0);return module_result(1,1);
+}
+
+/* Runs only on CPU0. USB core wakes this subscriber on lifecycle changes. */
+struct kernel_surface_result usb_storage_surface_worker(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || CALL(state.watch,1,0,0).status)return module_result(0,0);
+    for(;;){uint64_t seen=0;unsigned retry=0;
+        for(;;){uint64_t flags=lock();struct storage *s=state.first,*chosen=NULL;
+            while(s){if(s->record.block.cookie>seen && (!chosen || s->record.block.cookie<chosen->record.block.cookie))chosen=s;s=s->next;}
+            s=chosen;if(!s){unlock(flags);break;}uint64_t cookie=s->record.block.cookie;seen=cookie;
+            if(s->busy){retry=1;unlock(flags);continue;}s->busy=1;unlock(flags);
+            if(!alive(s)){
+                s->record.failed=1;s->record.error=STORAGE_DISCONNECTED;
+                if(!s->cleaned){
+                    struct kernel_surface_result fs=CALL(state.fs_disconnect,s->record.block.read,cookie,0);
+                    struct kernel_surface_result part=CALL(state.partition_disconnect,s->record.block.read,cookie,0);
+                    s->cleaned=!fs.status && !part.status;if(!s->cleaned)retry=1;
+                }
+                flags=lock();int reclaim=s->cleaned && !s->refs;s->busy=0;unlock(flags);
+                if(reclaim && usb_storage_surface_close(cookie,0,0,0,0,0).status)retry=1;
+            }else {flags=lock();s->busy=0;unlock(flags);}
+        }
+        if(retry){uint64_t time=CALL(state.clock,0,0,0).value;if(time<=UINT64_MAX-10000000)CALL(state.thread,THREAD_BLOCK_UNTIL,time+10000000,0);else CALL(state.thread,THREAD_YIELD,0,0);}
+        else CALL(state.thread,THREAD_BLOCK,0,0);
+    }
+}
+struct kernel_surface_result usb_storage_surface_start(MODULE_ARGS){
+    MODULE_UNUSED();if(!state.hub || CALL(state.cpu,CPU_CURRENT,0,0).value || CALL(state.cpu,CPU_DEPTH,0,0).value)return module_result(0,0);if(state.manager)return module_result(state.manager,1);
+    state.watch=kernel_surface_find(state.hub,"usb.watch");state.fs_disconnect=kernel_surface_find(state.hub,"ext4_fs.disconnect");state.partition_disconnect=kernel_surface_find(state.hub,"partition.disconnect");
+    kernel_surface_call create=kernel_surface_find(state.hub,"threads.create"),entry=kernel_surface_find(state.hub,"usb_storage.worker");
+    if(!state.watch || !state.fs_disconnect || !state.partition_disconnect || !create || !entry)return module_result(0,0);
+    struct thread_request request={.abi=1,.cpu=0,.stack_bytes=32768,.entry=(uintptr_t)entry,.major=1};struct kernel_surface_result r=CALL(create,&request,0,0);if(!r.status)state.manager=r.value;return r;
 }

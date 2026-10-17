@@ -22,6 +22,8 @@ with base.open('wb') as f:f.truncate(40*1024**2)
 subprocess.run(['sgdisk','--clear','--new=1:2048:67583','--typecode=1:8300',f'--partition-guid=1:{guid}',str(base)],check=True,stdout=subprocess.DEVNULL)
 with base.open('r+b') as out,fs.open('rb') as data:
     out.seek(1024**2);shutil.copyfileobj(data,out)
+disconnected=work/'disconnected.img';shutil.copyfile(base,disconnected)
+subprocess.run([str(exe),str(disconnected),'disconnect'],check=True)
 normal=work/'normal.img';shutil.copyfile(base,normal)
 subprocess.run([str(exe),str(normal),'normal'],check=True)
 with normal.open('rb') as source,fs.open('wb') as out:

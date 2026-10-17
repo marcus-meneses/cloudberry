@@ -61,3 +61,16 @@ failed reads through a mounted filesystem, retained-parent teardown and a fresh
 attachment. Native/physical USB storage remains unqualified.
 
 Protocol reference: [USB-IF Bulk-Only Transport 1.0](https://www.usb.org/sites/default/files/usbmassbulk_10.pdf).
+
+`start()` creates a boot-lifetime CPU0 lifecycle worker. It subscribes to
+`usb.watch` notifications, invalidates disconnected BOT identities, asks
+`ext4_fs.disconnect` and `partition.disconnect` to drain dependants, and reclaims
+unreferenced transport records. Busy teardown retries with a bounded sleep;
+ordinary idle waiting uses notifications. Final reference release wakes cleanup.
+The driver image and registry header stay loaded. Table record pointers may not
+be retained across the CPU lock; removal frees records after references drain.
+USB core owns transfer cancellation and xHCI's uncertain DMA quarantine.
+
+Use `make -C src test-storage-write-boot USB_HOTPLUG=1 QEMU_CPUS=4 QEMU_IOMMU=amd`
+for writable storage removal and explicit remount. `USB_HOTPLUG=2` removes an
+outer hub containing a nested hub and the mounted storage device.

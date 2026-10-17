@@ -5,7 +5,7 @@
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 struct inode {uint64_t number,size;uint32_t flags,generation;uint16_t mode;uint8_t map[60];};
-struct volume {struct volume *next;struct block_device device;struct ext4_info info;uint64_t first_data,groups;uint32_t blocks_group,inodes_group,descriptor_bytes,seed,metadata;unsigned busy;struct ext4_engine *engine;uint8_t scratch[4096],node[4096],data[4096];};
+struct volume {struct volume *next;struct block_device device;struct ext4_info info;uint64_t first_data,groups;uint32_t blocks_group,inodes_group,descriptor_bytes,seed,metadata;unsigned busy,disconnected;struct ext4_engine *engine;uint8_t scratch[4096],node[4096],data[4096];};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;unsigned mounting;struct volume *first;kernel_surface_call cpu,thread,irq,alloc,free;} state;
 static int foreground(void){uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));return (flags&512) && state.hub && !CALL(state.cpu,CPU_CURRENT,0,0).value && !CALL(state.cpu,CPU_DEPTH,0,0).value && !CALL(state.irq,0,0,0).value && CALL(state.thread,THREAD_CURRENT,0,0).value;
 }
@@ -16,7 +16,7 @@ static struct volume *find(uint64_t id){for(struct volume *v=state.first;v;v=v->
     return NULL;
 }
 static struct volume *acquire(uint64_t id){if(!foreground())return NULL;
-    uint64_t f=lock();struct volume *v=find(id);if(v && !v->busy){v->busy=1;v->info.error=EXT4_OK;}else v=NULL;unlock(f);
+    uint64_t f=lock();struct volume *v=find(id);if(v && !v->busy && !v->disconnected){v->busy=1;v->info.error=EXT4_OK;}else v=NULL;unlock(f);
     if(v && v->engine && !ext4_engine_enter(v->engine)){f=lock();v->busy=0;v->info.error=ext4_engine_error(v->engine);if(!v->info.error)v->info.error=EXT4_BUSY;unlock(f);return NULL;}
     return v;
 }
@@ -226,4 +226,20 @@ struct kernel_surface_result ext4_fs_surface_mutate(MODULE_ARGS){
 }
 struct kernel_surface_result ext4_fs_surface_sync(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);int ok=!v->engine || ext4_engine_sync(v->engine);finish(v);return module_result(1,ok);
+}
+
+/* Root identity invalidation: stop new calls immediately. An active call drains
+ * before abort/free; a retry never reconnects this mount to replacement media. */
+struct kernel_surface_result ext4_fs_surface_disconnect(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || !a || !b)return module_result(0,0);int ok=1;uint64_t removed=0;
+    uint64_t mark=lock();for(struct volume *v=state.first;v;v=v->next)if((uintptr_t)v->device.root_read==a && v->device.root_cookie==b){v->disconnected=1;v->info.error=EXT4_IO;if(v->engine)ext4_engine_disconnect(v->engine);}unlock(mark);
+    for(;;){uint64_t flags=lock();struct volume *v=state.first;
+        while(v && ((uintptr_t)v->device.root_read!=a || v->device.root_cookie!=b))v=v->next;
+        if(!v){unlock(flags);break;}v->disconnected=1;v->info.error=EXT4_IO;if(v->engine)ext4_engine_disconnect(v->engine);
+        if(v->busy){unlock(flags);ok=0;break;}v->busy=1;unlock(flags);
+        if(v->engine){if(!ext4_engine_abort_enter(v->engine)){flags=lock();v->busy=0;unlock(flags);ok=0;break;}
+            if(!ext4_engine_abort(v->engine)){ext4_engine_leave();flags=lock();v->busy=0;unlock(flags);ok=0;break;}v->engine=NULL;ext4_engine_leave();}
+        if(v->device.control(v->device.cookie,BLOCK_RELEASE,0,0,0,0).status){flags=lock();v->busy=0;unlock(flags);ok=0;break;}
+        flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;unlock(flags);CALL(state.free,state.heap,v,0);++removed;
+    }return module_result(removed,ok);
 }

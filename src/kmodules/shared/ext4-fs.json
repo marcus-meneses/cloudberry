@@ -44,6 +44,10 @@
     {
       "name": "ext4_fs.sync",
       "symbol": "ext4_fs_surface_sync"
+    },
+    {
+      "name": "ext4_fs.disconnect",
+      "symbol": "ext4_fs_surface_disconnect"
     }
   ]
 }

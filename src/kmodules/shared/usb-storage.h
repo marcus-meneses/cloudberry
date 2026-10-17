@@ -14,6 +14,8 @@ struct usb_storage_table {uint64_t count;struct usb_storage_record *first;};
  * close(cookie), read/write/flush/control follow block.h. Explicit interface/LUN selection;
  * SCSI transparent BOT (08/06/50), direct-access read/write and CD/DVD read-only devices.
  * Failed open can return a cleanup-only out.cookie; retry close if nonzero.
+ * start() creates a boot-lifetime notification worker for dependent mount/slice
+ * invalidation and unreferenced record reclamation on USB removal.
  * One LUN per claimed interface at a time. No automatic discovery/claim/retries.
  * Command failure captures REQUEST SENSE. Invalid wrappers/transport failure
  * poison the instance; USB rebind may be needed before reopen. */
@@ -25,4 +27,6 @@ struct kernel_surface_result usb_storage_surface_info(MODULE_ARGS);
 struct kernel_surface_result usb_storage_surface_close(MODULE_ARGS);
 struct kernel_surface_result usb_storage_surface_write(MODULE_ARGS);
 struct kernel_surface_result usb_storage_surface_flush(MODULE_ARGS);
+struct kernel_surface_result usb_storage_surface_start(MODULE_ARGS);
+struct kernel_surface_result usb_storage_surface_worker(MODULE_ARGS);
 #endif

@@ -935,3 +935,24 @@
  
  #ifdef __cplusplus
  extern "C" {
+
+diff --git a/lwext4/include/ext4.h b/lwext4/include/ext4.h
+index 3cd806b..95300e7 100644
+--- a/lwext4/include/ext4.h
++++ b/lwext4/include/ext4.h
+@@ -125,0 +126 @@ int ext4_device_register(struct ext4_blockdev *bd,
++int ext4_device_forget(const char *name);
+diff --git a/lwext4/src/ext4.c b/lwext4/src/ext4.c
+index 195719d..9f903db 100644
+--- a/lwext4/src/ext4.c
++++ b/lwext4/src/ext4.c
+@@ -129,0 +130,9 @@ int ext4_device_unregister(const char *name){
++/* Cloudberry disconnect: caller owns all allocation lifetimes and has drained
++ * synchronous users. Unlink only; never flush/checkpoint or invoke callbacks. */
++int ext4_device_forget(const char *name){
++    struct ext4_block_devices **link=&s_bdevices;while(*link && strcmp((*link)->name,name))link=&(*link)->next;
++    if(!*link)return ENOENT;
++    struct ext4_block_devices *p=*link;
++    struct ext4_mountpoint **m=&s_mp;while(*m && *m!=p->mp)m=&(*m)->next;if(!*m)return EINVAL;
++    *m=p->mp->next;*link=p->next;return EOK;
++}
