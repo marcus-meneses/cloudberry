@@ -55,9 +55,10 @@ Foreground mutations use the recursive CPU lock. Stack operations acquire it
 internally around short transitions and authority calls, rather than retaining
 it over the whole operation. Callers must quiesce every user
 before freeing. HHDM and firmware-read aliases are trusted kernel facilities,
-not managed mapping references or user isolation. No protection against malicious
-kernel code, demand paging or process address spaces is claimed. Shared-address
-space TLB shootdown is implemented through CPU mailboxes/IPIs.
+not managed mapping references or protection against malicious kernel code.
+Private process-root facilities are described in [mem-spaces.md](mem-spaces.md);
+user execution and demand paging remain absent. Shared-kernel and active private
+root TLB shootdowns use CPU mailboxes/IPIs.
 Empty page-table/ledger chunks and metadata heap backing remain reserved; ordinary
 malloc/free still reuse heap blocks without returning their backing pages.
 

@@ -60,6 +60,42 @@
     {
       "name": "mem.pages_info",
       "symbol": "mem_surface_pages_info"
+    },
+    {
+      "name": "mem.space_create",
+      "symbol": "mem_surface_space_create"
+    },
+    {
+      "name": "mem.space_map",
+      "symbol": "mem_surface_space_map"
+    },
+    {
+      "name": "mem.space_unmap",
+      "symbol": "mem_surface_space_unmap"
+    },
+    {
+      "name": "mem.space_protect",
+      "symbol": "mem_surface_space_protect"
+    },
+    {
+      "name": "mem.space_query",
+      "symbol": "mem_surface_space_query"
+    },
+    {
+      "name": "mem.space_info",
+      "symbol": "mem_surface_space_info"
+    },
+    {
+      "name": "mem.space_pin",
+      "symbol": "mem_surface_space_pin"
+    },
+    {
+      "name": "mem.space_switch",
+      "symbol": "mem_surface_space_switch"
+    },
+    {
+      "name": "mem.space_destroy",
+      "symbol": "mem_surface_space_destroy"
     }
   ]
 }

@@ -74,7 +74,12 @@ __attribute__((noreturn)) void kmain(void) {
     }
     debug("Cloudberry v2: PASS mem surface test\n");
 #endif
-#if !defined(BOOT_MEM_TEST) && !defined(BOOT_BLOCK_TEST) && !defined(BOOT_HUB_TEST)
+#ifdef BOOT_SPACES_TEST
+    extern _Bool kernel_spaces_test(const struct kernel_surfaces *,struct boot_pages *);
+    if(!kernel_spaces_test(kmodule_hub,&bootstrap_pages)){debug("Cloudberry v2: FAIL address spaces test\n");halt();}
+    debug("Cloudberry v2: PASS address spaces test\n");
+#endif
+#if !defined(BOOT_MEM_TEST) && !defined(BOOT_BLOCK_TEST) && !defined(BOOT_HUB_TEST) && !defined(BOOT_SPACES_TEST)
     kernel_surface_call usb_start=kernel_surface_find_version(kmodule_hub,"usb.start",1,0);
     kernel_surface_call hub_start=kernel_surface_find_version(kmodule_hub,"usb_hub.start",1,0);
     if(!hub_start || hub_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB hub startup failed\n");halt();}

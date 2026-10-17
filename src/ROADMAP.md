@@ -246,6 +246,17 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     disk-module init/start failure acceptance pass. Hardware rollback and code
     reclamation remain deferred.
 
+27. Closed: private address-space roots share supervisor-only upper kernel
+    mappings and own lower-half user tables. mem.space_* checks owner/bounds/W^X,
+    retains mapped data, tracks active CPUs/leases and reclaims private tables in
+    bounded steps. ABI2 kernel threads select their leased roots on every switch
+    and restore the kernel dispatcher root. Targeted TLB invalidation synchronizes
+    with root transitions and physical reuse; BSP/AP write protection is enforced.
+    Host ownership/OOM/teardown checks and isolated four-CPU AMD-Vi/Intel VT-d
+    tests pass for same-VA private backing, timer/yield/block/exit, remote active
+    translations and lease-gated destruction. All execution remains kernel-mode;
+    this is not completed user-process isolation.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
@@ -253,9 +264,12 @@ Multi-instance storage and USB storage-disconnection cleanup are implemented.
 Bootstrap storage selection and selected future disk-module loading are implemented.
 The five requested storage/hub priorities are closed.
 
-After disk loading: establish process address spaces, user/kernel privilege
-separation, safe boundary copying and teardown/ownership cleanup before
-application-facing handlers/handles. HID/input and native display follow the
+Activation hardening and private address-space infrastructure are implemented.
+Discuss the handler/handle architecture with the user before continuing into
+application execution or invocation boundaries. User/kernel privilege separation,
+safe boundary copying, process lifecycle and handle authorization remain future
+work; no independent application syscall interface has been introduced.
+HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,

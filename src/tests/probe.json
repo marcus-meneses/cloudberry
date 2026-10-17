@@ -76,6 +76,10 @@
     {
       "name": "probe.block",
       "symbol": "probe_block_call"
+    },
+    {
+      "name": "probe.space",
+      "symbol": "probe_space_call"
     }
   ]
 }

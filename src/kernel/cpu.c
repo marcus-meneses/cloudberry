@@ -19,13 +19,32 @@ static int attach(struct cpu_record *cpu) {
     if(!backend_init || backend_init(0,0,0,0,0,0).status)return 0;
     uintptr_t at=(uintptr_t)cpu,base=(uintptr_t)config.records;
     if(at<base || (at-base)%sizeof(*cpu) || (at-base)/sizeof(*cpu)>=config.count || cpu->lapic_id!=local_id())return 0;
+    uintptr_t cr0,cr4;uint32_t lo,hi;
+    __asm__ volatile("mov %%cr0,%0;mov %%cr4,%1":"=r"(cr0),"=r"(cr4));
+    __asm__ volatile("rdmsr":"=a"(lo),"=d"(hi):"c"(0xc0000080u));(void)hi;
+    if((cr4&((1u<<12)|(1u<<17))) || !(lo&(1u<<11)))return 0;
+    cr0|=UINT64_C(1)<<16;__asm__ volatile("mov %0,%%cr0"::"r"(cr0):"memory");
     cpu->self=at;
     __asm__ volatile("wrmsr"::"c"(0xc0000101u),"a"((uint32_t)at),"d"((uint32_t)(at>>32)):"memory");return 1;
+}
+uint64_t kernel_cpu_space(void){return __atomic_load_n(&current()->address_space,__ATOMIC_ACQUIRE);}
+void kernel_cpu_set_space(uint64_t id){__atomic_store_n(&current()->address_space,id,__ATOMIC_RELEASE);}
+void kernel_cpu_select_root(uint64_t root){
+    /* No PCID lifecycle yet. Flush inherited global entries as well: Limine's
+     * lower-half mappings must never survive into a private process root. */
+    uintptr_t cr4;__asm__ volatile("mov %%cr4,%0":"=r"(cr4));
+    if(cr4&128){uintptr_t off=cr4&~(uintptr_t)128;__asm__ volatile("mov %0,%%cr4;mov %1,%%cr3;mov %2,%%cr4"::"r"(off),"r"(root),"r"(cr4):"memory");}
+    else __asm__ volatile("mov %0,%%cr3"::"r"(root):"memory");
+}
+static void reload(void){
+    uintptr_t cr3,cr4;__asm__ volatile("mov %%cr3,%0;mov %%cr4,%1":"=r"(cr3),"=r"(cr4));
+    if(cr4&128){uintptr_t off=cr4&~(uintptr_t)128;__asm__ volatile("mov %0,%%cr4;mov %1,%%cr4"::"r"(off),"r"(cr4):"memory");}
+    else __asm__ volatile("mov %0,%%cr3"::"r"(cr3):"memory");
 }
 static void flush_local(struct cpu_record *cpu) {
     uint64_t request=__atomic_load_n(&cpu->tlb_request,__ATOMIC_ACQUIRE);
     if(request!=__atomic_load_n(&cpu->tlb_ack,__ATOMIC_RELAXED)) {
-        uintptr_t cr3;__asm__ volatile("mov %%cr3,%0;mov %0,%%cr3":"=r"(cr3)::"memory");
+        reload();
         __atomic_store_n(&cpu->tlb_ack,request,__ATOMIC_RELEASE);
     }
 }
@@ -137,13 +156,15 @@ void kernel_cpu_leave_domain(unsigned domain,uint64_t flags) {
     if(outer)__atomic_add_fetch(&cpu->metrics_sequence,1,__ATOMIC_RELEASE);
     __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");
 }
-void kernel_cpu_flush(void) {
+void kernel_cpu_flush(void){kernel_cpu_flush_space(0);}
+void kernel_cpu_flush_space(uint64_t id) {
+    if(!id || kernel_cpu_space()==id)reload();
     if(!config.records) return;
     struct cpu_record *self=current();
     for(size_t i=0;i<config.count;++i) {struct cpu_record *cpu=&config.records[i];
-        if(cpu==self || !__atomic_load_n(&cpu->online,__ATOMIC_ACQUIRE)) continue;
+        if(cpu==self || !__atomic_load_n(&cpu->online,__ATOMIC_ACQUIRE) || (id && __atomic_load_n(&cpu->address_space,__ATOMIC_ACQUIRE)!=id)) continue;
         uint64_t request=__atomic_add_fetch(&cpu->tlb_request,1,__ATOMIC_RELEASE);ipi(cpu->lapic_id,CPU_TLB_VECTOR);
-        uint64_t started=watchdog_now();unsigned wait;for(wait=0;wait<100000000;++wait) {if(__atomic_load_n(&cpu->tlb_ack,__ATOMIC_ACQUIRE)==request) break;watchdog_check(started,wait+1,"Cloudberry: fatal TLB acknowledgement timeout\n");flush_local(self);__asm__ volatile("pause");}
+        uint64_t started=watchdog_now();unsigned wait;for(wait=0;wait<100000000;++wait) {if(__atomic_load_n(&cpu->tlb_ack,__ATOMIC_ACQUIRE)>=request) break;watchdog_check(started,wait+1,"Cloudberry: fatal TLB acknowledgement timeout\n");flush_local(self);__asm__ volatile("pause");}
         if(wait==100000000)panic("Cloudberry: fatal TLB acknowledgement timeout\n");
     }
 }

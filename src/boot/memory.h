@@ -7,7 +7,7 @@
 struct boot_memory_entry { uint64_t base, length, type; };
 struct boot_memory_map { uint64_t revision, count; struct boot_memory_entry **entries; };
 enum boot_reservation_kind { BOOT_RES_LEDGER = 1, BOOT_RES_MODULE, BOOT_RES_HUB,
-    BOOT_RES_PAGE_TABLE, BOOT_RES_MEDIATION, BOOT_RES_HEAP, BOOT_RES_CONTEXT, BOOT_RES_OTHER, BOOT_RES_PAGES, BOOT_RES_STACK, BOOT_RES_SCRUB };
+    BOOT_RES_PAGE_TABLE, BOOT_RES_MEDIATION, BOOT_RES_HEAP, BOOT_RES_CONTEXT, BOOT_RES_OTHER, BOOT_RES_PAGES, BOOT_RES_STACK, BOOT_RES_SCRUB, BOOT_RES_SPACE_TABLE };
 /* ABI3 mappings counts CPU mappings plus DMA pins; SCRUB keeps construction/
  * release ranges unavailable while bulk zeroing runs outside the ledger lock. */
 struct boot_reservation { uint64_t base, bytes; uint32_t kind, mappings; uintptr_t owner; };
@@ -26,7 +26,7 @@ struct boot_reservation_table {
 #define BOOT_RESERVATION_MAGIC UINT64_C(0x3156534552424343)
 struct boot_pages {
     const struct boot_memory_map *map;
-    uint64_t hhdm;
+    uint64_t hhdm,kernel_root;
     struct boot_reservation_table reservations;
     struct boot_reservation_chunk *last;
 };

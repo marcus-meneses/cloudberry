@@ -63,8 +63,8 @@ Implemented foundations include:
 - Stable published entries, explicit provider ownership, queued/active call leases and cooperative retirement.
 - Limine-loaded text configuration parsed into owned typed hub references.
 - A build-prepared 512 MiB ext4 driver partition, unique-GUID bootstrap selection and boot-origin reporting.
-- Explicit future disk-module loading with versioned dependency leases, hidden initialization and failure diagnostics.
-- Owned memory allocation, page mappings, guarded stacks and TLB coordination.
+- Explicit future disk-module loading with versioned dependency leases, hidden initialization/startup and failure diagnostics.
+- Owned memory allocation, guarded stacks, private address-space roots and SMP TLB coordination.
 - Preemptible kernel threads, SMP startup, deadline scheduling and deferred IRQs.
 - Calibrated clocks, cross-CPU TSC qualification and HPET fallback.
 - Hardware/MMIO discovery, PCI ownership and initial Intel/AMD IOMMU backends.

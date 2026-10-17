@@ -43,6 +43,21 @@ geometry and must not be used to diagnose real disks. No bare-metal installer,
 USB writing or host boot changes are performed. Wider firmware topologies and
 native TSC/x2APIC/device acceptance require evidence from the target environment.
 
+## Address spaces and module activation
+
+`test-spaces` runs production page-table construction/teardown on host-backed
+memory with UBSan, including partial-construction OOM. `test-spaces-boot
+QEMU_CPUS=4 QEMU_IOMMU=amd` (or intel) uses kernel-only probes and disposable media
+to exercise same-VA private mappings, CR3 selection across timer/yield/block/exit,
+active remote TLB invalidation, owner checks, leases, teardown and stale IDs.
+Reports live under `bin/tests/isolated/tests/spaces-<N>cpu-<iommu>/`.
+User-mode execution and a handler invocation boundary are not tested or supplied.
+
+Runtime module initialization and startup now both reject discovery, captured
+stubs, callback leases and table publication. `test-hub` checks concurrent gate
+rejection; `test-module-disk-boot` checks ABI2 private lookup, hidden hooks,
+init/start failure, success and retirement. All existing modules stay Limine-loaded.
+
 ## Vendor and extended-context acceptance
 
 `make -C src test-portability` runs focused topology/coherence/firmware checks

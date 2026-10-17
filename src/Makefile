@@ -21,7 +21,7 @@ X2APIC ?= 0
 ifeq ($(filter $(X2APIC),0 1),)
 $(error X2APIC must be 0 or 1)
 endif
-COMMON_OBJECTS := $(BUILD)/src-boot-memory.o $(BUILD)/src-modules.o $(BUILD)/src-mediate.o $(BUILD)/src-limine-x2apic$(X2APIC).o $(BUILD)/src-cpu.o
+COMMON_OBJECTS := $(BUILD)/src-boot-spaces.o $(BUILD)/src-spaces.o $(BUILD)/src-boot-memory.o $(BUILD)/src-modules.o $(BUILD)/src-mediate.o $(BUILD)/src-limine-x2apic$(X2APIC).o $(BUILD)/src-cpu.o
 OBJECTS := $(BUILD)/src-main.o $(COMMON_OBJECTS)
 SPLASH_MODULE := $(BUILD)/kmodules/splash.kmod
 MEM_MODULE := $(BUILD)/kmodules/mem.kmod
@@ -244,7 +244,7 @@ $(BUILD)/kmodules/probe.exports.S: tests/probe.json tools/module-exports.py
 	@mkdir -p $(@D)
 	python3 tools/module-exports.py $< $@
 
-$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe-storage-pic.o $(BUILD)/kmodules/probe-block-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-spaces-pic.o $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe-storage-pic.o $(BUILD)/kmodules/probe-block-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
 .PHONY: test-reservations
@@ -854,3 +854,33 @@ test-driver-manifest:
 	@mkdir -p $(TEST_BUILD)/tests
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/bootstrap-load.c -Wl,--gc-sections -o $(TEST_BUILD)/tests/src-driver-manifest
 	$(TEST_BUILD)/tests/src-driver-manifest
+
+$(BUILD)/src-boot-spaces.o: boot/spaces.c boot/spaces.h boot/memory.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/src-spaces.o: kernel/spaces.c kernel/spaces.h kernel/cpu.h boot/spaces.h kmodules/shared/mem-spaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+.PHONY: test-spaces
+test-spaces:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-strict-aliasing -fsanitize=undefined tests/spaces.c boot/spaces.c boot/memory.c -o $(TEST_BUILD)/tests/src-spaces
+	$(TEST_BUILD)/tests/src-spaces
+
+$(BUILD)/kmodules/probe-spaces-pic.o: tests/probe-spaces.c tests/probe.h kmodules/shared/mem-spaces.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-spaces-main.o: kernel/main.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_SPACES_TEST -c $< -o $@
+$(BUILD)/tests/src-spaces-test.o: tests/spaces-boot.c kmodules/shared/mem-spaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-spaces-kernel.elf: $(BUILD)/tests/src-spaces-main.o $(BUILD)/tests/src-spaces-test.o $(COMMON_OBJECTS) boot/linker.ld FORCE
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+.PHONY: test-spaces-boot _test-spaces-boot
+test-spaces-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-spaces-boot
+_test-spaces-boot: $(ISO) $(BUILD)/tests/src-spaces-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --spaces-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"

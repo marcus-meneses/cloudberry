@@ -8,9 +8,13 @@ validated SMP clock selection, deferred device IRQ delivery, PCI/DMA ownership,
 NVMe/AHCI block read/write/flush, xHCI transport, USB core and external hub class support,
 with initial Intel VT-d/AMD-Vi DMA translation. Target hardware is modern (2016+) Intel/AMD x86-64.
 
-Kmodules are coupled kernel methods in one shared address space. They are not
+Kmodules are coupled kernel methods with shared supervisor-only mappings. They are not
 resource handlers, user processes or isolation boundaries. Existing method calls
 stay synchronous; a separate threads API explicitly creates saved contexts.
+Private lower-half address spaces can be attached to kernel threads through
+request ABI2, with ownership, leases, context-switch root selection and targeted
+TLB invalidation. This is infrastructure; ring-3 execution and application
+interfaces remain pending. See [mem spaces](kmodules/shared/mem-spaces.md).
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
@@ -199,19 +203,20 @@ DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmwa
 companions to PCI records. SCI delivery, runtime namespace reconciliation, embedded
 controllers, platform drivers and PCI INTx firmware routing remain deferred.
 
-## Current assessment (2026-10-16)
+## Current assessment (2026-10-17)
 
-The shared kernel foundation supports the next storage milestone. It does not
+The kernel foundation now includes storage selection, future disk-module loading
+and private address-space infrastructure. It does not
 implement the original application's handler/handle model yet; that layer must
 follow process isolation and safe boundary transfer.
 
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
-| Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Shared address space; no process isolation, migration or forced thread cancellation |
+| Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Private roots available to kernel threads; no user-mode execution, process manager, migration or forced cancellation |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
-| Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies; table withdrawal and executable reclamation remain future work |
+| Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies and hidden init/start; table withdrawal and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
 stop/start reclaims existing hubs while USB core and root attachment identity
@@ -297,7 +302,9 @@ src/
 │   ├── linker.ld
 │   ├── memory.c
 │   ├── memory.h
-│   └── run-qemu.sh
+│   ├── run-qemu.sh
+│   ├── spaces.c
+│   └── spaces.h
 ├── kernel/
 │   ├── cpu.c
 │   ├── cpu.h
@@ -306,7 +313,9 @@ src/
 │   ├── mediate.S
 │   ├── modules.c
 │   ├── modules.h
-│   └── surfaces.h
+│   ├── surfaces.h
+│   ├── spaces.c
+│   └── spaces.h
 ├── kmodules/
 │   ├── amd/
 │   │   ├── cpu-amd.c
@@ -409,6 +418,8 @@ src/
 │   │   ├── mem-pages.c
 │   │   ├── mem-pages.h
 │   │   ├── mem-pages.md
+│   │   ├── mem-spaces.h
+│   │   ├── mem-spaces.md
 │   │   ├── mem.c
 │   │   ├── mem.h
 │   │   ├── mem.json
@@ -531,6 +542,8 @@ src/
 │   ├── lock-watchdog.c
 │   ├── mem-boot.c
 │   ├── mem-boot.py
+│   ├── spaces.c
+│   ├── spaces-boot.c
 │   ├── mem-pages-boot.c
 │   ├── mem-pages.c
 │   ├── mem.c
@@ -544,6 +557,7 @@ src/
 │   ├── probe-storage.c
 │   ├── probe-usb.c
 │   ├── probe-xhci.c
+│   ├── probe-spaces.c
 │   ├── probe.c
 │   ├── probe.h
 │   ├── probe.json

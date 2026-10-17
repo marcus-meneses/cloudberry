@@ -3,6 +3,11 @@
 #include "../../kernel/cpu.h"
 #include "../../boot/memory.h"
 static const struct kernel_surfaces *hub;static kernel_surface_call cpu;
+static kernel_surface_call spaces[9];
+#define SPACE_FORWARD(op,index) struct kernel_surface_result mem_surface_space_##op(MODULE_ARGS){return spaces[index]?spaces[index](a,b,c,d,e,f):module_result(0,0);}
+SPACE_FORWARD(create,0) SPACE_FORWARD(map,1) SPACE_FORWARD(unmap,2) SPACE_FORWARD(protect,3)
+SPACE_FORWARD(query,4) SPACE_FORWARD(info,5) SPACE_FORWARD(pin,6) SPACE_FORWARD(switch,7) SPACE_FORWARD(destroy,8)
+#undef SPACE_FORWARD
 static uint64_t lock(void) {return cpu?cpu(CPU_ENTER,0,0,0,0,0).value:0;}
 static void unlock(uint64_t flags) {if(cpu)cpu(CPU_LEAVE,flags,0,0,0,0);}
 static void zero(void *p,size_t n) {unsigned char *out=p;for(size_t i=0;i<n;++i)out[i]=0;}
@@ -23,6 +28,8 @@ struct kernel_surface_result mem_surface_configure(MODULE_ARGS) {
     MODULE_UNUSED(); const struct kernel_surfaces *candidate = (const void *)a;
     if (!candidate || candidate->magic != KERNEL_SURFACES_MAGIC || candidate->major != KERNEL_HUB_ABI ||
         !kernel_surface_find_version(candidate, "memory.reserve", 1, 0)) return module_result(0, 0);
+    const char *names[]={"create","map","unmap","protect","query","info","pin","switch","destroy"};
+    for(unsigned i=0;i<9;++i){char name[32]="memory.space_";unsigned j=13;for(unsigned k=0;names[i][k];++k)name[j++]=names[i][k];name[j]=0;spaces[i]=kernel_surface_find_version(candidate,name,1,0);if(!spaces[i])return module_result(0,0);}
     cpu=kernel_surface_find(candidate,"cpu.control");hub = candidate; return module_result(1, 1);
 }
 struct kernel_surface_result mem_surface_context(MODULE_ARGS) {

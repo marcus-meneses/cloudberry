@@ -12,6 +12,12 @@ borrowed. Requests specify a CPU, process ID (zero is kernel-owned) and stack
 body size. Bodies are page-rounded, committed immediately, and must be at least
 one page; there is no fixed stack-size or thread-count ceiling.
 
+Request ABI1 uses the kernel root. ABI2 appends an optional `address_space` ID,
+which must belong to `process_id`. Creation leases it through REAP. All context
+switches, including timer preemption and yield/block/exit, select the saved root;
+dispatchers restore the kernel root. These are still kernel-mode threads, not
+user processes. See [private address spaces](mem-spaces.md).
+
 `threads.run(budget)` dispatches at most budget contexts pinned to the calling
 CPU. Runnable records rotate to the list tail. Each dispatch arms a 2 ms local
 APIC one-shot. Normal C contexts save RSP, callee-saved registers and flags;

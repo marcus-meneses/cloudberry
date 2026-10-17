@@ -131,9 +131,15 @@ Managed stacks use independently allocated frames; their guards have no physical
 backing. memory.map_owned/unmap_owned maintain per-reservation references and
 invalidate local leaves and wait for remote TLB acknowledgements before release. The reservation table ABI is version 3;
 entry.mappings counts CPU mapping references and DMA pins. SCRUB reservations
-protect in-progress allocation/release while sanitization runs outside the lock. Empty page-table/ledger pages and
+protect in-progress allocation/release while sanitization runs outside the lock. Shared kernel page-table/ledger pages and
 heap metadata backing remain permanent. See kmodules/shared/mem-pages.md for ownership,
-release/rollback and alias limitations. Shootdown covers the shared address space; no process VM or PCID lifecycle exists.
+release/rollback and alias limitations. Private lower-half roots and shared supervisor-only upper mappings now coexist;
+see [mem spaces](../kmodules/shared/mem-spaces.md). Bootstrap captures the master
+root and seeds absent upper PDPT slots before AP startup (at most 1 MiB shared
+boot backing). Kernel mappers always edit that root; process leaves are U/S,
+owned and W^X. Space-aware shootdowns synchronize with thread root selection.
+Private roots/tables can be reclaimed after active CPUs and thread leases drain;
+PCID, ring-3 execution and user-copy boundaries remain deferred.
 
 
 SMP preparation allocates CPU-local GDT/TSS/IDT storage plus four guarded 32 KiB

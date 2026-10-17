@@ -1,6 +1,7 @@
 #include "modules.h"
 #include "../kmodules/shared/boot-origin.h"
 #include "cpu.h"
+#include "spaces.h"
 #include "../boot/limine.h"
 #include "../kmodules/shared/hwenum.h"
 #include "../kmodules/shared/config.h"
@@ -109,6 +110,7 @@ static void write_surface(size_t index,const char *name,kernel_surface_call call
     }
     const char *unlocked[]={"kernel.module_load","memory.reserve","memory.release","mem.malloc","mem.calloc","mem.realloc","mem.aligned_alloc","mem.free","mem.usable_size","mem.pages_alloc","mem.pages_free","pci.dma_alloc","pci.dma_free","pci.release","hub.publish_table","hub.publish_tables","hub.owner_info","hub.owner_pin","hub.owner_control"};
     for(size_t i=0;i<sizeof(unlocked)/sizeof(unlocked[0]);++i)if(kernel_hub_name_equal(name,unlocked[i]))meta->mode=0;
+    if(prefix(name,"memory.space_") || prefix(name,"mem.space_"))meta->mode=0;
     if(kernel_hub_name_equal(name,"cpu.control")) meta->mode=0;
     {
         meta->implementation = call;
@@ -267,7 +269,7 @@ static struct kernel_surface_result reserve_memory(MODULE_ARGS) {
     return module_result(ok?(uintptr_t)boot_physical_pointer(hub_pages,physical):0,ok);
 }
 static struct kernel_surface_result release_memory(MODULE_ARGS) {
-    MODULE_UNUSED();uint64_t flags=kernel_cpu_enter();int ok=boot_pages_retire(hub_pages,a,b,c,d);kernel_cpu_leave(flags);
+    MODULE_UNUSED();uint64_t flags=kernel_cpu_enter();int ok=(c==BOOT_RES_PAGES || c==BOOT_RES_STACK) && boot_pages_retire(hub_pages,a,b,c,d);kernel_cpu_leave(flags);
     if(!ok)return module_result(0,0);
     boot_pages_zero(hub_pages,a,b);flags=kernel_cpu_enter();ok=boot_pages_finish(hub_pages,a,b,d);kernel_cpu_leave(flags);return module_result(ok,ok);
 }
@@ -297,7 +299,7 @@ static struct kernel_surface_result unmap_batch(MODULE_ARGS) {
 static struct kernel_surface_result framebuffer_map(MODULE_ARGS){MODULE_UNUSED();return module_result(1,boot_framebuffer_map(hub_pages,a,b));}
 static struct boot_origin origin;
 const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) {
-    if (hub_writable) return NULL;
+    if (hub_writable || !kernel_spaces_prepare(pages)) return NULL;
     uint64_t physical = boot_pages_reserve(pages, HUB_BYTES / BOOT_PAGE_SIZE, BOOT_RES_HUB, KERNEL_SURFACES_ADDRESS);
     if(!physical || !boot_map_page(pages,KERNEL_SURFACES_ADDRESS,physical,false,false))return NULL;
     hub_pages=pages;hub_writable=boot_physical_pointer(pages,physical);
@@ -320,6 +322,10 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     const char batch_name[32]="memory.unmap_batch";
     if(!add_surface(batch_name,unmap_batch,1,0,0))return NULL;
     if(!add_surface("kernel.module_load",load_runtime,1,0,0))return NULL;
+#define SPACE_SURFACE(op) if(!add_surface("memory.space_" #op,kernel_spaces_##op,1,0,0))return NULL;
+    SPACE_SURFACE(create) SPACE_SURFACE(map) SPACE_SURFACE(unmap) SPACE_SURFACE(protect)
+    SPACE_SURFACE(query) SPACE_SURFACE(info) SPACE_SURFACE(pin) SPACE_SURFACE(switch) SPACE_SURFACE(destroy)
+#undef SPACE_SURFACE
     if(!add_surface("hardware.framebuffer_map",framebuffer_map,1,0,0))return NULL;
     if(!add_surface("hardware.firmware_map",firmware_map,1,0,0) || !add_surface("hardware.port_read",port_read,1,0,0) ||
        !add_surface("hardware.port_write",port_write,1,0,0) || !add_surface("hardware.log",log_text,1,0,0))return NULL;
@@ -467,6 +473,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     uint64_t arena=boot_pages_reserve(pages,1,BOOT_RES_HEAP,heap);
     if (!arena) return startup_failure("memory.heap","exhausted");
     START("mem.init",calls[2](heap,(uintptr_t)boot_physical_pointer(pages,arena),4096,0,0,0));
+    if(!kernel_spaces_init(hub,heap))return startup_failure("memory.spaces","failed");
     const struct module_file *config_file=boot_file("cloudberry-config");
     kernel_surface_call config_init=kernel_surface_find_version(hub,"config.init",1,0);
     if(!config_file || !config_file->address || !config_file->size)return startup_failure("cloudberry.cnf","missing or duplicate data module");

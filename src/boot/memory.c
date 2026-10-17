@@ -84,7 +84,7 @@ bool boot_pages_retype(struct boot_pages *pages,uint64_t physical,size_t count,u
     return false;
 }
 bool boot_pages_retire(struct boot_pages *pages,uint64_t physical,size_t count,uint32_t kind,uintptr_t owner) {
-    return (kind==BOOT_RES_PAGES || kind==BOOT_RES_STACK) && boot_pages_retype(pages,physical,count,kind,BOOT_RES_SCRUB,owner);
+    return (kind==BOOT_RES_PAGES || kind==BOOT_RES_STACK || kind==BOOT_RES_SPACE_TABLE) && boot_pages_retype(pages,physical,count,kind,BOOT_RES_SCRUB,owner);
 }
 bool boot_pages_finish(struct boot_pages *pages,uint64_t physical,size_t count,uintptr_t owner) {
     if(!pages || !count || count>SIZE_MAX/BOOT_PAGE_SIZE)return false;
@@ -109,9 +109,10 @@ static bool map_page(struct boot_pages *pages, uintptr_t address, uint64_t physi
     /* Bootstrap mapper deliberately supports four-level paging with NX enabled. */
     if ((cr4 & (1u << 12)) || !(efer_low & (1u << 11)) ||
         (address & (BOOT_PAGE_SIZE - 1)) || !physical || (physical & ~ADDRESS_MASK) ||
+        (pages->kernel_root && address<UINT64_C(0xffff800000000000)) ||
         (writable && executable) ||
         ((address >> 47) != 0 && (address >> 47) != UINT64_C(0x1ffff))) return false;
-    uint64_t *table = boot_physical_pointer(pages, cr3 & ADDRESS_MASK);
+    uint64_t *table = boot_physical_pointer(pages, (pages->kernel_root?pages->kernel_root:cr3) & ADDRESS_MASK);
     for (unsigned shift = 39; shift > 12; shift -= 9) {
         uint64_t *entry = &table[(address >> shift) & 511];
         if (!(*entry & PRESENT)) {
@@ -212,7 +213,7 @@ bool boot_pages_release(struct boot_pages *pages,uint64_t physical,size_t count,
 static uint64_t *owned_leaf(struct boot_pages *pages,uintptr_t address) {
     if ((address&4095) || ((address>>47)!=0 && (address>>47)!=UINT64_C(0x1ffff))) return NULL;
     uint64_t cr3;__asm__ volatile("mov %%cr3,%0" : "=r"(cr3));
-    uint64_t *table=boot_physical_pointer(pages,cr3&ADDRESS_MASK);
+    uint64_t *table=boot_physical_pointer(pages,(pages->kernel_root?pages->kernel_root:cr3)&ADDRESS_MASK);
     for (unsigned shift=39;shift>12;shift-=9) {
         uint64_t entry=table[(address>>shift)&511];
         if (!(entry&PRESENT) || (entry&LARGE)) return NULL;
@@ -273,7 +274,7 @@ bool boot_framebuffer_map(struct boot_pages *pages,uintptr_t address,size_t byte
     for(size_t i=0;i<pages->map->count;++i){const struct boot_memory_entry *m=pages->map->entries[i];if(m && m->type==7 && m->length<=UINT64_MAX-m->base && physical>=m->base && end<=m->base+m->length){covered=1;break;}}
     if(!covered)return false;
     for(uintptr_t page=address&~UINT64_C(4095);page<address+bytes;page+=4096){
-        uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));uint64_t *table=boot_physical_pointer(pages,cr3&ADDRESS_MASK);int mapped=0;
+        uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));uint64_t *table=boot_physical_pointer(pages,(pages->kernel_root?pages->kernel_root:cr3)&ADDRESS_MASK);int mapped=0;
         for(unsigned shift=39;shift>=12;shift-=9){uint64_t entry=table[(page>>shift)&511];if(!(entry&PRESENT))break;if(!(entry&WRITABLE))return false;if(shift==12 || (entry&LARGE)){uint64_t mask=(UINT64_C(1)<<shift)-1;if((entry&ADDRESS_MASK&~mask)!=((page-pages->hhdm)&~mask))return false;mapped=1;break;}table=boot_physical_pointer(pages,entry&ADDRESS_MASK);}
         if(!mapped){uint32_t pat_low,pat_high;__asm__ volatile("rdmsr":"=a"(pat_low),"=d"(pat_high):"c"(0x277));(void)pat_high;
             if((pat_low>>24)!=0 || !map_page(pages,page,page-pages->hhdm,true,false,true))return false;}

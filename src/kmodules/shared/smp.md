@@ -56,12 +56,14 @@ must quiesce hardware and in-flight callbacks on all CPUs before reclaiming a
 binding's context.
 
 Managed map/unmap and MMIO permission changes invalidate remote CPUs before
-returning. TLB IPI handlers reload CR3, publish acknowledgement and send EOI.
+returning. TLB IPI handlers invalidate nonglobal/global translations, publish acknowledgement and send EOI.
 A CPU spinning for the kernel lock services its preallocated mailbox even with
 IF disabled, preventing a shootdown/lock deadlock. The issuer waits for every
 online CPU before physical reuse; a bounded delivery/acknowledgement failure
-enters the owned exception dump. This handles the shared address space and its
-non-global managed mappings, not future per-process PCIDs or global mappings.
+enters the owned exception dump. Shared-kernel changes cover every CPU; private-root changes target CPUs
+currently using that root, serialized with scheduler root transitions. Root
+switches flush inherited global entries too. PCID remains disabled. See
+[private address spaces](mem-spaces.md).
 Per-CPU boot/emergency stacks and active thread stacks cannot be released.
 
 Wake IPIs interrupt idle CPUs after runnable publication. APs execute pinned

@@ -18,7 +18,7 @@ future modules will use the ext4 driver directory.
 | [usb](shared/usb.md) | Root/downstream enumeration, configuration validation, interface ownership and scoped synchronous I/O; HID/UAS class drivers deferred; BOT storage implemented |
 | [usb-hub](shared/usb-hub.md) | Hub discovery, owned port registry, power/reset, nested enumeration and interrupt-driven hotplug |
 | [xhci](shared/xhci.md) | Owned controller/port registry, command/event rings, root/downstream slots/endpoints, asynchronous transfers and restart cleanup; HID/UAS class drivers deferred; BOT storage implemented |
-| [mem](shared/mem-pages.md) | Caller-owned heaps plus owned pages, sanitization/reuse and guarded stacks |
+| [mem](shared/mem-pages.md) | Caller-owned heaps, owned pages/guarded stacks and [private address-space roots](shared/mem-spaces.md) |
 | [inthandle](shared/inthandle.md) | Early faults, per-CPU descriptor tables, owned vectors and CMOS/NMI policy |
 | [hwenum](shared/hwenum.md) | Firmware/PCI enumeration and hardware descriptor table/dump |
 | [mmio](shared/mmio.md) | Hardware region inventory and checked UC mapping/register access |
@@ -63,8 +63,10 @@ Threads are pinned, preemptible outside critical sections and eagerly preserve
 x87/SSE/available AVX through [xstate](shared/xstate.md). Infrastructure uses
 general registers only. Migration/balancing, CPU hotplug and process lifetime are future work. USB
 device/hub hotplug is implemented. SMP begins on HPET and requires successful uncertainty/offset/drift
-validation before TSC activation, retaining HPET health checks/fallback. Shared
-address-space mapping changes wait for remote invalidation before physical reuse.
+validation before TSC activation, retaining HPET health checks/fallback. Shared kernel mapping changes wait for every online CPU; private-root changes
+invalidate CPUs using that space before physical reuse. ABI2 kernel threads lease
+owned private roots and restore the kernel dispatcher root on suspension; ring 3
+and application interfaces remain deferred.
 Owners must quiesce in-flight IRQ callbacks before freeing a binding's context.
 
 Focused test targets include test-hub, test-hub-boot, test-block-boot, test-config, test-config-boot, test-cpu-tsc, test-clock, test-timer, test-apic, test-pages,

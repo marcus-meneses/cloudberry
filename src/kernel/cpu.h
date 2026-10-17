@@ -21,7 +21,7 @@ struct cpu_metrics {
 struct cpu_record {
     uintptr_t self; /* GS:0; kernel reserves IA32_GS_BASE. */
     uint32_t lapic_id,index;
-    uint64_t online,tlb_request,tlb_ack,depth;
+    uint64_t online,tlb_request,tlb_ack,depth,address_space;
     uintptr_t stack_top,stack_bottom,active_bottom,active_top,ist_bottom[3],ist_top[3];
     uint64_t timer_interrupts;
     struct cpu_metrics metrics;
@@ -37,4 +37,10 @@ uint64_t kernel_cpu_enter_domain(unsigned domain,uint64_t method);
 void kernel_cpu_leave_domain(unsigned domain,uint64_t flags);
 void kernel_cpu_leave(uint64_t flags);
 void kernel_cpu_flush(void);
+/* Space-specific flush requires the global CPU lock. ID0 flushes shared kernel
+ * translations on every CPU; other IDs target CPUs currently using that root. */
+void kernel_cpu_flush_space(uint64_t id);
+uint64_t kernel_cpu_space(void);
+void kernel_cpu_set_space(uint64_t id);
+void kernel_cpu_select_root(uint64_t root);
 #endif
