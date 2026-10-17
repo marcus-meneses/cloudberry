@@ -359,6 +359,12 @@ Follow-up requested after that acceptance:
    now brackets its HPET reference to avoid treating vCPU pauses as drift; genuine
    drift/regression still falls back. Reports now retain the TSC rejection reason.
    Native confirmation remains pending; the old log cannot establish its reason.
+   The next native session, 20261017T213514.682497Z, completes seven boots with
+   stable TSC before the second VT-d boot exposes premature BLOCKED publication:
+   its remote thread still uses the private root during switch-out. Threads now
+   use BLOCKING until dispatcher/root restoration, preserving wakes across that
+   transition. The inactive-root assertion remains intact. Native reruns remain
+   required; this partial batch is not an accepted performance baseline.
 3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
    contract under interfaces, plus handlers/keyboard's loading/authorization plan.
    /@keyboard is the first handler milestone; C++ object layouts stay out of the

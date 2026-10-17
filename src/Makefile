@@ -405,6 +405,12 @@ $(BUILD)/kmodules/smp.elf: $(BUILD)/kmodules/smp-pic.o $(BUILD)/kmodules/smp-ent
 $(BUILD)/tests/src-threads-boot.o: tests/threads-boot.c tests/probe.h kmodules/shared/threads.h kmodules/shared/smp.h
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
+.PHONY: test-threads-state
+test-threads-state:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/threads-state.c -o $(BUILD)/tests/src-threads-state
+	$(BUILD)/tests/src-threads-state
+
 .PHONY: test-threads-smp _test-threads-smp
 test-threads-smp:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-threads-smp

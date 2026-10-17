@@ -271,7 +271,7 @@ no formatting or migration. Test fixtures never enter the candidate image.
 
 ```sh
 make -C src test-portability
-make -C src test-threads-smp
+make -C src test-threads-state test-threads-smp
 make -C src BUILD=../bin/tests/isolated test-clock test-tsc-validation test-irq test-timer test-apic test-pages
 make -C src test-inthandle-faults
 make -C src test-ext4-write test-ext4-runtime
@@ -598,6 +598,7 @@ src/
 │   ├── storage-fs.c
 │   ├── storage-fs.py
 │   ├── threads-boot.c
+│   ├── threads-state.c
 │   ├── timer.c
 │   ├── tsc-validation.c
 │   ├── tsc_profile.py

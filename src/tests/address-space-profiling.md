@@ -341,6 +341,33 @@ owned-reservation restoration and image checks, with the new reason recorded.
 TCG verifies fallback mechanics; native confirmation of this correction still
 requires the explicit accepted reference command above.
 
+## Remote block publication race: 2026-10-17
+
+Session `20261017T213514.682497Z` completes seven native boots with stable TSC
+and rejection reason zero: all three single-CPU runs, all three four-CPU AMD-Vi
+runs and the first four-CPU VT-d run. The second VT-d run fails the cycle-1
+assertion that the private root is inactive after all its workers report BLOCKED.
+The existing thread implementation published BLOCKED before saving its context
+and restoring the dispatcher root. A remote observer could therefore see blocked
+workers while an AP still counted as active in their root. This is a lifecycle
+publication race, not evidence of an Intel-specific controller failure.
+
+Threads now publish BLOCKING while switching away. Under the list lock, the
+dispatcher commits BLOCKED only after restoring its root/context and clearing
+current/active-stack ownership. Wakes during BLOCKING retain a coalesced credit;
+completion consumes it and publishes RUNNABLE instead. No polling wait or weaker
+address-space assertion hides the race, and existing lifecycle enum values stay
+unchanged. The new host state test exercises transition queries, coalesced wakes,
+post-block wake IPIs and exit publication. The incomplete native batch remains
+unaccepted; rerun against the explicit accepted reference above after validation.
+
+Focused acceptance passes `test-threads-state` (UBSan), a four-CPU VT-d address-
+space boot (`371cf4374e424923b6baf9ede083a9ab`, eight cycles/120 expected
+faults and restored owned reservations), and the four-CPU VT-d thread/SMP suite
+(`3af15a3a44394ed49623f1785ed7c14a`: preemption, block/wake, timed sleep,
+wake credits, FP state and remote mapping reuse). Both guest runs use TCG and
+isolated disposable media; native confirmation still requires the host rerun.
+
 ## Observations: 2026-10-17
 
 These acceptance runs used Q35, 512 MiB, `-cpu max`, TCG and the indicated emulated

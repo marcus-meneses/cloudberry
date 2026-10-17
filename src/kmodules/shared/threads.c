@@ -24,7 +24,10 @@ static void suspend(uint32_t next,uint64_t deadline) {
     uint64_t saved;__asm__ volatile("pushfq;pop %0;cli":"=r"(saved)::"memory");
     uint64_t lock_flags=next==THREAD_BLOCKED?enter():0;
     if(next==THREAD_BLOCKED && t->wake_pending) {t->wake_pending=0;leave(lock_flags);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");return;}
-    t->wake_ns=deadline;set_status(t,next);if(next==THREAD_BLOCKED)leave(lock_flags);
+    t->wake_ns=deadline;
+    /* A remote observer must not treat a still-executing context as blocked.
+     * Keep wake credits until the dispatcher commits the switch under lock. */
+    set_status(t,next==THREAD_BLOCKED?THREAD_BLOCKING:next);if(next==THREAD_BLOCKED)leave(lock_flags);
     switch_context(&t->context,&cpu->dispatcher);
     __asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");
 }
@@ -89,6 +92,13 @@ static void wake_due(uint64_t now) {
         t->wake_ns=0;t->ready_ns=now;t->ready_valid=1;set_status(t,THREAD_RUNNABLE);
     }
 }
+/* Called under the list lock, after root/context restoration and current clear. */
+static void finish_suspend(struct thread *t) {
+    if(status(t)==THREAD_BLOCKING) {
+        if(t->wake_pending){t->wake_pending=0;t->wake_ns=0;set_status(t,THREAD_RUNNABLE);}
+        else set_status(t,THREAD_BLOCKED);
+    }else if(status(t)==THREAD_EXITING)set_status(t,THREAD_EXITED);
+}
 struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !a || call(state.cpu,CPU_DEPTH,0,0).value) return module_result(0,0);
     struct local *cpu=&state.cpus[current_cpu()];if(cpu->dispatching) return module_result(0,0);cpu->dispatching=1;
@@ -114,7 +124,7 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         t->ready_ns=ready_time.value;t->ready_valid=!ready_time.status;
         uint64_t transition=enter();
         __atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);
-        if(status(t)==THREAD_EXITING)set_status(t,THREAD_EXITED);
+        finish_suspend(t);
         leave(transition);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");++done;
     }
     cpu->dispatching=0;return module_result(done,1);
@@ -139,7 +149,7 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
     struct thread *t=state.head,*prev=NULL;while(t && t->info.id!=b){prev=t;t=t->next;}
     if(!t) {leave(flags);return module_result(0,0);}int ok=0;
     if(a==THREAD_INFO && c) {*(struct thread_info *)c=(struct thread_info){t->info.id,t->info.process_id,t->info.cpu,status(t),t->info.switches,t->info.result};ok=1;}
-    if(a==THREAD_WAKE && (status(t)==THREAD_RUNNING || status(t)==THREAD_RUNNABLE)) {t->wake_pending=1;ok=1;}
+    if(a==THREAD_WAKE && (status(t)==THREAD_RUNNING || status(t)==THREAD_RUNNABLE || status(t)==THREAD_BLOCKING)) {t->wake_pending=1;ok=1;}
     if(a==THREAD_WAKE && status(t)==THREAD_BLOCKED) {struct kernel_surface_result time=call(state.now,0,0,0);t->ready_ns=time.value;t->ready_valid=!time.status;t->wake_ns=0;set_status(t,THREAD_RUNNABLE);call(state.cpu,CPU_WAKE,t->info.cpu,0);ok=1;}
     if(a==THREAD_REAP && status(t)==THREAD_EXITED && __atomic_load_n(&state.cpus[t->info.cpu].current,__ATOMIC_ACQUIRE)!=t) {
         /* Keep the record discoverable, but exclusively owned by this reaper.

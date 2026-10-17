@@ -29,9 +29,11 @@ run with IRQs disabled. No stack is freed while still executing.
 `threads.control(op,id,out)` supports:
 
 - YIELD: current running thread becomes runnable and suspends.
-- BLOCK: current running thread blocks until WAKE(id).
+- BLOCK: current running thread passes through BLOCKING, then blocks until WAKE(id).
 - WAKE: blocked becomes runnable and sends a wake IPI; RUNNING/RUNNABLE receives
   one coalesced wake credit, consumed by its next block to avoid a lost wake.
+  BLOCKING also receives a credit, consumed by dispatcher completion to make the
+  saved context runnable without exposing it before the switch finishes.
 - BLOCK_UNTIL: block until WAKE or absolute nanosecond deadline passed as id.
 - DEADLINE: earliest blocked-thread deadline on the calling CPU, zero if none.
 - CURRENT: current thread ID, zero on the dispatcher.
@@ -40,7 +42,13 @@ run with IRQs disabled. No stack is freed while still executing.
 - READY: number of runnable threads pinned to the caller CPU; used before idle.
 
 Yield/block fail outside a thread, with IRQs disabled or inside a kernel critical
-section. Exiting
+section. BLOCKING is published before switching away; BLOCKED is committed under
+the thread-list lock only after the dispatcher restores its root/context and
+clears the current thread and active-stack markers. Thus a remote BLOCKED
+observation no longer precedes context detachment. Other threads can still use
+the same address space; BLOCKED does not imply process-wide inactivity. A wake
+during BLOCKING commits RUNNABLE instead, clearing the sleep deadline and credit.
+Existing state values stay unchanged; BLOCKING is appended to the enum. Exiting
 passes through EXITING while switching away, then EXITED on the dispatcher stack;
 only EXITED can be reaped. REAPING claims exclusive cleanup ownership while
 stack unmapping/sanitization runs outside the thread-list lock; failed cleanup
