@@ -549,6 +549,11 @@ src/
 │   ├── space_report.py
 │   ├── test-space-report.py
 │   ├── address-space-profiling.md
+│   ├── bench-spaces-kvm.py
+│   ├── baselines/
+│   │   └── address-spaces-tcg.json
+│   ├── space_compare.py
+│   ├── test-space-compare.py
 │   ├── spaces-boot.c
 │   ├── mem-pages-boot.c
 │   ├── mem-pages.c

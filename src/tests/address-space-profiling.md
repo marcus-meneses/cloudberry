@@ -4,6 +4,47 @@ The isolated address-space test measures the existing implementation. All probes
 fault fixups, measurement loops and report processing are test-only. Production
 root switching, scheduling, TLB policy and allocation are unchanged.
 
+## KVM collection and automatic comparison
+
+From the project root, run:
+
+```sh
+./scripts/bench-spaces-kvm.sh
+# Optional independent repetitions; the default already samples extensively:
+./scripts/bench-spaces-kvm.sh --runs 3
+```
+
+The script checks `/dev/kvm` before building, then compiles once into the reusable
+`bin/tests/kvm-spaces-build` directory. It runs one CPU without IOMMU, then four
+CPUs with AMD-Vi and Intel VT-d, always using `-accel kvm -cpu
+host,migratable=off,+invtsc`. There is no TCG fallback, sudo or host reconfiguration.
+It uses the existing isolated runner and disposable image paths only. Candidate
+artifacts, persistent disks and the original TCG report directories are untouched.
+
+A timestamped directory under `bin/tests/kvm-spaces/` contains per-boot reports,
+boot/runner/build logs, host CPU/kernel/affinity/QEMU/compiler information, guest
+binary hashes and source identity. `comparison.json` and `comparison.md` compare
+pooled native distributions against the checked-in historical summary at
+`baselines/address-spaces-tcg.json`; that file preserves the three run IDs below
+and their counts/minimum/median/p95/maximum. Native raw samples and per-boot medians
+remain available. Ratios describe elapsed TCG/KVM measurements, not code speedups.
+Clock-source/paging differences and changed guest sources are explicitly flagged;
+clock changes during measurement or across repetitions prevent a pooled result.
+
+`bin/tests/kvm-spaces/latest.json` points to the latest session and its status.
+A small adjacent `.tar.gz` contains reports/logs and the reference summary, never
+VM disks or guest binaries. Failed runs return nonzero and retain diagnostics;
+they are not accepted performance results. After running, reply “done” so the
+saved host-side reports can be inspected; no guest file export is required.
+The script serializes access to its build directory and detects source/binary
+changes during a batch. Run it while the host is otherwise quiet; it does not
+change host scheduling, CPU frequency or affinity settings.
+
+Host-only verification: `python3 src/tests/test-space-compare.py` covers ratios,
+raw samples, repetitions, invalid/stale identities, source changes, clock/mode
+warnings, preflight failure and a simulated full collection/archive. The actual
+KVM run remains user-host acceptance because this agent environment lacks KVM.
+
 ## Run and report
 
 ```sh

@@ -45,6 +45,12 @@ native TSC/x2APIC/device acceptance require evidence from the target environment
 
 ## Address spaces and module activation
 
+For native collection with automatic comparison, run
+`./scripts/bench-spaces-kvm.sh` from the project root. It builds once, retains
+independent per-boot outputs and a small report archive, and records the latest
+session in `bin/tests/kvm-spaces/latest.json`. No guest export is needed. See
+[collection and comparison details](address-space-profiling.md#kvm-collection-and-automatic-comparison).
+
 `test-spaces` runs production page-table construction/teardown on host-backed
 memory with UBSan, including partial-construction OOM. `test-spaces-boot
 QEMU_CPUS=4 QEMU_IOMMU=amd` (or intel) uses kernel-only probes and disposable media

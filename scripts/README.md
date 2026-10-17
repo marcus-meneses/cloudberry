@@ -46,3 +46,17 @@ fresh destination when changing the install prefix or Limine ref.
 Sources: [GCC release](https://gcc.gnu.org/ftp/gcc/releases/gcc-15.2.0/),
 [Binutils checksums](https://sourceware.org/pub/binutils/releases/sha512.sum),
 [Limine](https://github.com/limine-bootloader/limine).
+
+
+## KVM address-space measurements
+
+```sh
+./scripts/bench-spaces-kvm.sh
+```
+
+This compiles the isolated benchmark once and runs one/four-CPU KVM measurements
+without attaching persistent disks. It writes raw reports, a TCG comparison and
+a small report archive under `bin/tests/kvm-spaces/`. `latest.json` identifies the
+last session. Use `--runs 3` for independent repetitions or `--jobs 2` to reduce
+build parallelism. KVM must already be accessible to your user; the script never
+uses sudo or falls back to TCG. See the [method and output details](../src/tests/address-space-profiling.md).

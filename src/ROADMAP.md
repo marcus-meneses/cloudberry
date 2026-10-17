@@ -293,6 +293,12 @@ work; no independent application syscall interface has been introduced.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 
+Native address-space collection is available through scripts/bench-spaces-kvm.sh:
+compile once, run one/four-CPU KVM cases, retain per-boot raw reports and compare
+against the frozen TCG summary with source/clock/paging identity checks. Host-only
+comparison/orchestration checks pass; actual KVM timing awaits the user-host run.
+No scheduling/invalidation optimization is justified solely by TCG measurements.
+
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
 qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI
 INTx routing also remain deferred until required by a consumer.

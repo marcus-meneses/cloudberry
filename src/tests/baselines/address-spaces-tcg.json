@@ -1,0 +1,525 @@
+{
+  "schema": 1,
+  "kind": "historical-tcg-summary",
+  "source_revision": "e7edaa50ec5ca56a40e8e3c6673e1ebeba1bc9c6",
+  "guest_source_sha256": "dc5161d7280b567f9553469904c1da7f884fe9cf3994930ffd75cf77123842d4",
+  "guest_ram_mib": 512,
+  "cases": {
+    "1cpu-none": {
+      "run_id": "3131359e42ff412bab46af4d57128e9a",
+      "cpu_spec": "max",
+      "accelerator": "tcg",
+      "started_at": "2026-10-17T15:05:56.598213+00:00",
+      "finished_at": "2026-10-17T15:06:12.794024+00:00",
+      "clock_begin": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "clock_end": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "pge": false,
+      "pcid": false,
+      "cycles": 8,
+      "fault_events": 80,
+      "distributions": {
+        "protect_clock_bracket_ns": {
+          "count": 256,
+          "min": 11380,
+          "median": 13480.0,
+          "p95": 16690,
+          "max": 59640
+        },
+        "inactive_protect_ns": {
+          "count": 256,
+          "min": 15020,
+          "median": 17320.0,
+          "p95": 25770,
+          "max": 165390
+        },
+        "no_active_protect_ns": {
+          "count": 256,
+          "min": 15370,
+          "median": 17250.0,
+          "p95": 21310,
+          "max": 68510
+        },
+        "switch_clock_bracket_ns": {
+          "count": 512,
+          "min": 11110,
+          "median": 13410.0,
+          "p95": 15790,
+          "max": 70120
+        },
+        "same_root_pair_ns": {
+          "count": 512,
+          "min": 31350,
+          "median": 35750.0,
+          "p95": 48960,
+          "max": 85200
+        },
+        "root_roundtrip_ns": {
+          "count": 512,
+          "min": 48740,
+          "median": 53430.0,
+          "p95": 76050,
+          "max": 167830
+        },
+        "yield_roundtrip_ns": {
+          "count": 512,
+          "min": 537920,
+          "median": 611735.0,
+          "p95": 731580,
+          "max": 939150
+        },
+        "cycle_max_hold_ns": {
+          "count": 8,
+          "min": 4336910,
+          "median": 4715060.0,
+          "p95": 12404010,
+          "max": 12404010
+        },
+        "cycle_max_irq_off_ns": {
+          "count": 8,
+          "min": 4350660,
+          "median": 4738800.0,
+          "p95": 12434530,
+          "max": 12434530
+        },
+        "teardown_dense_32_ns": {
+          "count": 10,
+          "min": 932940,
+          "median": 1000470.0,
+          "p95": 1232270,
+          "max": 1232270
+        },
+        "populate_dense_32_ns": {
+          "count": 10,
+          "min": 4092600,
+          "median": 4151545.0,
+          "p95": 4725910,
+          "max": 4725910
+        },
+        "teardown_dense_32_hold_ns": {
+          "count": 10,
+          "min": 20530,
+          "median": 26085.0,
+          "p95": 47280,
+          "max": 47280
+        },
+        "teardown_dense_32_irq_off_ns": {
+          "count": 10,
+          "min": 26680,
+          "median": 33065.0,
+          "p95": 55800,
+          "max": 55800
+        },
+        "teardown_dense_512_ns": {
+          "count": 10,
+          "min": 12945330,
+          "median": 13305260.0,
+          "p95": 23911530,
+          "max": 23911530
+        },
+        "populate_dense_512_ns": {
+          "count": 10,
+          "min": 14214620,
+          "median": 14722190.0,
+          "p95": 19946530,
+          "max": 19946530
+        },
+        "teardown_dense_512_hold_ns": {
+          "count": 10,
+          "min": 27170,
+          "median": 74345.0,
+          "p95": 134860,
+          "max": 134860
+        },
+        "teardown_dense_512_irq_off_ns": {
+          "count": 10,
+          "min": 39180,
+          "median": 84820.0,
+          "p95": 3684170,
+          "max": 3684170
+        },
+        "teardown_sparse_128_ns": {
+          "count": 10,
+          "min": 7587150,
+          "median": 7878320.0,
+          "p95": 9144950,
+          "max": 9144950
+        },
+        "populate_sparse_128_ns": {
+          "count": 10,
+          "min": 199143470,
+          "median": 206151545.0,
+          "p95": 269031120,
+          "max": 269031120
+        },
+        "teardown_sparse_128_hold_ns": {
+          "count": 10,
+          "min": 28080,
+          "median": 65650.0,
+          "p95": 125150,
+          "max": 125150
+        },
+        "teardown_sparse_128_irq_off_ns": {
+          "count": 10,
+          "min": 44910,
+          "median": 75810.0,
+          "p95": 134100,
+          "max": 134100
+        }
+      }
+    },
+    "4cpu-amd": {
+      "run_id": "6bef1848d8494883a938b219639d2491",
+      "cpu_spec": "max",
+      "accelerator": "tcg",
+      "started_at": "2026-10-17T15:03:31.238888+00:00",
+      "finished_at": "2026-10-17T15:03:49.813416+00:00",
+      "clock_begin": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "clock_end": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "pge": false,
+      "pcid": false,
+      "cycles": 8,
+      "fault_events": 120,
+      "distributions": {
+        "protect_clock_bracket_ns": {
+          "count": 256,
+          "min": 11870,
+          "median": 14670.0,
+          "p95": 128360,
+          "max": 921210
+        },
+        "inactive_protect_ns": {
+          "count": 256,
+          "min": 14740,
+          "median": 18610.0,
+          "p95": 333490,
+          "max": 1666840
+        },
+        "remote_protect_ns": {
+          "count": 256,
+          "min": 40640,
+          "median": 191115.0,
+          "p95": 869670,
+          "max": 1873850
+        },
+        "switch_clock_bracket_ns": {
+          "count": 768,
+          "min": 11320,
+          "median": 14810.0,
+          "p95": 135560,
+          "max": 1345570
+        },
+        "same_root_pair_ns": {
+          "count": 768,
+          "min": 33800,
+          "median": 100610.0,
+          "p95": 751560,
+          "max": 7216250
+        },
+        "root_roundtrip_ns": {
+          "count": 768,
+          "min": 54270,
+          "median": 257125.0,
+          "p95": 1366450,
+          "max": 3763760
+        },
+        "yield_roundtrip_ns": {
+          "count": 768,
+          "min": 236070,
+          "median": 692725.0,
+          "p95": 4486280,
+          "max": 13950660
+        },
+        "cycle_max_hold_ns": {
+          "count": 8,
+          "min": 4960650,
+          "median": 5129900.0,
+          "p95": 5678270,
+          "max": 5678270
+        },
+        "cycle_max_irq_off_ns": {
+          "count": 8,
+          "min": 4968330,
+          "median": 5142680.0,
+          "p95": 5693700,
+          "max": 5693700
+        },
+        "teardown_dense_32_ns": {
+          "count": 10,
+          "min": 1014660,
+          "median": 1030240.0,
+          "p95": 1127100,
+          "max": 1127100
+        },
+        "populate_dense_32_ns": {
+          "count": 10,
+          "min": 5493400,
+          "median": 5519905.0,
+          "p95": 5632100,
+          "max": 5632100
+        },
+        "teardown_dense_32_hold_ns": {
+          "count": 10,
+          "min": 20400,
+          "median": 23120.0,
+          "p95": 40020,
+          "max": 40020
+        },
+        "teardown_dense_32_irq_off_ns": {
+          "count": 10,
+          "min": 29540,
+          "median": 32025.0,
+          "p95": 61040,
+          "max": 61040
+        },
+        "teardown_dense_512_ns": {
+          "count": 10,
+          "min": 13552700,
+          "median": 13624605.0,
+          "p95": 13681910,
+          "max": 13681910
+        },
+        "populate_dense_512_ns": {
+          "count": 10,
+          "min": 15589000,
+          "median": 15719850.0,
+          "p95": 15796710,
+          "max": 15796710
+        },
+        "teardown_dense_512_hold_ns": {
+          "count": 10,
+          "min": 36250,
+          "median": 43335.0,
+          "p95": 47910,
+          "max": 47910
+        },
+        "teardown_dense_512_irq_off_ns": {
+          "count": 10,
+          "min": 46870,
+          "median": 53635.0,
+          "p95": 59150,
+          "max": 59150
+        },
+        "teardown_sparse_128_ns": {
+          "count": 10,
+          "min": 7934080,
+          "median": 8058570.0,
+          "p95": 8208700,
+          "max": 8208700
+        },
+        "populate_sparse_128_ns": {
+          "count": 10,
+          "min": 255684350,
+          "median": 268408060.0,
+          "p95": 291353570,
+          "max": 291353570
+        },
+        "teardown_sparse_128_hold_ns": {
+          "count": 10,
+          "min": 32900,
+          "median": 47425.0,
+          "p95": 64400,
+          "max": 64400
+        },
+        "teardown_sparse_128_irq_off_ns": {
+          "count": 10,
+          "min": 41340,
+          "median": 56750.0,
+          "p95": 75920,
+          "max": 75920
+        }
+      }
+    },
+    "4cpu-intel": {
+      "run_id": "ab7590d0f0914e62b2583d32632356de",
+      "cpu_spec": "max",
+      "accelerator": "tcg",
+      "started_at": "2026-10-17T15:04:47.504103+00:00",
+      "finished_at": "2026-10-17T15:05:06.887724+00:00",
+      "clock_begin": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "clock_end": [
+        2,
+        177,
+        10000000,
+        0
+      ],
+      "pge": false,
+      "pcid": false,
+      "cycles": 8,
+      "fault_events": 120,
+      "distributions": {
+        "protect_clock_bracket_ns": {
+          "count": 256,
+          "min": 11800,
+          "median": 14380.0,
+          "p95": 155750,
+          "max": 1368960
+        },
+        "inactive_protect_ns": {
+          "count": 256,
+          "min": 14730,
+          "median": 17810.0,
+          "p95": 245570,
+          "max": 1269850
+        },
+        "remote_protect_ns": {
+          "count": 256,
+          "min": 44840,
+          "median": 187735.0,
+          "p95": 1087430,
+          "max": 2657450
+        },
+        "switch_clock_bracket_ns": {
+          "count": 768,
+          "min": 11240,
+          "median": 14810.0,
+          "p95": 87160,
+          "max": 661390
+        },
+        "same_root_pair_ns": {
+          "count": 768,
+          "min": 33390,
+          "median": 117090.0,
+          "p95": 872030,
+          "max": 5811340
+        },
+        "root_roundtrip_ns": {
+          "count": 768,
+          "min": 53290,
+          "median": 306955.0,
+          "p95": 1453320,
+          "max": 3855440
+        },
+        "yield_roundtrip_ns": {
+          "count": 768,
+          "min": 227970,
+          "median": 668445.0,
+          "p95": 4317510,
+          "max": 11212500
+        },
+        "cycle_max_hold_ns": {
+          "count": 8,
+          "min": 4957460,
+          "median": 5012640.0,
+          "p95": 5645190,
+          "max": 5645190
+        },
+        "cycle_max_irq_off_ns": {
+          "count": 8,
+          "min": 4964730,
+          "median": 5020980.0,
+          "p95": 5659500,
+          "max": 5659500
+        },
+        "teardown_dense_32_ns": {
+          "count": 10,
+          "min": 1006060,
+          "median": 1025795.0,
+          "p95": 1109640,
+          "max": 1109640
+        },
+        "populate_dense_32_ns": {
+          "count": 10,
+          "min": 5429800,
+          "median": 5514935.0,
+          "p95": 7297280,
+          "max": 7297280
+        },
+        "teardown_dense_32_hold_ns": {
+          "count": 10,
+          "min": 20470,
+          "median": 22595.0,
+          "p95": 65230,
+          "max": 65230
+        },
+        "teardown_dense_32_irq_off_ns": {
+          "count": 10,
+          "min": 27240,
+          "median": 29335.0,
+          "p95": 77170,
+          "max": 77170
+        },
+        "teardown_dense_512_ns": {
+          "count": 10,
+          "min": 13541290,
+          "median": 13703700.0,
+          "p95": 13819600,
+          "max": 13819600
+        },
+        "populate_dense_512_ns": {
+          "count": 10,
+          "min": 15598460,
+          "median": 15705980.0,
+          "p95": 17431930,
+          "max": 17431930
+        },
+        "teardown_dense_512_hold_ns": {
+          "count": 10,
+          "min": 33800,
+          "median": 51055.0,
+          "p95": 75640,
+          "max": 75640
+        },
+        "teardown_dense_512_irq_off_ns": {
+          "count": 10,
+          "min": 42810,
+          "median": 60100.0,
+          "p95": 83250,
+          "max": 83250
+        },
+        "teardown_sparse_128_ns": {
+          "count": 10,
+          "min": 7925840,
+          "median": 8202070.0,
+          "p95": 9808280,
+          "max": 9808280
+        },
+        "populate_sparse_128_ns": {
+          "count": 10,
+          "min": 260444990,
+          "median": 266486620.0,
+          "p95": 295786010,
+          "max": 295786010
+        },
+        "teardown_sparse_128_hold_ns": {
+          "count": 10,
+          "min": 44350,
+          "median": 60555.0,
+          "p95": 127180,
+          "max": 127180
+        },
+        "teardown_sparse_128_irq_off_ns": {
+          "count": 10,
+          "min": 51890,
+          "median": 67920.0,
+          "p95": 138630,
+          "max": 138630
+        }
+      }
+    }
+  }
+}
