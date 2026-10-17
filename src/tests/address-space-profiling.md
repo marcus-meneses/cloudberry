@@ -3,7 +3,47 @@
 The isolated address-space test measures the production implementation. All probes,
 fault fixups, measurement loops and report processing are test-only. The dated
 follow-up sections describe production timestamp, allocation and teardown changes;
-root-switch, scheduling and TLB-invalidation policy are unchanged by this work.
+root-switch and TLB-invalidation policy are unchanged; the follow-ups also fix
+thread blocking-state publication and test rendezvous.
+
+## Accepted native follow-up: 2026-10-17
+
+Session `20261017T214448.656303Z` passes all nine KVM boots at revision `4813e2f`:
+three each with one CPU/no IOMMU, four CPUs/AMD-Vi and four CPUs/VT-d. Every boot
+completes eight cycles, exact expected faults, lease/reference and owned-reservation
+restoration, and image checks. TSC remains selected throughout, rejection reason
+is zero, and all 38 per-boot measured scopes use TSC statistics with no HPET or
+unavailable duration samples. This closes the native confirmation requests in
+the failed-run sections below for the rendezvous, runtime-health and BLOCKING fixes.
+
+The Ryzen 5 5500U host, QEMU 6.2, compiler and affinity match accepted reference
+`20261017T202426.499405Z`; only the recorded guest revision changes. Both IOMMU
+cases still use the AMD CPU backend, so this does not qualify a native Intel CPU.
+PGE and PCID remain off. All reports and native/TCG comparisons are retained in
+the session directory and archive; none feed compilation or guest configuration.
+
+Pooled four-CPU medians below are in microseconds, before -> after:
+
+| Measurement | AMD-Vi | VT-d |
+| --- | ---: | ---: |
+| Clock bracket | 35.40 -> 0.350 | 35.06 -> 0.310 |
+| Two same-root selections | 117.15 -> 0.941 | 117.40 -> 0.812 |
+| Kernel/private root round trip | 123.77 -> 4.538 | 124.28 -> 3.967 |
+| Remote protection change | 105.79 -> 52.29 | 112.32 -> 48.84 |
+| Sparse 128-page population | 6365.84 -> 496.14 | 6353.88 -> 434.72 |
+| Dense 512-page teardown | 1938.32 -> 317.56 | 1935.89 -> 282.06 |
+| Sparse 128-page teardown | 1599.80 -> 826.77 | 1600.93 -> 737.38 |
+
+These elapsed gains include removal of instrumentation overhead and corrected test
+driving, not isolated CR3/allocator speedups. The comparator warns about changed
+sources and previously unrecorded profiling sources. Sparse-teardown managed
+IRQ-off maxima have typical values of 60.08/55.78 us and largest observations of
+89.10/133.64 us (AMD-Vi/VT-d). Broader stress still reaches 5.346 ms managed IRQ-off
+in `memory.unmap_batch` and 6.067 ms waiting for `clock.now_ns`. Attribution locates
+the observed call path; it does not separate guest work from host vCPU pauses.
+No hard latency bound or all-CPU critical-section coverage is established.
+Use this completed session as the next native baseline; repeat collection only
+when a relevant change needs native evidence.
 
 ## KVM collection and automatic comparison
 

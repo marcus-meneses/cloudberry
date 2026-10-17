@@ -347,28 +347,40 @@ Follow-up requested after that acceptance:
    Independent HPET lock/IPI/TLB watchdogs remain active. Reports retain CPU,
    method/name, lock domain, caller PC, clock source/epoch and address-space identity
    for wait/hold/IRQ peaks. Focused host and guest validation is recorded in tests;
-   fresh native performance acceptance requires the existing KVM collection script.
+   native acceptance is now complete in session 20261017T214448.656303Z. Earlier
+   failed sessions below record the races found and corrected during acceptance.
    Native session 20261017T211928.519874Z passes three single-CPU runs but times
    out during the first four-CPU AMD-Vi run. The benchmark's shared-state waits
    now use nonblocking dispatch rather than event-loop idle, with an explicit
    remote-only completion regression. The incomplete session is not accepted;
-   native reruns against 20261017T202426.499405Z remain required.
+   native reruns against 20261017T202426.499405Z were required at that stage.
    Session 20261017T212856.886469Z subsequently completes three single-CPU and
    two four-CPU AMD-Vi correctness boots, but its second SMP boot falls back to
    HPET and the comparator rejects mixed-clock timings. The runtime health check
    now brackets its HPET reference to avoid treating vCPU pauses as drift; genuine
    drift/regression still falls back. Reports now retain the TSC rejection reason.
-   Native confirmation remains pending; the old log cannot establish its reason.
+   Native confirmation was pending then; the old log cannot establish its reason.
    The next native session, 20261017T213514.682497Z, completes seven boots with
    stable TSC before the second VT-d boot exposes premature BLOCKED publication:
    its remote thread still uses the private root during switch-out. Threads now
    use BLOCKING until dispatcher/root restoration, preserving wakes across that
-   transition. The inactive-root assertion remains intact. Native reruns remain
-   required; this partial batch is not an accepted performance baseline.
+   transition. The inactive-root assertion remains intact. This partial batch is
+   not an accepted performance baseline.
 3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
    contract under interfaces, plus handlers/keyboard's loading/authorization plan.
    /@keyboard is the first handler milestone; C++ object layouts stay out of the
    ABI. Keyboard runtime implementation follows the process/transport foundation.
+
+Native follow-up closed: session 20261017T214448.656303Z passes all nine KVM
+boots, three per topology/IOMMU case, with stable TSC, zero rejection reasons,
+TSC-only measured duration statistics and no unavailable samples. Host/toolchain
+metadata match the previous accepted session. Four-CPU clock brackets are now
+0.31-0.35 us, root round trips 3.97-4.54 us, sparse population 0.43-0.50 ms and
+dense teardown 0.28-0.32 ms. These elapsed gains include instrumentation changes.
+Managed stress outliers still reach 5.35 ms in memory.unmap_batch and 6.07 ms
+waiting for clock.now_ns; caller attribution does not distinguish host pauses.
+This accepted session becomes the next baseline. Further native reruns need a
+relevant change; native Intel CPU and physical hardware qualification remain open.
 
 Clock boot-cost reporting remains a backlog item; retain per-boot calibration,
 qualification and HPET fallback. SCI reconciliation, EC/platform drivers and PCI
