@@ -293,7 +293,7 @@ work; no independent application syscall interface has been introduced.
 HID/input and native display follow the
 storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
 
-Current performance sequence (keep this order):
+Completed performance sequence (native acceptance 2026-10-17):
 
 1. Reduce timestamp/lock instrumentation overhead without weakening ordering or
    watchdogs. Implemented capability-selected AMD LFENCE/RDTSC/LFENCE or
@@ -317,11 +317,15 @@ Current performance sequence (keep this order):
    and amortize lock overhead over batches of at most 16 removals/4096 entry
    examinations. Ownership, inactive-root checks, sanitization, watchdogs and
    acknowledged invalidation remain enforced. Host and isolated guest checks pass.
-   Final four-CPU TCG sparse population is 3.47 ms versus 266.10 ms previously;
-   dense/sparse teardown is 1.57/5.29 ms versus 12.10/7.23 ms. Batching increases
-   individual sparse holds (median maximum about 314 us; largest observed IRQ-off
-   span 329 us). Native throughput/latency confirmation remains pending; compare
-   the next repeated KVM batch against 20261017T165114.408723Z before more tuning.
+   Repeated KVM acceptance passed: 20261017T202426.499405Z, three boots per case,
+   unchanged host and stable TSC. Four-CPU AMD-Vi/VT-d sparse population is
+   6.37/6.35 ms versus 73.85/73.58 ms; dense teardown is 1.94/1.94 ms versus
+   25.17/25.14 ms; sparse teardown is 1.60/1.60 ms versus 12.95/12.96 ms.
+   Batching increases individual sparse holds: typical managed IRQ-off maxima
+   are about 78 us versus 50 us; the largest sparse-trial observation is 90 us.
+   Broader stress cycles still contain multi-ms outliers (up to 4.06 ms in this
+   batch); no hard latency bound or attribution to host pauses is established.
+   Per-boot raw results and both previous reference sessions remain preserved.
 
 See tests/address-space-profiling.md for collection commands and interpretation.
 

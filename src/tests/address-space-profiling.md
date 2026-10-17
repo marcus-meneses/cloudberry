@@ -191,9 +191,41 @@ dense 512-page teardown from 12.10 to 1.57 ms, and sparse teardown from 7.23 to
 emulated observations, not native speedup claims. Batching trades fewer lock
 acquisitions for longer individual holds: sparse teardown's median managed
 maximum hold rose from about 59 to 314 us; the largest observed managed IRQ-off
-span over its ten trials was 329 us. Native throughput and latency acceptance
-remain pending. Rerun bench-spaces-kvm.sh --runs 3 to compare against the preserved
-20261017T165114.408723Z baseline before further tuning.
+span over its ten trials was 329 us. Native validation follows below; these TCG
+observations remain historical evidence rather than native predictions.
+
+### Native acceptance: allocation and teardown
+
+Session 20261017T202426.499405Z passed all nine KVM boots (three per case), with
+matching current guest source, unchanged host metadata and stable TSC throughout.
+It compares against 20261017T165114.408723Z. Both references and the full raw
+reports remain preserved; native-comparison.json/.md records per-boot medians,
+pooled distributions and the expected changed-source warning.
+
+Pooled medians below are milliseconds; AMD-Vi and VT-d are emulated IOMMU models
+on the same AMD host, not native Intel CPU qualification.
+
+| Measurement | 1 CPU before/after | 4 CPUs AMD-Vi before/after | 4 CPUs VT-d before/after |
+| --- | ---: | ---: | ---: |
+| Sparse 128-page population | 56.74 / 6.32 | 73.85 / 6.37 | 73.58 / 6.35 |
+| Dense 512-page teardown | 24.96 / 1.91 | 25.17 / 1.94 | 25.14 / 1.94 |
+| Sparse 128-page teardown | 12.86 / 1.57 | 12.95 / 1.60 | 12.96 / 1.60 |
+
+Per-boot four-CPU sparse population medians stay within 6.34–6.38 ms; dense
+teardown within 1.93–1.94 ms and sparse teardown within 1.60–1.61 ms. Empty clock
+brackets remain approximately 35 us; root round-trip medians remain approximately
+124 us, with visible noise/outliers. These measurements still include the real
+cost of enabled lock/HPET instrumentation; no overhead is subtracted.
+
+The latency tradeoff is recorded explicitly: typical sparse-teardown
+managed IRQ-off maxima increase from about 50 us to 78 us; the largest observation
+across its 90 trials is 91.56 us (90.09 us for the four-CPU cases). Broader cycle
+median maxima decrease, but individual stress-cycle observations reach 4.06 ms.
+Those lack caller/host-pause attribution in this report and establish no hard
+latency bound. Correctness checks, exact hardware faults, active-root revocation,
+reference/lease checks and owned-reservation baseline restoration all pass.
+The requested performance sequence is complete; further instrumentation tuning
+or architectural work requires a separate decision.
 
 Focused local acceptance: AMD RDTSCP four-CPU run
 7bdedaf162144d50a7caeca271c632d4; AMD double-CPUID fallback one-CPU run
