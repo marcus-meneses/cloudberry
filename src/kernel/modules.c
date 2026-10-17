@@ -284,6 +284,7 @@ static struct kernel_surface_result unmap_batch(MODULE_ARGS) {
     if(ok)kernel_cpu_flush();
     return module_result(ok,ok);
 }
+static struct kernel_surface_result framebuffer_map(MODULE_ARGS){MODULE_UNUSED();return module_result(1,boot_framebuffer_map(hub_pages,a,b));}
 const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) {
     if (hub_writable) return NULL;
     uint64_t physical = boot_pages_reserve(pages, HUB_BYTES / BOOT_PAGE_SIZE, BOOT_RES_HUB, KERNEL_SURFACES_ADDRESS);
@@ -307,6 +308,7 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     if(!add_surface(map_batch_name,map_batch,1,0,0))return NULL;
     const char batch_name[32]="memory.unmap_batch";
     if(!add_surface(batch_name,unmap_batch,1,0,0))return NULL;
+    if(!add_surface("hardware.framebuffer_map",framebuffer_map,1,0,0))return NULL;
     if(!add_surface("hardware.firmware_map",firmware_map,1,0,0) || !add_surface("hardware.port_read",port_read,1,0,0) ||
        !add_surface("hardware.port_write",port_write,1,0,0) || !add_surface("hardware.log",log_text,1,0,0))return NULL;
     const char cpu_name[32]="cpu.control";
@@ -393,7 +395,7 @@ bool kernel_modules_load(struct boot_pages *pages) {
      * established. Splash needs only Limine's existing framebuffer mapping. */
     if(!load_boot_image(pages,"splash","splash"))return false;
     kernel_surface_call splash=kernel_surface_find_version(hub,"splash.show",1,0);
-    if(!splash || splash((uintptr_t)framebuffer_request.response,0,0,0,0,0).status) {
+    if(!splash || splash((uintptr_t)framebuffer_request.response,(uintptr_t)hub_writable,0,0,0,0).status) {
         debug("Cloudberry v2: splash failed\n");return false;
     }
     uint32_t a,b,c,d;__asm__ volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(0),"c"(0));
@@ -430,7 +432,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
         "hwenum.enumerate","mmio.init","clock.init","apic.init","timer.init","event.init","smp.prepare","threads.init","smp.start","irq.init","pci.init","nvme.init","iommu.init","xhci.init","acpi.init","platform.init","usb.init","usb_hub.init","usb_storage.init","partition.init","ext4_fs.init","sata.init"};
     kernel_surface_call calls[sizeof(names)/sizeof(names[0])];
     for (size_t i=0;i<sizeof(names)/sizeof(names[0]);++i) {
-        calls[i]=kernel_surface_find_version(hub,names[i],1,0);
+        calls[i]=kernel_surface_find_version(hub,names[i],(i==16 || i==26)?2:1,0);
         if (!calls[i]) return startup_failure(names[i],"missing");
     }
     START("mem.configure",calls[0]((uintptr_t)hub,0,0,0,0,0));
@@ -479,13 +481,13 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("pci.init",calls[15]((uintptr_t)hub,heap,0,0,0,0));
     START("acpi.init",calls[19]((uintptr_t)hub,heap,rsdp_physical,0,0,0));
     START("platform.init",calls[20]((uintptr_t)hub,heap,0,0,0,0));
-    START("nvme.init",calls[16]((uintptr_t)hub,0,0,0,0,0));
+    START("nvme.init",calls[16]((uintptr_t)hub,heap,0,0,0,0));
     START("xhci.init",calls[18]((uintptr_t)hub,heap,0,0,0,0));
     START("usb.init",calls[21]((uintptr_t)hub,heap,0,0,0,0));
     START("usb_hub.init",calls[22]((uintptr_t)hub,heap,0,0,0,0));
     START("usb_storage.init",calls[23]((uintptr_t)hub,heap,0,0,0,0));
     START("partition.init",calls[24]((uintptr_t)hub,heap,0,0,0,0));
     START("ext4_fs.init",calls[25]((uintptr_t)hub,heap,0,0,0,0));
-    START("sata.init",calls[26]((uintptr_t)hub,0,0,0,0,0));
+    START("sata.init",calls[26]((uintptr_t)hub,heap,0,0,0,0));
     return true;
 }

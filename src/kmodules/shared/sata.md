@@ -1,17 +1,18 @@
 # AHCI SATA block backend
 
-`sata.kmod` is a Limine-loaded kernel module implementing one explicitly selected
-AHCI controller and one ATA disk port. It uses the existing PCI inventory,
+`sata.kmod` is a Limine-loaded kernel module implementing multiple explicitly selected
+AHCI controllers and ATA disk ports. It uses the existing PCI inventory,
 BAR mapping, exclusive ownership, DMA/IOMMU allocations, clock, preemptible
 threads and deferred IRQ worker. It does not enumerate PCI again or implement a
 filesystem. Intel and AMD use the same AHCI frontend/backend contract.
 
-`init(hub)` binds dependencies without claiming disks. `open(sata_open*,out block,
-capacity)` selects a hardware index and port, returning the common block ABI1.1.
+`init(hub,heap)` binds dependencies without claiming disks. `open(sata_open*,out block,
+capacity,out cookie optional)` selects a hardware index and port, returning the common block ABI1.1.
 Pass `sizeof(struct block_device)` for writes/flush and root identity; capacity zero
 requests the legacy 48-byte read-only prefix. `info(cookie,out sata_info)` reports
 geometry, state, reads/writes/barriers, interrupt/time-out counts and open stage;
-cookie zero inspects the current or failed open for cleanup.
+cookie zero is accepted only with exactly one open instance. The optional fourth
+open argument receives a cleanup cookie even if open fails.
 
 Open performs BIOS/OS handoff when advertised, resets the exclusively owned HBA,
 checks the selected implemented port and active link, allocates three tracked
@@ -19,8 +20,9 @@ pages for the command list/received FIS, command table and private data buffer,
 and enables FIS reception before examining the reset signature. IDENTIFY DEVICE
 requires plain ATA LBA48, FLUSH CACHE EXT and power-of-two 512–4096-byte logical
 sectors. A successful flush qualifies the barrier before publishing writable
-access. This initial backend requires a 64-bit DMA-capable HBA. Other ports are
-not driven; ownership and reset apply to the whole controller.
+access. This initial backend requires a 64-bit DMA-capable HBA. Ports share one controller owner and MSI route, with separate command/FIS/data
+pages and cookies. Opening a sibling never resets the HBA. Commands serialize
+per controller; independent controllers keep separate queues and lifetimes.
 
 `read/write(cookie,lba,sectors,buffer,capacity,0)` use READ/WRITE DMA EXT and one
 non-NCQ command slot, with at most 4 KiB per call. Source data is copied into a
@@ -39,7 +41,9 @@ require a CPU0 kernel thread, IF=1, no critical section and no IRQ-callback cont
 
 `control(cookie,BLOCK_RETAIN/RELEASE)` pins the instance; `close(cookie)` refuses
 retained or active instances. Cookie values never repeat. Timeout or failure
-attempts HBA reset. Close disables MSI and the software route, proves reset
+stops the affected port engine; failure to stop poisons all controller siblings
+and attempts reset. Closing one port stops its engine, temporarily disables
+bus mastering while freeing its DMA, and preserves siblings. Final close disables MSI and the software route, proves reset
 completion, disables bus mastering, releases the route and tracked DMA, then
 releases PCI ownership. If quiescence or cleanup fails, ownership and DMA stay
 reachable for retry; clearing bus mastering alone is not proof of DMA drain.
@@ -58,7 +62,11 @@ checks pins/bounds, suppresses notification delivery to force timeout, resets an
 reopens with a fresh cookie, and independently checks GPT/ext4 after shutdown.
 Only disposable images below `bin/tests` are attached.
 
-Remaining limits: one controller/port open at a time, no ATAPI, NCQ, hotplug,
+`BLOCK_MULTI=1` validates two controllers and two ports on the first, closing and
+reopening one port without disturbing its sibling, stale cookies and a timeout
+while a different controller remains usable.
+
+Remaining limits: no ATAPI, NCQ, hotplug,
 32-bit-only DMA HBA, shared INTx, multiple MSI vectors or physical acceptance.
 Readiness/flush deadlines need hardware qualification. MSI and MSI-X are device
 capabilities, not CPU-vendor alternatives. Reference:

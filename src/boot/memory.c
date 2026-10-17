@@ -264,3 +264,18 @@ bool boot_pages_pin(struct boot_pages *pages,uint64_t physical,size_t count,uint
         }
     return false;
 }
+
+/* The boot framebuffer may occupy a gap in the inherited direct map. Preserve
+ * existing mappings/cache attributes; fill only absent framebuffer pages. */
+bool boot_framebuffer_map(struct boot_pages *pages,uintptr_t address,size_t bytes){
+    if(!pages || !bytes || address<pages->hhdm || bytes>UINTPTR_MAX-address)return false;
+    uint64_t physical=address-pages->hhdm,end=physical+bytes;int covered=0;
+    for(size_t i=0;i<pages->map->count;++i){const struct boot_memory_entry *m=pages->map->entries[i];if(m && m->type==7 && m->length<=UINT64_MAX-m->base && physical>=m->base && end<=m->base+m->length){covered=1;break;}}
+    if(!covered)return false;
+    for(uintptr_t page=address&~UINT64_C(4095);page<address+bytes;page+=4096){
+        uint64_t cr3;__asm__ volatile("mov %%cr3,%0":"=r"(cr3));uint64_t *table=boot_physical_pointer(pages,cr3&ADDRESS_MASK);int mapped=0;
+        for(unsigned shift=39;shift>=12;shift-=9){uint64_t entry=table[(page>>shift)&511];if(!(entry&PRESENT))break;if(!(entry&WRITABLE))return false;if(shift==12 || (entry&LARGE)){uint64_t mask=(UINT64_C(1)<<shift)-1;if((entry&ADDRESS_MASK&~mask)!=((page-pages->hhdm)&~mask))return false;mapped=1;break;}table=boot_physical_pointer(pages,entry&ADDRESS_MASK);}
+        if(!mapped){uint32_t pat_low,pat_high;__asm__ volatile("rdmsr":"=a"(pat_low),"=d"(pat_high):"c"(0x277));(void)pat_high;
+            if((pat_low>>24)!=0 || !map_page(pages,page,page-pages->hhdm,true,false,true))return false;}
+    }return true;
+}

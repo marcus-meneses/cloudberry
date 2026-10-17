@@ -30,6 +30,7 @@ struct boot_pages {
     struct boot_reservation_table reservations;
     struct boot_reservation_chunk *last;
 };
+bool boot_framebuffer_map(struct boot_pages *,uintptr_t,size_t);
 bool boot_pages_init(struct boot_pages *, const struct boot_memory_map *, uint64_t hhdm);
 uint64_t boot_pages_claim(struct boot_pages *,size_t,uint32_t,uintptr_t);
 bool boot_pages_retype(struct boot_pages *,uint64_t,size_t,uint32_t,uint32_t,uintptr_t);

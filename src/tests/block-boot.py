@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
-import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
+import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--multi',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
 if not build.is_relative_to(root/'bin/tests'):raise SystemExit('isolated build required')
 if args.accel=='kvm':subprocess.run([sys.executable,str(root/'src/tests/native-check.py')],check=True)
-test=build/'tests'/f'{"hub" if args.hub_only else "block-"+args.backend}-{args.cpus}cpu-{args.iommu}';test.mkdir(parents=True,exist_ok=True)
+test=build/'tests'/f'{"hub" if args.hub_only else "block-"+args.backend+("-multi" if args.multi else "")}-{args.cpus}cpu-{args.iommu}';test.mkdir(parents=True,exist_ok=True)
+lock=(test/'run.lock').open('a')
+try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+except BlockingIOError:raise SystemExit('this isolated test is already running; refusing to overwrite its media')
 report=test/'report.json';report.unlink(missing_ok=True)
 result={'run_id':uuid.uuid4().hex,'status':'running','backend':args.backend,'hub_only':args.hub_only,'cpus':args.cpus,'iommu':args.iommu,'accelerator':args.accel,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 def save(): (test/'result.json').write_text(json.dumps(result,indent=2)+'\n')
@@ -17,6 +20,17 @@ try:
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     image=test/'boot.img';subprocess.run([sys.executable,str(root/'src/tools/build-boot-image.py'),str(stage),str(image),'--drivers-source',str(fixture)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     cmd=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',args.accel,'-cpu',args.cpu,'-smp',str(args.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,bus=xhci.0','-drive',f'if=none,id=bootmedia,format=raw,file={image}','-device',('nvme,drive=bootmedia,serial=CLOUDBERRYTEST,bootindex=1' if args.backend=='nvme' else 'ide-hd,bus=ide.0,drive=bootmedia,bootindex=1'),'-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-no-reboot','-no-shutdown']
+    if args.multi:
+        # Only disposable blank media; keep the boot filesystem unchanged.
+        for i in range(3):
+            disk=test/f'data{i}.img'
+            with disk.open('wb') as f:f.truncate(32*1024*1024)
+            cmd+=['-drive',f'if=none,id=data{i},format=raw,file={disk}']
+        # Detach bootmedia's original backend; attach it as a boot-only USB disk.
+        backend_device=next(i for i,x in enumerate(cmd) if x.startswith('nvme,drive=bootmedia') or x.startswith('ide-hd,bus=ide.0,drive=bootmedia'))
+        cmd[backend_device]='usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1'
+        if args.backend=='nvme':cmd+=['-device','nvme,id=controller0,serial=MULTI0','-device','nvme-ns,drive=data0,bus=controller0,nsid=1','-device','nvme-ns,drive=data1,bus=controller0,nsid=2','-device','nvme,drive=data2,serial=MULTI1']
+        else:cmd+=['-device','ich9-ahci,id=controller1','-device','ide-hd,bus=controller1.0,drive=data0','-device','ide-hd,bus=controller1.1,drive=data1','-device','ide-hd,bus=ide.0,drive=data2']
     if args.iommu!='none':cmd+=['-device',f'{args.iommu}-iommu,intremap=off']
     log=test/'boot.log'
     with log.open('w') as output:
@@ -25,7 +39,7 @@ try:
             deadline=time.monotonic()+90
             while time.monotonic()<deadline:
                 text=log.read_text()
-                if 'FAIL' in text or 'FAULT' in text or 'module startup failed' in text:raise RuntimeError(text[-4000:])
+                if 'FAIL' in text or 'FAULT' in text or 'inthandle: fatal' in text or 'module startup failed' in text:raise RuntimeError(text[-4000:])
                 if ('PASS dynamic hub test' if args.hub_only else 'PASS block backend test') in text and 'managed BSP event stack active' in text:break
                 if process.poll() is not None:raise RuntimeError(f'QEMU exited {process.returncode}: {text[-2000:]}')
                 time.sleep(.1)

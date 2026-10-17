@@ -786,7 +786,7 @@ $(BUILD)/tests/src-block-kernel.elf: FORCE $(BUILD)/tests/src-block-main.o $(BUI
 test-block-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-block-boot
 _test-block-boot: $(ISO) $(BUILD)/tests/src-block-kernel.elf $(BUILD)/kmodules/probe.kmod
-	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=$(BLOCK_BACKEND) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=$(BLOCK_BACKEND) $(if $(filter 1,$(BLOCK_MULTI)),--multi,) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
 .PHONY: test-hub
 test-hub:

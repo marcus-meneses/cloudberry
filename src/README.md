@@ -54,8 +54,11 @@ controllers and enumerate root/downstream devices. HID class drivers remain futu
 
 Both backends remain Limine-loaded and take explicit device selection. NVMe
 opens a hardware index and optional namespace ID, then `nvme.block` exports its
-common block descriptor. SATA opens a hardware index and port through
-`sata.open`. Feed either descriptor to `partition.find` using the GUID bytes
+common block descriptor using the returned cookie. Multiple controllers and
+namespaces can stay open. SATA opens a hardware index and port through
+`sata.open`; multiple ports share controller ownership without sibling resets.
+Both backends allocate instance state from the kernel heap and serialize commands
+per controller. Zero compatibility selectors fail when ambiguous. Feed either descriptor to `partition.find` using the GUID bytes
 exposed by `config.drivers.partition_guid`, then mount the bounded slice through
 `ext4_fs.mount`. No filesystem logic lives in the transport drivers.
 
@@ -68,6 +71,7 @@ for explicitly selected future modules; disk loading is not implemented yet.
 ```sh
 make -C src test-block-boot BLOCK_BACKEND=nvme QEMU_CPUS=4 QEMU_IOMMU=amd
 make -C src test-block-boot BLOCK_BACKEND=sata QEMU_CPUS=4 QEMU_IOMMU=intel
+# Add BLOCK_MULTI=1 for two controllers and two namespaces/ports on the first.
 ```
 
 These focused tests actually boot from the selected transport, use only disposable
@@ -199,7 +203,7 @@ follow process isolation and safe boundary transfer.
 | Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Shared address space; no process isolation, migration or forced thread cancellation |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
-| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; automatic boot-volume selection, parallel controllers and physical durability remain open |
+| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; automatic boot-volume selection, parallel command queues and physical durability remain open |
 | Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; table withdrawal, disk loading, dependency-driven selection and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
@@ -613,9 +617,9 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are multiple NVMe/SATA
-instances and completion of USB device/hub hotplug cleanup, followed by bootstrap boot-volume selection and driver
-reading and loading driver modules from disk, followed by process isolation; see [roadmap](ROADMAP.md#next-priorities).
+Current next priorities are completion of USB device/hub hotplug cleanup, followed
+by bootstrap boot-volume selection, loading selected future modules from disk
+and process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 
 [xHCI transport](kmodules/shared/xhci.md) is loaded/initialized by the kernel and

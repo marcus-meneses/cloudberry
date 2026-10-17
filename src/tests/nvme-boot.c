@@ -39,7 +39,8 @@ static void issue_read(uintptr_t registers,uintptr_t sq,unsigned slot,uint64_t p
     __asm__ volatile("mfence":::"memory");*(volatile uint32_t *)(registers+0x1000+2*stride)=slot+1;
 }
 static bool denied_dma(const struct kernel_surfaces *hub,size_t index,const struct nvme_info *info,int *closed) {
-    const uint64_t owner=UINT64_C(0x4e564d4500000001);struct iommu_info before,after;
+    struct pci_record device;CHECK(!CALL(kernel_surface_find(hub,"pci.device"),index,&device,0).status);
+    const uint64_t owner=device.identity.owner;CHECK(owner);struct iommu_info before,after;
     kernel_surface_call inspect=kernel_surface_find(hub,"iommu.info"),lookup=kernel_surface_find(hub,"iommu.lookup"),grant=kernel_surface_find(hub,"iommu.map"),revoke=kernel_surface_find(hub,"iommu.unmap"),master=kernel_surface_find(hub,"pci.busmaster");
     CHECK(!CALL(inspect,&before,0,0).status);if(!before.backend)return true;
     CHECK(before.active && before.attached==1 && before.mapped_pages==6 && !before.failed);

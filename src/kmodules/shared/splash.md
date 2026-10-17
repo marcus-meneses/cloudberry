@@ -2,10 +2,17 @@
 
 `splash.kmod` owns temporary pre-flight framebuffer validation and rendering.
 It embeds the packed Cloudberry logo in its own read-only image. The kernel
-only passes the Limine framebuffer response to `splash.show(response)` through
+only passes the Limine framebuffer response to `splash.show(response,hub)` through
 the hub; main does not inspect framebuffer fields or contain drawing loops.
 
-The module requires a valid, mapped RGB framebuffer with 32-bit pixels, aligned
+The module validates the RGB framebuffer and asks the kernel memory surface
+`hardware.framebuffer_map(address,bytes)` to ensure its direct mapping before
+rendering. That surface accepts only ranges covered by the boot framebuffer
+memory-map entry. Existing mappings/cache attributes are preserved; absent pages
+are mapped RW/NX/UC after PAT validation. This covers the NVMe-boot OVMF handoff
+where the framebuffer pointer can have gaps in the inherited mapping.
+
+The module requires a valid RGB framebuffer with 32-bit pixels, aligned
 storage/pitch, three non-overlapping eight-bit color channels, and representable
 row/address arithmetic. It validates the packed logo dimensions and byte extent
 before writing pixels. Unsupported/missing input returns failure. It clears the

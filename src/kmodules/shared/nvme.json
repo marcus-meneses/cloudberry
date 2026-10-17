@@ -3,27 +3,43 @@
   "exports": [
     {
       "name": "nvme.init",
-      "symbol": "nvme_surface_init"
+      "symbol": "nvme_surface_init",
+      "version": [
+        2,
+        0
+      ]
     },
     {
       "name": "nvme.open",
       "symbol": "nvme_surface_open",
       "version": [
         1,
-        1
+        2
       ]
     },
     {
       "name": "nvme.read",
-      "symbol": "nvme_surface_read"
+      "symbol": "nvme_surface_read",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "nvme.info",
-      "symbol": "nvme_surface_info"
+      "symbol": "nvme_surface_info",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "nvme.close",
-      "symbol": "nvme_surface_close"
+      "symbol": "nvme_surface_close",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "nvme.interrupt",
@@ -31,7 +47,11 @@
     },
     {
       "name": "nvme.block",
-      "symbol": "nvme_surface_block"
+      "symbol": "nvme_surface_block",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "nvme.block_read",

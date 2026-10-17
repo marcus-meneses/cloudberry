@@ -189,24 +189,27 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     guards/permissions and rejected oversized and unavailable-physical-memory
     requests without publishing partial exports.
 
+22. Closed: dynamic NVMe controllers/namespaces and AHCI controllers/ports,
+    with controller-specific ownership, IRQ routes and DMA state. Namespace/port
+    cookies and references have independent lifetimes; sibling open/close never
+    resets a live controller. Commands serialize per controller. NVMe failure
+    poisons its namespaces; SATA stops the affected engine, escalating to a
+    controller-wide failure if quiescence cannot be proven. Four-CPU isolated
+    tests cover two controllers and two namespaces/ports, data isolation,
+    close/reopen, pins, stale cookies and an unrelated surviving controller.
+    Journaled ext4 regression passes through both backends. Inactive namespace
+    cleanup is explicit/retryable. Early splash ensures its framebuffer mapping
+    before drawing, covering the NVMe/OVMF direct-map gap found by acceptance.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
-Multi-instance storage and completion of USB hotplug cleanup
-are planned next, before bootstrap storage selection and disk-loaded future modules.
+Multi-instance storage is implemented. Completion of USB hotplug cleanup
+comes next, before bootstrap storage selection and disk-loaded future modules.
 USB enumeration/hotplug already exists; the new priority closes lifecycle and
 storage-disconnection gaps rather than replacing that implementation.
 
-1. Support multiple active NVMe/SATA instances without changing the common block
-   contract. Allocate per-controller ownership, queue, IRQ and DMA state; NVMe
-   namespaces and AHCI ports get distinct device records, cookies and lifetimes.
-   AHCI ports share controller ownership safely: opening/closing one port must
-   not reset or invalidate siblings. Controller-wide failures must have explicit
-   effects on every dependent device. Validate two controllers, multiple NVMe
-   namespaces and two SATA ports, stale identities and closing/failing one device
-   while another remains usable where the hardware failure boundary permits it.
-   Simultaneous instances do not imply parallel command queues or SMP I/O dispatch.
-2. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
+1. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
    AHCI/NVMe controllers and platform devices as boot-lifetime hardware; general
    PCI/controller removal, rediscovery and kernel-module unloading are excluded.
    Handle USB attachment, removal and nested hub subtree removal with fresh
@@ -220,7 +223,7 @@ storage-disconnection gaps rather than replacing that implementation.
    unsafe. Keep driver code and top-level registry tables loaded. Validate repeated
    attach/remove cycles, in-flight I/O, nested hub loss, cleanup and stale-reference
    rejection on disposable media; verify that unrelated devices keep working.
-3. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
+2. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
    now provide the common block read/write/flush contract alongside USB BOT.
    USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
    GUID across available devices without silently accepting duplicates or assuming
@@ -229,7 +232,7 @@ storage-disconnection gaps rather than replacing that implementation.
    or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
    and writes are implemented; optimize barrier batching only after preserving
    commit/checkpoint ordering and repeating crash validation.
-4. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
+3. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
    modules, including all existing kmodules, remain Limine-loaded from the boot
    partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot
@@ -247,7 +250,7 @@ INTx routing also remain deferred until required by a consumer.
 Outstanding acceptance: native Intel CPU (including shared TSC), physical
 Intel/AMD firmware/device DMA takeover and posted-write drain. Both emulated
 IOMMU models on an AMD host do not establish those results. HPET-less SMP,
-hard latency bounds, simultaneous storage controllers/namespaces/parallel queues,
+hard latency bounds, parallel storage command queues,
 interrupt remapping and unsupported IOMMU firmware policies remain open.
 
 Tests stay on isolated builds/disposable media and never run candidate VMs or

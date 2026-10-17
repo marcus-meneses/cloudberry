@@ -3,15 +3,27 @@
   "exports": [
     {
       "name": "sata.init",
-      "symbol": "sata_surface_init"
+      "symbol": "sata_surface_init",
+      "version": [
+        2,
+        0
+      ]
     },
     {
       "name": "sata.open",
-      "symbol": "sata_surface_open"
+      "symbol": "sata_surface_open",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "sata.read",
-      "symbol": "sata_surface_read"
+      "symbol": "sata_surface_read",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "sata.write",
@@ -27,11 +39,19 @@
     },
     {
       "name": "sata.info",
-      "symbol": "sata_surface_info"
+      "symbol": "sata_surface_info",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "sata.close",
-      "symbol": "sata_surface_close"
+      "symbol": "sata_surface_close",
+      "version": [
+        1,
+        2
+      ]
     },
     {
       "name": "sata.interrupt",
