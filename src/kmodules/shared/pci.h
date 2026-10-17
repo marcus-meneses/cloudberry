@@ -22,11 +22,14 @@ struct pci_msix {uint64_t hardware_index,owner;uint32_t entry,masked;struct irq_
  * msix(request) masks the entry/function while programming one owned entry.
  * DMA ownership/pinning/translation is delegated to iommu. Unsupported firmware
  * fails closed. A failed mapping may return an owned cleanup descriptor/ID; retain
- * it and retry dma_free after quiescence. No port BARs/bridges/shared INTx. */
+ * it and retry dma_free after quiescence. No port BARs/bridges/shared INTx. MSI supports one owned vector. */
 struct kernel_surface_result pci_surface_init(MODULE_ARGS);
 struct kernel_surface_result pci_surface_claim(MODULE_ARGS);
 struct kernel_surface_result pci_surface_busmaster(MODULE_ARGS);
 struct kernel_surface_result pci_surface_msix(MODULE_ARGS);
+/* msi(pci_msix request): entry must be zero; masked disables MSI. Programs
+ * one 32/64-bit MSI message with MME=0. Same owned IRQ_MSI route contract. */
+struct kernel_surface_result pci_surface_msi(MODULE_ARGS);
 struct kernel_surface_result pci_surface_dma_alloc(MODULE_ARGS);
 struct kernel_surface_result pci_surface_dma_free(MODULE_ARGS);
 struct kernel_surface_result pci_surface_release(MODULE_ARGS);

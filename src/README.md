@@ -5,7 +5,7 @@ Its current foundation includes independently loaded kernel modules, a versioned
 C ABI hub, owned memory/guarded stacks, hardware/MMIO discovery, clock/RTC,
 interrupt ownership, APIC timers, deadline callbacks, preemptible kernel threads, initial SMP execution, measured critical sections,
 validated SMP clock selection, deferred device IRQ delivery, PCI/DMA ownership,
-a read-only NVMe path, xHCI transport, USB core and external hub class support,
+NVMe/AHCI block read/write/flush, xHCI transport, USB core and external hub class support,
 with initial Intel VT-d/AMD-Vi DMA translation. Target hardware is modern (2016+) Intel/AMD x86-64.
 
 Kmodules are coupled kernel methods in one shared address space. They are not
@@ -14,9 +14,8 @@ stay synchronous; a separate threads API explicitly creates saved contexts.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
-Application-facing handles/handlers, userland, filesystems, HID/USB-storage class drivers and SATA
-drivers do not exist in this rewrite yet. The xHCI transport supplies root/downstream
-slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe is an initial kernel-only read path. The superseded implementation is preserved locally in `../.src_old/`, excluded
+Application-facing handles/handlers, userland and HID class drivers do not exist in this rewrite yet. The xHCI transport supplies root/downstream
+slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe and AHCI are kernel-only block backends. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
 ## Build and run
@@ -49,7 +48,57 @@ once during build and retained by clean. Boot never formats or migrates them.
 The NVMe module is available through explicit kernel surfaces; normal boot does
 not claim or access the persistent disks. xHCI initialization publishes an empty
 owned registry; normal boot starts USB-core workers and the hub-class manager to claim
-controllers and enumerate root/downstream devices. HID/USB-storage class drivers and SATA remain future work.
+controllers and enumerate root/downstream devices. HID class drivers remain future work; USB storage and ext4 are boot-loaded modules, with explicit writable mounts.
+
+## NVMe and SATA block access
+
+Both backends remain Limine-loaded and take explicit device selection. NVMe
+opens a hardware index and optional namespace ID, then `nvme.block` exports its
+common block descriptor. SATA opens a hardware index and port through
+`sata.open`. Feed either descriptor to `partition.find` using the GUID bytes
+exposed by `config.drivers.partition_guid`, then mount the bounded slice through
+`ext4_fs.mount`. No filesystem logic lives in the transport drivers.
+
+Normal startup initializes these modules without opening the persistent disks.
+Automatic boot-device correlation/duplicate-GUID handling is still pending;
+identifying a configured partition does not by itself prove boot provenance.
+Current modules stay in the Limine boot partition. The ext4 directory is reserved
+for explicitly selected future modules; disk loading is not implemented yet.
+
+```sh
+make -C src test-block-boot BLOCK_BACKEND=nvme QEMU_CPUS=4 QEMU_IOMMU=amd
+make -C src test-block-boot BLOCK_BACKEND=sata QEMU_CPUS=4 QEMU_IOMMU=intel
+```
+
+These focused tests actually boot from the selected transport, use only disposable
+media, exercise GPT/ext4 journaled writes and remount, verify IRQ completion,
+bounds/lifetime pins and timeout/reset/stale cookies, then run independent host
+filesystem checks. See [NVMe](kmodules/shared/nvme.md) and [SATA](kmodules/shared/sata.md).
+
+## Boot image layout
+
+`bin/cloudberry.iso` is a hybrid ISO/GPT disk image: ISO9660 supplies the kernel,
+configuration and foundational kmodules, an embedded FAT EFI System Partition
+starts Limine, and GPT partition 4 is a separate 512 MiB ext4 filesystem named
+`Cloudberry drivers`. Xorriso also describes gap partitions around these regions.
+The ext4 root contains the configured `/boot/system/drivers` directory, currently
+empty. Limine 10 reads FAT/ISO9660, not ext4. The boot-loaded `usb-storage`,
+`partition` and `ext4-fs` modules provide guest access and explicitly requested journaled writes; disk-loaded
+drivers remain future work.
+
+`tools/build-boot-image.py` formats only generated regular files during image
+building and assigns the partition GUID from `boot/cloudberry.cnf`. The packaged
+config and GPT therefore agree across rebuilds. `BOOT_DRIVERS_MIB` can increase
+capacity (minimum 512). Images built from the same config share this identity;
+an installer must assign a fresh GUID for an independent installation. The ext4
+filesystem UUID is separate from its GPT partition GUID.
+
+Generated filesystem staging and `layout.json` live in `bin/cloudberry.iso.parts/`
+and are removed by `clean`. The entire boot image remains read-only in QEMU;
+persistent NVMe/SATA images are unaffected. No mount, loop device, host-disk
+formatting or boot-time initialization is involved. `mke2fs` (e2fsprogs) and
+`sgdisk` (gdisk) are build dependencies. `make -C src test-boot-image` verifies an
+isolated image; ordinary boot tests use the same image builder.
 
 ## Boot configuration
 
@@ -58,9 +107,9 @@ text. Limine loads it into memory with the `cloudberry-config` tag; the core
 passes its address/size to the separate [config kmodule](kmodules/shared/config.md).
 The module validates a typed schema, copies values into owned storage and
 atomically publishes `config.<key>` descriptor references through the hub.
-`boot.show_inventory` controls hardware listing; driver location and timeout
-entries are metadata for future consumers. The partition GUID is optional until
-image preparation assigns one. Missing/duplicate files and invalid configuration
+`boot.show_inventory` controls hardware listing. Driver selection remains
+caller-owned; USB storage applies the configured command timeout. The source
+configuration supplies the GPT identity of the appended ext4 driver partition; image preparation uses that exact GUID. Missing/duplicate files and invalid configuration
 fail startup with a diagnostic. No disk access, formatting or migration is added.
 
 ## Execution and ownership
@@ -126,8 +175,8 @@ managed IRQ-off intervals and runnable waiting; raw local TSC ticks include host
 vCPU pauses. [Device IRQ routing](kmodules/shared/irq.md) adds exclusive IOAPIC GSI routes,
 MSI/MSI-X messages, preallocated/coalesced notifications and foreground drain/rearm.
 It does not program PCI capabilities, resolve ACPI PCI INTx routing or initialize
-USB/storage devices. Controller-specific work belongs to NVMe/xHCI drivers;
-USB core now owns enumeration; HID/storage class drivers remain deferred. IRQ affinity is CPU0.
+USB/storage devices. Controller-specific work belongs to NVMe/AHCI/xHCI drivers;
+USB core owns enumeration; usb-storage provides BOT/SCSI read/write/flush. HID remains deferred. IRQ affinity is CPU0.
 Production boot creates no test routes or periodic device polling. ACPI reserves
 its SCI route masked. The [ACPI/platform modules](kmodules/shared/acpi.md) load
 DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmware
@@ -144,8 +193,8 @@ follow process isolation and safe boundary transfer.
 | --- | --- | --- |
 | Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Shared address space; no process isolation, migration or forced thread cancellation |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
-| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or mass-storage class driver |
-| Storage | Explicit read-only NVMe namespace access | No SATA driver, partition layer, mounted filesystem or boot-volume matching |
+| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
+| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; automatic boot-volume selection, parallel controllers and physical durability remain open |
 | Modules | Separate Limine-loaded images, validated versioned exports and mediated hub | Disk loading, dependency-driven driver selection and executable hot replacement remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
@@ -156,18 +205,32 @@ validated against their prefix before configuration. Automatic failed-provider
 recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
-The production hub uses 64.50% of its 16 KiB extent, or 66.55% with the selected
-IOMMU backend; mediation uses 52.08%/53.91% of 12 KiB. Capacity is sufficient for
+The production hub uses 77.00% of its 16 KiB extent, or 79.05% with the selected
+IOMMU backend; mediation uses 62.50%/64.32% of 12 KiB. Capacity is sufficient for
 the immediate storage work. These figures measure registry/stub occupancy, not
 whole-kernel RAM use or a demonstrated throughput/latency bound.
 
-Current QEMU boot media is a read-only USB mass-storage ISO. USB storage is
-recognized by its descriptors but has no block-read class implementation yet.
+Current QEMU boot media is a read-only USB mass-storage ISO. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
+driver partition by its configured GUID. Production init claims no storage interface
+or mounted filesystem automatically; explicit callers own selection and lifecycle.
 The kernel does not currently correlate Limine boot-volume identity with device
 transport. Future matching must report absent/ambiguous identity rather than
 infer the boot device from enumeration order. Native/physical USB and real
 high-speed TT/SuperSpeed hub qualification remain pending; earlier AMD KVM
 clock/SMP acceptance does not qualify the new USB stack.
+
+Ext4 now supplies creation, growth, append, truncate, deletion, directories and
+no-replace rename with journaling. Default mounts and the ordinary QEMU boot medium
+remain read-only; explicit writable mounts replay an internal journal and require
+block write/flush support. The private pinned lwext4 engine runs behind the same
+frontend for writable and ordinary read-only mounts. Explicit checksum-seed layouts
+currently retain the qualified read-only parser and cannot be mounted writable.
+Conservative flush-after-each-write ordering is implemented before batching.
+Dirty transaction/I/O failures poison and retain an instance until reboot; a fresh
+mount replays the journal. See [USB storage](kmodules/shared/usb-storage.md),
+[GPT partitions](kmodules/shared/partition.md) and [ext4](kmodules/shared/ext4-fs.md).
+All remain boot-loaded; production initialization selects/mounts no filesystem and
+performs no formatting or migration. Test fixtures never enter the candidate image.
 
 ## Focused validation
 
@@ -176,6 +239,8 @@ make -C src test-portability
 make -C src test-threads-smp
 make -C src BUILD=../bin/tests/isolated test-clock test-tsc-validation test-irq test-timer test-apic test-pages
 make -C src test-inthandle-faults
+make -C src test-ext4-write test-ext4-runtime
+make -C src test-storage-write-boot QEMU_CPUS=4 QEMU_IOMMU=amd
 ```
 
 Boot/fault targets build under bin/tests/isolated with disposable disks. They
@@ -197,7 +262,7 @@ completed milestones, current limits and recommended next priorities.
 
 ## Directory tree
 
-```
+```text
 src/
 ├── assets/
 │   └── cloudberry.png
@@ -231,27 +296,41 @@ src/
 │   │   └── iommu-intel.json
 │   ├── shared/
 │   │   ├── acpi/
+│   │   │   ├── vendor/
+│   │   │   │   ├── uacpi/
+│   │   │   │   │   └── …
+│   │   │   │   └── README.md
 │   │   │   ├── acpi.c
 │   │   │   ├── association.c
 │   │   │   ├── association.h
 │   │   │   ├── module.ld
 │   │   │   ├── runtime.c
+│   │   │   └── runtime.h
+│   │   ├── ext4-fs/
+│   │   │   ├── compat/
+│   │   │   │   ├── inttypes.h
+│   │   │   │   ├── stdlib.h
+│   │   │   │   └── string.h
+│   │   │   ├── vendor/
+│   │   │   │   ├── lwext4/
+│   │   │   │   │   └── …
+│   │   │   │   ├── README.md
+│   │   │   │   └── cloudberry.patch
+│   │   │   ├── engine.c
+│   │   │   ├── engine.h
 │   │   │   ├── runtime.h
-│   │   │   └── vendor/
-│   │   │       ├── README.md
-│   │   │       └── uacpi/ (pinned upstream include/, source/, README.md, LICENSE)
+│   │   │   └── strings.c
 │   │   ├── acpi.h
 │   │   ├── acpi.json
 │   │   ├── acpi.md
 │   │   ├── apic-platform.h
 │   │   ├── apic-x86.c
-│   │   ├── acpi-boot.c
-│   ├── acpi-fixture.py
-│   ├── acpi.c
-│   ├── apic.c
+│   │   ├── apic.c
 │   │   ├── apic.h
 │   │   ├── apic.json
 │   │   ├── apic.md
+│   │   ├── block-util.h
+│   │   ├── block.h
 │   │   ├── clock-platform.h
 │   │   ├── clock-x86.c
 │   │   ├── clock.c
@@ -272,6 +351,10 @@ src/
 │   │   ├── event.h
 │   │   ├── event.json
 │   │   ├── event.md
+│   │   ├── ext4-fs.c
+│   │   ├── ext4-fs.h
+│   │   ├── ext4-fs.json
+│   │   ├── ext4-fs.md
 │   │   ├── hwenum-module.c
 │   │   ├── hwenum.c
 │   │   ├── hwenum.h
@@ -308,6 +391,10 @@ src/
 │   │   ├── nvme.h
 │   │   ├── nvme.json
 │   │   ├── nvme.md
+│   │   ├── partition.c
+│   │   ├── partition.h
+│   │   ├── partition.json
+│   │   ├── partition.md
 │   │   ├── pci-platform.h
 │   │   ├── pci-x86.c
 │   │   ├── pci.c
@@ -319,6 +406,10 @@ src/
 │   │   ├── platform.json
 │   │   ├── portability.md
 │   │   ├── profiling.md
+│   │   ├── sata.c
+│   │   ├── sata.h
+│   │   ├── sata.json
+│   │   ├── sata.md
 │   │   ├── scheduler.c
 │   │   ├── scheduler.h
 │   │   ├── scheduler.json
@@ -349,11 +440,15 @@ src/
 │   │   ├── tsc-validation.h
 │   │   ├── usb-descriptors.c
 │   │   ├── usb-descriptors.h
+│   │   ├── usb-host.h
 │   │   ├── usb-hub.c
 │   │   ├── usb-hub.h
 │   │   ├── usb-hub.json
 │   │   ├── usb-hub.md
-│   │   ├── usb-host.h
+│   │   ├── usb-storage.c
+│   │   ├── usb-storage.h
+│   │   ├── usb-storage.json
+│   │   ├── usb-storage.md
 │   │   ├── usb.c
 │   │   ├── usb.h
 │   │   ├── usb.json
@@ -372,14 +467,23 @@ src/
 │   └── startup.md
 ├── tests/
 │   ├── README.md
+│   ├── acpi-boot.c
+│   ├── acpi-fixture.py
+│   ├── acpi.c
 │   ├── apic.c
 │   ├── backend-contracts.py
+│   ├── block-boot.c
+│   ├── block-boot.py
+│   ├── boot-image.py
 │   ├── clock-boot.c
 │   ├── clock.c
-│   ├── cpu-tsc.c
-│   ├── cpu-topology.c
 │   ├── config.c
+│   ├── cpu-topology.c
+│   ├── cpu-tsc.c
 │   ├── events-boot.c
+│   ├── ext4-runtime.c
+│   ├── ext4-write.c
+│   ├── ext4-write.py
 │   ├── hwenum.c
 │   ├── inthandle-faults.py
 │   ├── iommu-amd-backend.c
@@ -397,7 +501,9 @@ src/
 │   ├── native-check.py
 │   ├── nvme-boot.c
 │   ├── pci.c
+│   ├── probe-block.c
 │   ├── probe-hubs.c
+│   ├── probe-storage.c
 │   ├── probe-usb.c
 │   ├── probe-xhci.c
 │   ├── probe.c
@@ -406,20 +512,24 @@ src/
 │   ├── reservations.c
 │   ├── scheduler-boot.c
 │   ├── scheduler.c
+│   ├── smp-clock.c
 │   ├── splash.c
 │   ├── stack-call.S
-│   ├── smp-clock.c
+│   ├── storage-fs.c
+│   ├── storage-fs.py
 │   ├── threads-boot.c
 │   ├── timer.c
-│   ├── tsc_profile.py
 │   ├── tsc-validation.c
-│   ├── usb-hub.c
+│   ├── tsc_profile.py
 │   ├── usb-boot.c
+│   ├── usb-hub.c
+│   ├── usb-storage.c
 │   ├── usb.c
 │   ├── xhci-boot.c
 │   ├── xhci.c
 │   └── xstate-host.c
 ├── tools/
+│   ├── build-boot-image.py
 │   ├── check-acpi-image.py
 │   ├── check-module-pic.py
 │   ├── module-exports.py
@@ -491,7 +601,7 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are boot-medium storage access, partition/filesystem
+Current next priorities are boot-volume selection and driver
 reading and loading driver modules from disk, followed by process isolation; see [roadmap](ROADMAP.md#next-priorities).
 
 
@@ -507,8 +617,8 @@ both emulated IOMMUs. Native/physical xHCI acceptance remains pending.
 [USB core](kmodules/shared/usb.md) publishes `usb.devices` and seventeen surfaces.
 Normal boot starts root enumeration in preemptible BSP workers; workers sleep
 between xHCI change notifications. Interface-scoped ownership and core-owned I/O
-buffers keep future class drivers independent of xHCI DMA/context formats. HID
-and mass-storage class drivers are not included in this milestone.
+buffers keep class drivers independent of xHCI DMA/context formats.
+The separate usb-storage module implements BOT/SCSI; HID remains deferred.
 
 [USB hub class](kmodules/shared/usb-hub.md) supplies six surfaces and the owned
 `usb.hubs` registry. Normal boot starts its manager alongside USB core. External
@@ -516,4 +626,4 @@ hub workers power/reset ports, enumerate nested devices and block on interrupt
 change bitmaps. Subtree disconnect revokes references before postorder slot
 cleanup. Isolated one/four-CPU tests cover child hotplug, pending grandchild I/O,
 upstream removal and reattachment, including both emulated IOMMUs. Native and
-physical hub/USB3 qualification remain pending; storage remains the next priority.
+physical hub/USB3 qualification remain pending; disk-loaded drivers remain the next priority.

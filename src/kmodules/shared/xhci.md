@@ -4,8 +4,8 @@
 other boot images and calls `xhci.init(hub,heap)` after PCI/IOMMU initialization.
 Initialization caches versioned hub dependencies and publishes `xhci.controllers`;
 it does not open a controller or access the developer's persistent disks.
-[USB core](usb.md) consumes these surfaces. [Hub class policy](usb-hub.md) is a separate module; HID/storage class drivers
-and application-facing handlers remain deferred.
+[USB core](usb.md) consumes these surfaces. [Hub class policy](usb-hub.md) is a separate module; [USB storage](usb-storage.md) supplies BOT/SCSI policy.
+HID and application-facing handlers remain deferred.
 
 The module uses existing PCI ownership/BAR/MSI-X surfaces, PCI-managed DMA/IOMMU
 mapping, mem allocation, irq routing/deferred notifications, clock deadlines and

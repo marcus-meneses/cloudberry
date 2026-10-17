@@ -49,12 +49,12 @@ Hub ABI2 stores only 48-byte method records (name, mediated entry, method versio
 and 64-byte table references, sharing the contiguous hub allocation dynamically. Argument definitions
 remain in headers. Registering exports moves the table-reference area within the
 hub, so clients must reacquire record pointers after registration; callable entry
-addresses and table backing addresses remain stable. Current production without an IOMMU backend has 200
-methods and fourteen table references, occupying 10,568 bytes (64.50%) of the four-page
-16 KiB hub. With fourteen table references, up to 321 methods fit. Mediation backing
+addresses and table backing addresses remain stable. Current production without an IOMMU backend has 240
+methods and sixteen table references, occupying 12,616 bytes (77.00%) of the four-page
+16 KiB hub. With sixteen table references, up to 318 methods fit. Mediation backing
 is sized from method capacity and occupies three pages (12 KiB); current stubs
-use 6,400 bytes (52.08%). An optional selected IOMMU backend adds seven methods:
-207 methods, 10,904 hub bytes (66.55%) and 6,624 stub bytes (53.91%). page_bytes describes the hub extent. Dynamic growth is not
+use 7,680 bytes (62.50%). An optional selected IOMMU backend adds seven methods:
+247 methods, 12,952 hub bytes (79.05%) and 7,904 stub bytes (64.32%). page_bytes describes the hub extent. Dynamic growth is not
 implemented. Capacity checks fail cleanly rather than overrunning this extent.
 
 Kmodules provide format2 named/versioned export manifests; the generic loader
@@ -166,11 +166,25 @@ Port arrays are freed on rebind and exited worker stacks are reaped. Interrupt
 bitmaps are bounded to 32 bytes by the USB descriptor's 255-port field. No USB
 class allocation occurs in the IRQ handler.
 
-Boot configuration adds four `config.<key>` descriptor references by default;
-the optional partition GUID adds a fifth when supplied (64 additional hub bytes).
+Boot configuration now supplies five `config.<key>` descriptor references,
+including the real appended drivers-partition GUID. The parser still permits
+omission of that optional schema item, but image building requires it.
 Each descriptor is 24 bytes and points into config-owned heap storage. The five
-schema slots occupy 280 bytes, plus copied strings and allocator metadata.
+schema slots occupy 280 bytes, plus copied strings (21 bytes for the configured
+`/boot/system/drivers` path) and allocator metadata.
 Limine reports the source file's address/size; parsed pointers do not depend on
 that source buffer. Config initializes after the boot heap, before hardware/APs.
 `hub.publish_tables(refs,count)` validates a whole batch before publication under
 the CPU lock. See [config](../kmodules/shared/config.md) for types and lifetime.
+
+USB storage publishes `usb_storage.devices`, a live 16-byte list header. Each
+explicit open owns a record and 4 KiB staging buffer; each GPT slice owns 8 KiB
+of scratch/cache plus its descriptors; each ext4 mount owns 12 KiB of buffers
+plus geometry/state. These allocations are dynamic and reclaimed on successful
+close/unmount. Parent descriptor retention prevents premature teardown.
+
+The private ext4 allocation/journal engine is linked into the boot-loaded ext4-fs
+image; it adds no hub tables. Ordinary mounts dynamically allocate a block cache
+and per-device/journal state, with dynamically owned mount/device registry nodes.
+File-write transactions are bounded at 64 KiB. Failed dirty transactions retain
+owned state and parent descriptors until reboot; normal unmount reclaims them.

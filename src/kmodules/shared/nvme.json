@@ -7,7 +7,11 @@
     },
     {
       "name": "nvme.open",
-      "symbol": "nvme_surface_open"
+      "symbol": "nvme_surface_open",
+      "version": [
+        1,
+        1
+      ]
     },
     {
       "name": "nvme.read",
@@ -24,6 +28,26 @@
     {
       "name": "nvme.interrupt",
       "symbol": "nvme_surface_interrupt"
+    },
+    {
+      "name": "nvme.block",
+      "symbol": "nvme_surface_block"
+    },
+    {
+      "name": "nvme.block_read",
+      "symbol": "nvme_surface_block_read"
+    },
+    {
+      "name": "nvme.write",
+      "symbol": "nvme_surface_write"
+    },
+    {
+      "name": "nvme.flush",
+      "symbol": "nvme_surface_flush"
+    },
+    {
+      "name": "nvme.control",
+      "symbol": "nvme_surface_control"
     }
   ]
 }

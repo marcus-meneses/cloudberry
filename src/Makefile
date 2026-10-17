@@ -9,7 +9,10 @@ LIMINE_DIR ?= $(TOOLCHAIN_DIR)/limine
 CC := $(CROSS_PREFIX)gcc
 KERNEL := $(BUILD)/kernel.elf
 ISO := $(BUILD)/cloudberry.iso
+BOOT_DRIVERS_MIB ?= 512
 # Distinct object/staging names keep archived implementation artifacts out.
+STORAGE_WRITE_TEST ?= 0
+STORAGE_TEST ?= 0
 USB_HUB_TEST ?= 0
 USB_HOTPLUG ?= 0
 XHCI_HOTPLUG ?= 0
@@ -27,7 +30,11 @@ EVENT_MODULE := $(BUILD)/kmodules/event.kmod
 THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
 IOMMU_MODULE := $(BUILD)/kmodules/iommu.kmod
 PCI_MODULE := $(BUILD)/kmodules/pci.kmod
+SATA_MODULE := $(BUILD)/kmodules/sata.kmod
 NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
+USB_STORAGE_MODULE := $(BUILD)/kmodules/usb-storage.kmod
+PARTITION_MODULE := $(BUILD)/kmodules/partition.kmod
+EXT4_FS_MODULE := $(BUILD)/kmodules/ext4-fs.kmod
 CONFIG_MODULE := $(BUILD)/kmodules/config.kmod
 USB_HUB_MODULE := $(BUILD)/kmodules/usb-hub.kmod
 USB_MODULE := $(BUILD)/kmodules/usb.kmod
@@ -85,6 +92,8 @@ check-tools:
 	@test -x "$(CC)" || { echo 'Missing cross compiler in .toolchain'; exit 1; }
 	@test -f "$(LIMINE_DIR)/BOOTX64.EFI" -a -f "$(LIMINE_DIR)/limine-uefi-cd.bin"
 	@command -v xorriso >/dev/null
+	@command -v mke2fs >/dev/null
+	@command -v sgdisk >/dev/null
 
 $(BUILD)/src-main.o: kernel/main.c kernel/modules.h kernel/surfaces.h boot/memory.h | check-tools
 	@mkdir -p $(BUILD)
@@ -101,7 +110,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf
+$(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -114,15 +123,14 @@ $(ISO): $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER
 	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
 	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
 	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
+	cp $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
 	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
 	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
-	xorriso -as mkisofs -R -r -J --efi-boot boot/limine/limine-uefi-cd.bin \
-	    -efi-boot-part --efi-boot-image --protective-msdos-label $(STAGE) -o $@
+	python3 tools/build-boot-image.py "$(STAGE)" "$@" --drivers-mib=$(BOOT_DRIVERS_MIB)
 
 # Sparse, blank 1 GiB media, created once; no filesystem or boot-time formatting.
 $(NVME_DISK) $(SATA_DISK):
@@ -139,7 +147,7 @@ debug: build
 # Persistent virtual disks are retained by clean.
 clean:
 	rm -f $(BUILD)/src-*.o $(BUILD)/src-*.d $(BUILD)/src-logo.rgb $(KERNEL) $(ISO)
-	rm -rf $(BUILD)/kmodules $(STAGE)
+	rm -rf $(BUILD)/kmodules $(STAGE) $(ISO).parts
 
 # Native debug object for the standalone allocator; the loaded module uses PIC below.
 $(BUILD)/kmodules/mem.o: kmodules/shared/mem.c kmodules/shared/mem.h | check-tools
@@ -168,7 +176,7 @@ $(BUILD)/tests/src-mem-boot.o: tests/mem-boot.c kernel/modules.h kernel/surfaces
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -DBOOT_MEM_TEST -c $< -o $@
 
-$(BUILD)/tests/src-kernel.elf: FORCE $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-mem-boot.o $(BUILD)/tests/src-acpi-boot.o $(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST).o $(BUILD)/tests/src-scheduler-boot.o $(BUILD)/tests/src-mmio-boot.o $(BUILD)/tests/src-clock-boot.o $(BUILD)/tests/src-events-boot.o $(BUILD)/tests/src-mem-pages-boot.o $(BUILD)/tests/src-stack-call.o $(BUILD)/tests/src-threads-boot.o $(BUILD)/tests/src-irq-boot.o $(BUILD)/tests/src-nvme-boot.o $(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o $(COMMON_OBJECTS) boot/linker.ld
+$(BUILD)/tests/src-kernel.elf: FORCE $(BUILD)/tests/src-main-test.o $(BUILD)/tests/src-mem-boot.o $(BUILD)/tests/src-acpi-boot.o $(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST)-storage$(STORAGE_TEST)-write$(STORAGE_WRITE_TEST).o $(BUILD)/tests/src-scheduler-boot.o $(BUILD)/tests/src-mmio-boot.o $(BUILD)/tests/src-clock-boot.o $(BUILD)/tests/src-events-boot.o $(BUILD)/tests/src-mem-pages-boot.o $(BUILD)/tests/src-stack-call.o $(BUILD)/tests/src-threads-boot.o $(BUILD)/tests/src-irq-boot.o $(BUILD)/tests/src-nvme-boot.o $(BUILD)/tests/src-xhci-boot$(XHCI_HOTPLUG).o $(COMMON_OBJECTS) boot/linker.ld
 	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
 
 .PHONY: test-mem-boot
@@ -234,7 +242,7 @@ $(BUILD)/kmodules/probe.exports.S: tests/probe.json tools/module-exports.py
 	@mkdir -p $(@D)
 	python3 tools/module-exports.py $< $@
 
-$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/probe.elf: $(BUILD)/kmodules/probe-pic.o $(BUILD)/kmodules/probe-xhci-pic.o $(BUILD)/kmodules/probe-usb-pic.o $(BUILD)/kmodules/probe-hubs-pic.o $(BUILD)/kmodules/probe-storage-pic.o $(BUILD)/kmodules/probe-block-pic.o $(BUILD)/kmodules/probe.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
 .PHONY: test-reservations
@@ -626,9 +634,9 @@ test-usb:
 $(BUILD)/kmodules/probe-usb-pic.o: tests/probe-usb.c tests/probe.h kmodules/shared/usb.h
 	@mkdir -p $(@D)
 	$(CC) $(MODULE_CFLAGS) -c $< -o $@
-$(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST).o: tests/usb-boot.c tests/probe.h kmodules/shared/usb.h
+$(BUILD)/tests/src-usb-boot$(USB_HOTPLUG)-hub$(USB_HUB_TEST)-storage$(STORAGE_TEST)-write$(STORAGE_WRITE_TEST).o: tests/usb-boot.c tests/probe.h kmodules/shared/usb.h
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $(if $(filter 1,$(USB_HOTPLUG)),-DUSB_HOTPLUG_TEST,) $(if $(filter 1,$(USB_HUB_TEST)),-DUSB_HUB_TEST,) -c $< -o $@
+	$(CC) $(CFLAGS) $(if $(filter 1,$(USB_HOTPLUG)),-DUSB_HOTPLUG_TEST,) $(if $(filter 1,$(USB_HUB_TEST)),-DUSB_HUB_TEST,) $(if $(filter 1,$(STORAGE_TEST)),-DSTORAGE_TEST,) $(if $(filter 1,$(STORAGE_WRITE_TEST)),-DSTORAGE_WRITE_TEST,) -c $< -o $@
 .PHONY: test-usb-boot _test-usb-boot
 test-usb-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" USB_HOTPLUG=1 _test-usb-boot
@@ -671,3 +679,111 @@ _test-config-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=missing
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=duplicate
 	python3 tests/mem-boot.py "$(abspath $(BUILD))" --config-error=invalid
+
+.PHONY: test-boot-image _test-boot-image
+test-boot-image:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" _test-boot-image
+_test-boot-image: $(ISO)
+	python3 tests/boot-image.py "$(abspath $(ISO))"
+
+$(BUILD)/kmodules/usb-storage.elf: $(BUILD)/kmodules/usb-storage-pic.o $(BUILD)/kmodules/usb-storage.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/partition.elf: $(BUILD)/kmodules/partition-pic.o $(BUILD)/kmodules/partition.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/ext4-fs.elf: $(BUILD)/kmodules/ext4-fs-pic.o $(BUILD)/kmodules/ext4-fs.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-usb-storage
+test-usb-storage:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/usb-storage.c -o $(TEST_BUILD)/tests/src-usb-storage
+	$(TEST_BUILD)/tests/src-usb-storage
+
+$(TEST_BUILD)/tests/src-storage-fs: tests/storage-fs.c kmodules/shared/partition.h kmodules/shared/ext4-fs.h kmodules/shared/partition.c kmodules/shared/ext4-fs.c kmodules/shared/block.h kmodules/shared/block-util.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Wno-error -fsanitize=undefined $(EXT4_ENGINE_FLAGS) $(filter %.c,$^) -Wl,--gc-sections -o $@
+
+.PHONY: test-storage-fs
+test-storage-fs: $(TEST_BUILD)/tests/src-storage-fs
+	python3 tests/storage-fs.py
+
+$(BUILD)/kmodules/probe-storage-pic.o: tests/probe-storage.c tests/probe.h kmodules/shared/usb-storage.h kmodules/shared/ext4-fs.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+.PHONY: test-storage-boot _test-storage-boot
+test-storage-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" STORAGE_TEST=1 _test-storage-boot
+_test-storage-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage $(if $(filter 1,$(USB_HOTPLUG)),--storage-hotplug,)
+
+# Pinned allocation/journal engine, privately linked into ext4-fs.kmod.
+EXT4_VENDOR := kmodules/shared/ext4-fs/vendor/lwext4
+EXT4_LIBRARY_SOURCES := $(filter-out $(EXT4_VENDOR)/src/ext4_mkfs.c $(EXT4_VENDOR)/src/ext4_mbr.c $(EXT4_VENDOR)/src/ext4_xattr.c $(EXT4_VENDOR)/src/ext4_debug.c,$(wildcard $(EXT4_VENDOR)/src/*.c))
+EXT4_ENGINE_FLAGS := -ffunction-sections -fdata-sections -DCONFIG_USE_DEFAULT_CFG=1 -DCONFIG_USE_USER_MALLOC=1 -DCONFIG_HAVE_OWN_ERRNO=1 -DCONFIG_DEBUG_PRINTF=0 -DCONFIG_DEBUG_ASSERT=0 -DCONFIG_XATTR_ENABLE=0 -include kmodules/shared/ext4-fs/runtime.h -I$(EXT4_VENDOR)/include
+EXT4_ENGINE_OBJECTS := $(patsubst $(EXT4_VENDOR)/src/%.c,$(BUILD)/kmodules/ext4-fs/%.o,$(EXT4_LIBRARY_SOURCES)) $(BUILD)/kmodules/ext4-fs/engine.o $(BUILD)/kmodules/ext4-fs/strings.o
+$(BUILD)/kmodules/ext4-fs/%.o: $(EXT4_VENDOR)/src/%.c kmodules/shared/ext4-fs/runtime.h Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) $(EXT4_ENGINE_FLAGS) -Ikmodules/shared/ext4-fs/compat -Wno-error -c $< -o $@
+$(BUILD)/kmodules/ext4-fs/engine.o: kmodules/shared/ext4-fs/engine.c kmodules/shared/ext4-fs/engine.h kmodules/shared/ext4-fs/runtime.h Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) $(EXT4_ENGINE_FLAGS) -Ikmodules/shared/ext4-fs/compat -c $< -o $@
+$(BUILD)/kmodules/ext4-fs/strings.o: kmodules/shared/ext4-fs/strings.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -ffunction-sections -fdata-sections -Ikmodules/shared/ext4-fs/compat -c $< -o $@
+$(BUILD)/kmodules/ext4-fs.elf: $(EXT4_ENGINE_OBJECTS)
+
+$(TEST_BUILD)/tests/src-storage-fs: $(EXT4_LIBRARY_SOURCES) kmodules/shared/ext4-fs/engine.c kmodules/shared/ext4-fs/engine.h
+
+$(TEST_BUILD)/tests/src-ext4-write: tests/ext4-write.c tests/storage-fs.c kmodules/shared/partition.c kmodules/shared/ext4-fs.c kmodules/shared/ext4-fs/engine.c $(EXT4_LIBRARY_SOURCES) kmodules/shared/block.h kmodules/shared/ext4-fs.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -O1 -g -Wall -Wextra -Wno-error -fsanitize=undefined $(EXT4_ENGINE_FLAGS) $(filter-out tests/storage-fs.c,$(filter %.c,$^)) -Wl,--gc-sections -o $@
+
+.PHONY: test-ext4-write test-storage-write-boot _test-storage-write-boot
+test-ext4-write: $(TEST_BUILD)/tests/src-ext4-write
+	python3 tests/ext4-write.py
+
+test-storage-write-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" NVME_DISK="$(TEST_BUILD)/nvme.img" SATA_DISK="$(TEST_BUILD)/sata.img" STORAGE_TEST=1 STORAGE_WRITE_TEST=1 _test-storage-write-boot
+_test-storage-write-boot: $(ISO) $(BUILD)/tests/src-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/mem-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)" --storage --storage-write
+
+.PHONY: test-ext4-runtime
+test-ext4-runtime:
+	@mkdir -p $(TEST_BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/ext4-runtime.c -o $(TEST_BUILD)/tests/src-ext4-runtime
+	$(TEST_BUILD)/tests/src-ext4-runtime
+
+-include $(EXT4_ENGINE_OBJECTS:.o=.d)
+EXT4_ENGINE_HEADERS := $(wildcard $(EXT4_VENDOR)/include/*.h $(EXT4_VENDOR)/include/misc/*.h) kmodules/shared/ext4-fs/runtime.h kmodules/shared/ext4-fs/engine.h
+$(TEST_BUILD)/tests/src-storage-fs $(TEST_BUILD)/tests/src-ext4-write: $(EXT4_ENGINE_HEADERS)
+
+$(BUILD)/kmodules/sata.elf: $(BUILD)/kmodules/sata-pic.o $(BUILD)/kmodules/sata.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+BLOCK_BACKEND ?= nvme
+ifeq ($(filter $(BLOCK_BACKEND),nvme sata),)
+$(error BLOCK_BACKEND must be nvme or sata)
+endif
+$(BUILD)/kmodules/probe-block-pic.o: tests/probe-block.c tests/probe.h kmodules/shared/sata.h kmodules/shared/nvme.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/src-block-main.o: kernel/main.c Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBOOT_BLOCK_TEST=1 -c $< -o $@
+$(BUILD)/tests/src-block-$(BLOCK_BACKEND).o: tests/block-boot.c tests/probe.h Makefile
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DBLOCK_BACKEND_TEST=$(if $(filter nvme,$(BLOCK_BACKEND)),1,2) -c $< -o $@
+$(BUILD)/tests/src-block-kernel.elf: FORCE $(BUILD)/tests/src-block-main.o $(BUILD)/tests/src-block-$(BLOCK_BACKEND).o $(COMMON_OBJECTS) boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter %.o,$^) -o $@
+.PHONY: test-block-boot _test-block-boot
+test-block-boot:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-block-boot
+_test-block-boot: $(ISO) $(BUILD)/tests/src-block-kernel.elf $(BUILD)/kmodules/probe.kmod
+	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=$(BLOCK_BACKEND) --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"

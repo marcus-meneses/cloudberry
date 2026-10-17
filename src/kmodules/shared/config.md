@@ -22,15 +22,16 @@ is accepted. Type definitions, defaults and ranges belong to the module schema.
 | --- | --- | --- |
 | `version` | unsigned integer | Required; exactly `1` |
 | `boot.show_inventory` | boolean | `true`; controls the core's hardware inventory dump |
-| `drivers.directory` | string | `/system/drivers`; metadata for future disk loading |
-| `storage.timeout_ms` | unsigned integer | `1000`, range 1–4294967295; metadata for future storage consumers |
-| `drivers.partition_guid` | GUID | Optional; absent until image preparation assigns the partition |
+| `drivers.directory` | string | `/boot/system/drivers`; metadata for future disk loading |
+| `storage.timeout_ms` | unsigned integer | `1000`, range 1–4294967295; BOT command deadline in usb-storage; future consumers may also use it |
+| `drivers.partition_guid` | GUID | Optional to parser; supplied in the boot config and required by image preparation |
 
 Booleans are strictly `true`/`false`. Integers are unsigned decimal with overflow
 and schema-range checks. GUIDs use exact `8-4-4-4-12` hex groups, accepting either
-hex letter case. The driver directory and timeout do not yet configure a storage
-stack; in particular they do not change the existing NVMe timeout. There is no
-fabricated partition GUID or automatic selection of the first ext4 partition.
+hex letter case. USB storage applies the timeout to each BOT command. Driver-directory selection
+remains caller-owned; the setting does not change the existing NVMe timeout. There is no
+automatic selection of the first ext4 partition: the image builder assigns the
+configured GUID to the appended 512 MiB ext4 partition.
 
 ## Hub references and ownership
 
@@ -58,7 +59,7 @@ They are immutable by trusted-kernel contract; heap pages are not separately
 write-protected and this is not a userland isolation boundary. Reacquire hub
 reference pointers after subsequent export registration moves the reference area;
 descriptor/data pointers stay stable. The current schema retains five 56-byte
-item slots plus string backing (16 bytes for the default directory), excluding
+item slots plus string backing (21 bytes for the default directory), excluding
 allocator metadata. Temporary publication references are freed after init.
 
 `config.info(out)` reports readiness, published count, error code and source line.

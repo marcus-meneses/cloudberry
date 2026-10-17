@@ -68,6 +68,14 @@
     {
       "name": "probe.hubs",
       "symbol": "probe_hubs_call"
+    },
+    {
+      "name": "probe.storage",
+      "symbol": "probe_storage_call"
+    },
+    {
+      "name": "probe.block",
+      "symbol": "probe_block_call"
     }
   ]
 }

@@ -112,6 +112,24 @@ int main(int argc,char **argv) {
     assert(CALL(pci_surface_claim,0,99,&dev).status);pci_write16((uintptr_t)config+0x106,0);
     pci_write32((uintptr_t)config+0x100,0x1001000f);assert(CALL(pci_surface_claim,0,99,&dev).status);
     pci_write32((uintptr_t)config+0x100,0);assert(!CALL(pci_surface_claim,0,99,&dev).status && !CALL(pci_surface_release,0,99,1).status);
-    puts("PASS PCI: BAR probe/restore, capability cycles, ownership, MSI-X bounds, DMA retention/preemption, active ATS/cycles and conservative fallback");
+    /* MSI is separate from MSI-X: owned one-vector programming, 32/64-bit
+     * address layouts, masking, upper-address rejection and malformed extent. */
+    config[0x41]=0x60;config[0x60]=5;pci_write16((uintptr_t)config+0x62,0x1f1);
+    assert(!CALL(pci_surface_claim,0,99,&dev).status);
+    irq.entry=0;irq.masked=0;irq.route.message_address=UINT64_C(0x1fee00000);
+    assert(!CALL(pci_surface_msi,&irq,0,0).status);
+    assert(pci_read32((uintptr_t)config+0x64)==0xfee00000 && pci_read32((uintptr_t)config+0x68)==1 && pci_read16((uintptr_t)config+0x6c)==48 && !(pci_read16((uintptr_t)config+0x62)&0x70));
+    irq.owner=100;assert(CALL(pci_surface_msi,&irq,0,0).status);irq.owner=99;
+    irq.entry=1;assert(CALL(pci_surface_msi,&irq,0,0).status);irq.entry=0;
+    irq.masked=1;assert(!CALL(pci_surface_msi,&irq,0,0).status && !(pci_read16((uintptr_t)config+0x62)&1) && pci_read32((uintptr_t)config+0x70)==UINT32_MAX);
+    assert(!CALL(pci_surface_release,0,99,1).status);
+    pci_write16((uintptr_t)config+0x62,0);
+    assert(!CALL(pci_surface_claim,0,99,&dev).status && CALL(pci_surface_msi,&irq,0,0).status);
+    irq.route.message_address=0xfee00000;irq.masked=0;
+    assert(!CALL(pci_surface_msi,&irq,0,0).status && pci_read16((uintptr_t)config+0x68)==48 && (pci_read16((uintptr_t)config+0x62)&1));
+    irq.masked=1;assert(!CALL(pci_surface_msi,&irq,0,0).status && !CALL(pci_surface_release,0,99,1).status);
+    config[0x41]=0xf0;config[0xf0]=5;pci_write16((uintptr_t)config+0xf2,0x180);
+    assert(CALL(pci_surface_claim,0,99,&dev).status);config[0x41]=0;
+    puts("PASS PCI: BAR probe/restore, capability cycles, ownership, MSI/MSI-X bounds, DMA retention/preemption, active ATS/cycles and conservative fallback");
     return 0;
 }

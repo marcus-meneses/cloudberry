@@ -136,7 +136,7 @@ hot removal and image unloading remain deferred. Individual submissions and whol
 configuration descriptors are limited by xHCI's current 4 KiB transfer capacity;
 larger configurations fail explicitly rather than being truncated. USB3 descriptor
 normalization is modeled; real SuperSpeed transfers and physical quirks remain
-unqualified. HID and USB mass-storage/SCSI policy are separate future modules.
+unqualified. HID remains deferred; [usb-storage](usb-storage.md) supplies separate BOT/SCSI policy.
 No boot filesystem or persistent disk access is introduced by enumeration.
 
 `make -C src test-usb` exercises production core code with a modeled host under

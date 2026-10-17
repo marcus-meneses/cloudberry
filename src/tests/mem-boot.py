@@ -26,7 +26,10 @@ xhci_hotplug = '--xhci-hotplug' in sys.argv[2:]
 acpi_fixture = '--acpi-fixture' in sys.argv[2:]
 usb_hotplug = '--usb-hotplug' in sys.argv[2:]
 usb_hubs = '--usb-hubs' in sys.argv[2:]
-hotplug = xhci_hotplug or usb_hotplug or usb_hubs
+storage = '--storage' in sys.argv[2:]
+storage_write = '--storage-write' in sys.argv[2:]
+storage_hotplug = '--storage-hotplug' in sys.argv[2:]
+hotplug = xhci_hotplug or usb_hotplug or usb_hubs or storage_hotplug
 cpus = next((int(arg.split('=')[1]) for arg in sys.argv[2:] if arg.startswith('--cpus=')), 1)
 iommu = next((arg.split('=')[1] for arg in sys.argv[2:] if arg.startswith('--iommu=')), 'none')
 cpu_model = next((arg.split('=',1)[1] for arg in sys.argv[2:] if arg.startswith('--cpu=')), 'host,migratable=off,+invtsc' if '--accel=kvm' in sys.argv[2:] else 'max')
@@ -42,6 +45,9 @@ if xhci_hotplug: suffix += '-xhci-hotplug'
 if acpi_fixture: suffix += '-acpi'
 if usb_hotplug: suffix += '-usb-hotplug'
 if usb_hubs: suffix += '-usb-hubs'
+if storage: suffix += '-storage'
+if storage_write: suffix += '-write'
+if storage_hotplug: suffix += '-hotplug'
 test = build / ('tests/config-'+config_error if config_error else 'tests/startup-failure' if missing_clock else 'tests/lock-watchdog' if watchdog else f'tests/mem-boot-{cpus}cpu{suffix}')
 test.mkdir(parents=True, exist_ok=True)
 # A failed rerun must never leave an older successful report looking current.
@@ -51,7 +57,7 @@ if report_path.exists():
     saved=history/f'success-{report_path.stat().st_mtime_ns}-{uuid.uuid4().hex[:8]}.json'
     report_path.replace(saved)
 run_id=uuid.uuid4().hex
-run_result={'run_id':run_id,'status':'running','started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'accelerator':accel,'cpus':cpus,'iommu':iommu}
+run_result={'run_id':run_id,'status':'running','started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'accelerator':accel,'cpus':cpus,'iommu':iommu,'storage':storage,'storage_write':storage_write,'storage_hotplug':storage_hotplug}
 def finish(status,reason=None):
     run_result.update(status=status,finished_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
     if reason is not None:run_result['reason']=str(reason)[-4096:]
@@ -79,10 +85,14 @@ if config_error:
         data=stage/'boot/cloudberry.cnf'
         data.write_text(data.read_text().replace('version=1','version=2'))
 iso = test / 'test.iso' 
-subprocess.run(['xorriso', '-as', 'mkisofs', '-R', '-r', '-J', '--efi-boot',
-    'boot/limine/limine-uefi-cd.bin', '-efi-boot-part', '--efi-boot-image',
-    '--protective-msdos-label', str(stage), '-o', str(iso)], check=True,
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+image_options=[]
+if storage:
+    fixtures=test/'drivers-source';fixtures.mkdir(exist_ok=True)
+    (fixtures/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
+    image_options=['--drivers-source',str(fixtures)]
+subprocess.run([sys.executable, str(root/'src/tools/build-boot-image.py'), str(stage), str(iso)]+image_options,
+               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run([sys.executable, str(root/'src/tests/boot-image.py'), str(iso)], check=True)
 for name in ('nvme.img', 'sata.img'):
     with (test / name).open('wb') as output:
         output.truncate(1024 ** 3)
@@ -94,6 +104,9 @@ plan = subprocess.check_output(['make', '-s', '-n', '-C', str(root / 'src'), 'ru
     f'BUILD={build}', f'QEMU_CPU={cpu_model}', f'QEMU_CPUS={cpus}', 'QEMU_DISPLAY=none', f'QEMU_ACCEL={accel}', f'QEMU_IOMMU={iommu}', f'ISO={iso}',
     f'NVME_DISK={test}/nvme.img', f'SATA_DISK={test}/sata.img'], text=True)
 command = next(line for line in plan.splitlines() if line.startswith('bash boot/run-qemu.sh'))
+if storage_write:
+    assert storage and not storage_hotplug
+    command=command.replace('id=bootmedia,format=raw,readonly=on,','id=bootmedia,format=raw,')
 command = command.replace('id=nvmedisk,format=raw,', 'id=nvmedisk,format=raw,readonly=on,')
 if '--xhci-trace' in sys.argv[2:]:
     for event in ('usb_xhci_oper_write','usb_xhci_runtime_write','usb_xhci_doorbell_write','usb_xhci_fetch_trb','usb_xhci_queue_event','usb_xhci_irq_msix','usb_xhci_run','usb_xhci_stop'):
@@ -104,6 +117,8 @@ if acpi_fixture:
     command += ' -acpitable file=' + shlex.quote(str(fixture_path))
 if usb_hubs:
     command += ' -device usb-hub,id=testhub,bus=xhci.0,port=4 -device usb-kbd,id=hub-child,bus=xhci.0,port=4.1 -device usb-hub,id=nestedhub,bus=xhci.0,port=4.2 -device usb-mouse,id=hub-grandchild,bus=xhci.0,port=4.2.1'
+if storage_hotplug:
+    command=command.replace('-device usb-storage,bus=xhci.0', '-device usb-storage,id=storage-test,bus=xhci.0')
 log = test / 'boot.log'
 if hotplug:
     command = command.replace('-device usb-kbd,bus=xhci.0', '-device usb-kbd,id=xhci-test-keyboard,bus=xhci.0,port=1')
@@ -112,8 +127,9 @@ if hotplug:
 with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
     process = subprocess.Popen(shlex.split(command), cwd=root / 'src', bufsize=0, stdin=subprocess.PIPE if hotplug else None, stdout=subprocess.PIPE if hotplug else output, stderr=qemu_errors if hotplug else output)
     try:
-        deadline = time.monotonic() + (45 if hotplug else 30)
+        deadline = time.monotonic() + (90 if storage_write else 45 if hotplug else 30)
         removed = added = False
+        storage_removed = storage_added = False
         usb_removed = usb_added = False
         hub_child_removed = hub_child_added = hub_removed = hub_added = False
         def qmp_call(name, arguments=None):
@@ -134,6 +150,12 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 qmp_call('device_del', {'id':'xhci-test-keyboard'}); removed = True
             if xhci_hotplug and 'WAIT XHCI ADD' in content and not added:
                 qmp_call('device_add', {'driver':'usb-kbd','id':'xhci-test-keyboard','bus':'xhci.0','port':'1'}); added = True
+            if storage_hotplug and 'WAIT STORAGE REMOVE' in content and not storage_removed:
+                qmp_call('device_del', {'id':'storage-test'});storage_removed=True
+            if storage_hotplug and 'WAIT STORAGE ADD' in content and not storage_added:
+                # QEMU deletes the legacy -drive backend with its USB device.
+                qmp_call('blockdev-add', {'driver':'raw','node-name':'storage-replug','read-only':True,'file':{'driver':'file','filename':str(iso)}})
+                qmp_call('device_add', {'driver':'usb-storage','id':'storage-test','bus':'xhci.0','drive':'storage-replug'});storage_added=True
             if usb_hotplug and 'WAIT USB REMOVE' in content and not usb_removed:
                 qmp_call('device_del', {'id':'xhci-test-keyboard'}); usb_removed = True
             if usb_hotplug and 'WAIT USB ADD' in content and not usb_added:
@@ -174,10 +196,12 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
                 if iommu != 'none':
                     assert 'PASS IOMMU:' in content
                 assert ('PASS ACPI AML fixture:' if acpi_fixture else 'PASS ACPI:') in content
-                assert ('PASS USB hubs:' if usb_hubs else 'PASS USB core:') in content
+                assert ('PASS USB storage/ext4:' if storage else 'PASS USB hubs:' if usb_hubs else 'PASS USB core:') in content
                 if usb_hubs:
                     assert hub_child_removed and hub_child_added and hub_removed and hub_added
                     assert 'PASS USB hub class restart:' in content
+                if storage_write: assert 'PASS writable USB/ext4:' in content
+                if storage_hotplug: assert storage_removed and storage_added
                 if usb_hotplug: assert usb_removed and usb_added
                 assert 'PASS config: Limine text handoff, typed owned descriptors and atomic publication' in content
                 assert 'PASS xHCI:' in content
@@ -242,4 +266,8 @@ with log.open('w') as output, (test/'qemu.log').open('w') as qemu_errors:
         except BaseException as error:
             finish('failed',f'VM cleanup failed: {error}')
             raise
+if storage_write:
+    try:subprocess.run([sys.executable,str(root/'src/tests/boot-image.py'),str(iso)],check=True)
+    except BaseException as error:
+        finish('failed',f'Post-write filesystem validation failed: {error}');raise
 print('Boot log:', log)

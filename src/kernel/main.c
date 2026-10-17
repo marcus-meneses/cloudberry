@@ -58,13 +58,18 @@ __attribute__((noreturn)) void kmain(void) {
         kernel_surface_call hardware_dump=kernel_surface_find_version(kmodule_hub,"hwenum.dump",1,0);
         if(!hardware_dump || hardware_dump(0,0,0,0,0,0).status){debug("Cloudberry v2: hardware inventory dump failed\n");halt();}
     }
+#ifdef BOOT_BLOCK_TEST
+    extern _Bool kernel_block_test(const struct kernel_surfaces *);
+    if(!kernel_block_test(kmodule_hub)){debug("Cloudberry v2: FAIL block backend test\n");halt();}
+    debug("Cloudberry v2: PASS block backend test\n");
+#endif
 #ifdef BOOT_MEM_TEST
     if (!kernel_mem_test(kmodule_hub, &bootstrap_pages)) {
         debug("Cloudberry v2: FAIL mem surface test\n"); halt();
     }
     debug("Cloudberry v2: PASS mem surface test\n");
 #endif
-#ifndef BOOT_MEM_TEST
+#if !defined(BOOT_MEM_TEST) && !defined(BOOT_BLOCK_TEST)
     kernel_surface_call usb_start=kernel_surface_find_version(kmodule_hub,"usb.start",1,0);
     kernel_surface_call hub_start=kernel_surface_find_version(kmodule_hub,"usb_hub.start",1,0);
     if(!hub_start || hub_start(0,0,0,0,0,0).status){debug("Cloudberry v2: USB hub startup failed\n");halt();}

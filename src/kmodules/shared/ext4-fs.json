@@ -1,0 +1,49 @@
+{
+  "name": "ext4-fs",
+  "exports": [
+    {
+      "name": "ext4_fs.init",
+      "symbol": "ext4_fs_surface_init"
+    },
+    {
+      "name": "ext4_fs.mount",
+      "symbol": "ext4_fs_surface_mount",
+      "version": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "ext4_fs.unmount",
+      "symbol": "ext4_fs_surface_unmount"
+    },
+    {
+      "name": "ext4_fs.stat",
+      "symbol": "ext4_fs_surface_stat"
+    },
+    {
+      "name": "ext4_fs.read",
+      "symbol": "ext4_fs_surface_read"
+    },
+    {
+      "name": "ext4_fs.list",
+      "symbol": "ext4_fs_surface_list"
+    },
+    {
+      "name": "ext4_fs.info",
+      "symbol": "ext4_fs_surface_info"
+    },
+    {
+      "name": "ext4_fs.write",
+      "symbol": "ext4_fs_surface_write"
+    },
+    {
+      "name": "ext4_fs.mutate",
+      "symbol": "ext4_fs_surface_mutate"
+    },
+    {
+      "name": "ext4_fs.sync",
+      "symbol": "ext4_fs_surface_sync"
+    }
+  ]
+}

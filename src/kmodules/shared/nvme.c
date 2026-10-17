@@ -1,4 +1,5 @@
 #include "nvme.h"
+#include "block.h"
 #include "pci.h"
 #include "threads.h"
 #include "hwenum.h"
@@ -16,7 +17,7 @@ static struct {
     const struct kernel_surfaces *hub;struct pci_device device;struct mem_pages dma;struct irq_route route;
     struct nvme_info info;struct queue admin,io;uintptr_t registers;uint64_t stride,timeout_ns;
     int owned,busy,waiting,complete,completion_failed;uint16_t expected;
-    uint64_t reader;
+    uint64_t reader,cookie,serial,refs;
     kernel_surface_call claim,master,msix,allocate,free,release,irq_route,irq_enable,irq_release,control,clock,cpu,irq_context,dma_ready;
 } state;
 static uint32_t r32(size_t offset) {return *(volatile uint32_t *)(state.registers+offset);}
@@ -86,14 +87,14 @@ struct kernel_surface_result nvme_surface_init(MODULE_ARGS) {
 }
 static struct kernel_surface_result close_owned(void);
 struct kernel_surface_result nvme_surface_open(MODULE_ARGS) {
-    MODULE_UNUSED();if(!state.hub || !foreground() || !b)return module_result(0,0);
+    MODULE_UNUSED();if(!state.hub || !foreground() || !b || c>=UINT32_MAX)return module_result(0,0);
     const struct kernel_hub_table *ref=kernel_hub_find_table(state.hub,"hwenum.hardware");
     if(!ref)return module_result(0,0);
     /* Enumeration owns class interpretation; never claim an arbitrary device. */
     const struct hwenum_table *hw=(const void *)ref->address;
     if(a>=hw->count || hw->entries[a].kind!=HWENUM_PCI || hw->entries[a].data.pci.class_code!=1 || hw->entries[a].data.pci.subclass!=8 || hw->entries[a].data.pci.programming_interface!=2)return module_result(0,0);
     if(__atomic_exchange_n(&state.busy,1,__ATOMIC_ACQUIRE))return module_result(0,0);
-    if(state.owned || CALL(state.claim,a,OWNER,&state.device).status) {__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(0,0);}
+    if(state.serial==UINT64_MAX || state.owned || CALL(state.claim,a,OWNER,&state.device).status) {__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(0,0);}
     state.owned=1;state.info=(struct nvme_info){.hardware_index=a};state.timeout_ns=500000000;
     if(!state.device.bars[0].address || state.device.bars[0].bytes<0x1008 || !state.device.msix_count)goto fail;
     state.info.open_stage=2;state.registers=state.device.bars[0].address;
@@ -111,8 +112,8 @@ struct kernel_surface_result nvme_surface_open(MODULE_ARGS) {
     state.info.open_stage=5;w32(0x14,1|(6u<<16)|(4u<<20));if(!ready(1))goto fail;
     struct command identify={.op=6,.prp1=state.dma.physical+20480,.cdw={1}};
     state.info.open_stage=6;if(!admin(identify))goto fail;
-    state.info.open_stage=7;identify.cdw[0]=2;if(!admin(identify))goto fail;
-    uint32_t nsid=*(uint32_t *)(state.dma.address+20480);if(!nsid || nsid==UINT32_MAX)goto fail;
+    state.info.open_stage=7;identify.nsid=c?c-1:0;identify.cdw[0]=2;if(!admin(identify))goto fail;
+    uint32_t nsid=*(uint32_t *)(state.dma.address+20480);if(!nsid || nsid==UINT32_MAX || (c && nsid!=c))goto fail;
     state.info.open_stage=8;identify.nsid=nsid;identify.cdw[0]=0;if(!admin(identify))goto fail;
     const unsigned char *ns=(const void *)(state.dma.address+20480);unsigned format=ns[26]&15,shift=ns[128+format*4+2];
     if((ns[26]&0xf0) || ns[29] || format>ns[25] || *(const uint16_t *)(ns+128+format*4) || shift<9 || shift>12)goto fail;
@@ -125,7 +126,7 @@ struct kernel_surface_result nvme_surface_open(MODULE_ARGS) {
     struct command sq={.op=1,.prp1=state.dma.physical+8192,.cdw={1|((DEPTH-1)<<16),1|(1u<<16)}};
     state.info.open_stage=12;if(!admin(sq) || CALL(state.irq_enable,state.route.id,OWNER,1).status)goto fail;
     m.masked=0;if(CALL(state.msix,&m,0,0).status)goto fail;
-    state.info.open_stage=0;state.info.route_id=state.route.id;state.info.online=1;*(struct nvme_info *)b=state.info;__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(1,1);
+    state.cookie=++state.serial;state.refs=0;state.info.open_stage=0;state.info.route_id=state.route.id;state.info.online=1;*(struct nvme_info *)b=state.info;__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(1,1);
 fail:
     state.info.failed=1;
     /* Cleanup is retryable and retains ownership on uncertain quiescence. */
@@ -138,33 +139,56 @@ struct kernel_surface_result nvme_surface_interrupt(MODULE_ARGS) {
     if(state.waiting) {int result=take(&state.io,NULL);if(result) {state.completion_failed=result<0;state.complete=1;CALL(state.control,THREAD_WAKE,state.reader,0);}}
     return module_result(1,1);
 }
-struct kernel_surface_result nvme_surface_read(MODULE_ARGS) {
-    MODULE_UNUSED();uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));
-    if(!state.hub || !foreground() || !(flags&512) || CALL(state.cpu,CPU_DEPTH,0,0).value || !CALL(state.control,THREAD_CURRENT,0,0).value)return module_result(0,0);
+static struct kernel_surface_result transfer(uint64_t lba,uint64_t blocks,uintptr_t buffer,unsigned opcode,uint64_t cookie) {
+    if(!state.hub || !foreground() || !CALL(state.control,THREAD_CURRENT,0,0).value)return module_result(0,0);
     if(__atomic_exchange_n(&state.busy,1,__ATOMIC_ACQUIRE))return module_result(0,0);
-    if(!state.info.online || state.info.failed || !b || !c || a>=state.info.blocks || b>state.info.blocks-a || b>SIZE_MAX/state.info.block_bytes || c>UINTPTR_MAX-b*state.info.block_bytes) {
-        __atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(0,0);
-    }
-    state.reader=CALL(state.control,THREAD_CURRENT,0,0).value;uint64_t remaining=b,lba=a;unsigned char *destination=(void *)c;
-    while(remaining) {
+    uint64_t completed=0;
+    if((cookie && cookie!=state.cookie) || !state.info.online || state.info.failed || lba>state.info.blocks || blocks>state.info.blocks-lba || blocks>SIZE_MAX/state.info.block_bytes || (blocks && !buffer) || buffer>UINTPTR_MAX-blocks*state.info.block_bytes)goto invalid;
+    state.reader=CALL(state.control,THREAD_CURRENT,0,0).value;
+    uint64_t remaining=blocks;unsigned char *payload=(void *)buffer;
+    do {
         unsigned count=4096/state.info.block_bytes;if(count>remaining)count=remaining;
+        size_t bytes=count*state.info.block_bytes;unsigned char *bounce=(void *)(state.dma.address+16384);
+        if(opcode==1)for(size_t i=0;i<bytes;++i)bounce[i]=payload[i];
         state.waiting=1;state.complete=0;state.completion_failed=0;
-        struct command read={.op=2,.nsid=state.info.namespace_id,.prp1=state.dma.physical+16384,.cdw={(uint32_t)lba,(uint32_t)(lba>>32),count-1}};
+        struct command cmd={.op=opcode,.nsid=state.info.namespace_id};
+        if(opcode){if(!count)break;cmd.prp1=state.dma.physical+16384;cmd.cdw[0]=(uint32_t)lba;cmd.cdw[1]=lba>>32;cmd.cdw[2]=count-1;}
         uint64_t start=time_now();if(start==UINT64_MAX || start>UINT64_MAX-READ_TIMEOUT_NS)goto fail;
-        submit(&state.io,read);
+        submit(&state.io,cmd);
         while(!state.complete) {
             uint64_t now=time_now();
-            if(start==UINT64_MAX || now==UINT64_MAX || now<start || now-start>READ_TIMEOUT_NS || (r32(0x1c)&2) ) {++state.info.timeouts;goto fail;}
+            if(now==UINT64_MAX || now<start || now-start>READ_TIMEOUT_NS || (r32(0x1c)&2)){++state.info.timeouts;goto fail;}
             if(CALL(state.control,THREAD_BLOCK_UNTIL,start+READ_TIMEOUT_NS,0).status)goto fail;
         }
         state.waiting=0;if(state.completion_failed || CALL(state.dma_ready,state.device.hardware_index,OWNER,0).status)goto fail;
-        size_t bytes=count*state.info.block_bytes;const unsigned char *source=(const void *)(state.dma.address+16384);
-        for(size_t i=0;i<bytes;++i)destination[i]=source[i];
-        destination+=bytes;lba+=count;remaining-=count;++state.info.reads;
-    }
-    uintptr_t bytes=b*state.info.block_bytes;__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(bytes,1);
+        if(opcode==2){for(size_t i=0;i<bytes;++i)payload[i]=bounce[i];++state.info.reads;}
+        if(bytes){payload+=bytes;}lba+=count;remaining-=count;completed+=bytes;
+    }while(remaining);
+    state.waiting=0;__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(completed,1);
 fail:
-    state.waiting=0;state.info.failed=1;state.info.online=0;(void)disable();__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(0,0);
+    state.waiting=0;state.info.failed=1;state.info.online=0;(void)disable();
+invalid:
+    __atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(completed,0);
+}
+struct kernel_surface_result nvme_surface_read(MODULE_ARGS){MODULE_UNUSED();return transfer(a,b,c,2,0);}
+struct kernel_surface_result nvme_surface_block(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || !a || !block_capacity(b) || __atomic_exchange_n(&state.busy,1,__ATOMIC_ACQUIRE))return module_result(0,0);
+    if(!state.info.online || state.info.failed){__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(0,0);}
+    struct block_device disk={.major=1,.minor=1,.block_bytes=state.info.block_bytes,.max_transfer_bytes=4096,.blocks=state.info.blocks,.cookie=state.cookie,
+        .read=kernel_surface_find(state.hub,"nvme.block_read"),.control=kernel_surface_find(state.hub,"nvme.control"),.write=kernel_surface_find(state.hub,"nvme.write"),.flush=kernel_surface_find(state.hub,"nvme.flush")};
+    disk.root_read=disk.read;disk.root_cookie=disk.cookie;block_export((void *)a,&disk,b);__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(disk.cookie,1);
+}
+static int block_request(uintptr_t cookie,uint64_t lba,uint64_t count,uintptr_t buffer,size_t capacity){
+    return foreground() && cookie && cookie==state.cookie && state.owned && state.info.online && !state.info.failed && lba<=state.info.blocks && count<=state.info.blocks-lba && count<=4096/state.info.block_bytes && capacity>=count*state.info.block_bytes && (!count || buffer) && buffer<=UINTPTR_MAX-count*state.info.block_bytes;
+}
+struct kernel_surface_result nvme_surface_block_read(MODULE_ARGS){MODULE_UNUSED();return block_request(a,b,c,d,e)?transfer(b,c,d,2,a):module_result(0,0);}
+struct kernel_surface_result nvme_surface_write(MODULE_ARGS){MODULE_UNUSED();return block_request(a,b,c,d,e)?transfer(b,c,d,1,a):module_result(0,0);}
+struct kernel_surface_result nvme_surface_flush(MODULE_ARGS){MODULE_UNUSED();return block_request(a,0,0,0,0)?transfer(0,0,0,0,a):module_result(0,0);}
+struct kernel_surface_result nvme_surface_control(MODULE_ARGS){
+    MODULE_UNUSED();if(!foreground() || __atomic_exchange_n(&state.busy,1,__ATOMIC_ACQUIRE))return module_result(0,0);
+    int valid=a && a==state.cookie && state.owned;
+    int ok=valid && (b==BLOCK_RETAIN?(state.info.online && !state.info.failed && state.refs<UINT64_MAX):(b==BLOCK_RELEASE && state.refs));
+    if(ok){if(b==BLOCK_RETAIN)++state.refs;else --state.refs;}__atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return module_result(1,ok);
 }
 struct kernel_surface_result nvme_surface_info(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !bsp() || !a)return module_result(0,0);
@@ -183,13 +207,13 @@ static struct kernel_surface_result close_owned(void) {
         state.dma=(struct mem_pages){0};
     }
     if(CALL(state.release,state.device.hardware_index,OWNER,1).status)goto fail;
-    state.owned=0;state.registers=0;return module_result(1,1);
+    state.owned=0;state.registers=0;state.cookie=0;return module_result(1,1);
 fail:
     state.info.failed=1;return module_result(0,0);
 }
 
 struct kernel_surface_result nvme_surface_close(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !foreground() || __atomic_exchange_n(&state.busy,1,__ATOMIC_ACQUIRE))return module_result(0,0);
-    struct kernel_surface_result result=state.owned?close_owned():module_result(0,0);
+    struct kernel_surface_result result=state.owned && !state.refs?close_owned():module_result(0,0);
     __atomic_store_n(&state.busy,0,__ATOMIC_RELEASE);return result;
 }

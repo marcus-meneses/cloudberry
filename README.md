@@ -61,17 +61,19 @@ Implemented foundations include:
 
 - Independently loaded kernel modules with a versioned method/table hub.
 - Limine-loaded text configuration parsed into owned typed hub references.
+- A build-prepared 512 MiB ext4 driver partition identified by its configured GPT GUID.
 - Owned memory allocation, page mappings, guarded stacks and TLB coordination.
 - Preemptible kernel threads, SMP startup, deadline scheduling and deferred IRQs.
 - Calibrated clocks, cross-CPU TSC qualification and HPET fallback.
 - Hardware/MMIO discovery, PCI ownership and initial Intel/AMD IOMMU backends.
 - ACPI AML device enumeration, PCI firmware companions and a platform-device inventory.
 - USB core with root/downstream enumeration, interface ownership and event-driven hotplug.
+- Boot-loaded USB BOT/SCSI read/write/flush, GPT GUID selection and journaled ext4 file mutations.
 - External hub class module with nested topology and interrupt-driven port changes.
-- Read-only NVMe and an xHCI transport with asynchronous transfers, hotplug
+- NVMe/AHCI SATA block read/write/flush and an xHCI transport with asynchronous transfers, hotplug
   detection and controlled controller restart.
 
-User processes, application-facing handles, HID/storage class drivers, filesystems and runtime
+User processes, application-facing handles, HID class drivers, general storage-driver selection and runtime
 ACPI notification/driver policy are still ahead. QEMU acceptance includes isolated one/four-CPU
 runs with both emulated IOMMU models. AMD-host KVM validates the earlier SMP,
 clock and extended-state foundation; native xHCI and physical-device validation
@@ -79,7 +81,7 @@ remain pending.
 
 The [current assessment](src/README.md#current-assessment-2026-10-16) separates
 implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: implement
-read-only USB storage and boot-volume matching, then load driver modules from disk. Process isolation follows that
+boot-volume selection across the common block backends, then load driver modules from disk. Process isolation follows that
 foundation. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
 
 ## Build and run

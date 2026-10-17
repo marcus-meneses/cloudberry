@@ -477,3 +477,122 @@ Positive result/report pairs: `mem-boot-1cpu`, run
 `config-missing`, `config-duplicate` and `config-invalid` under the same isolated
 tests directory. These fixtures never alter the candidate configuration or
 attach persistent development disks. See [config contract](../kmodules/shared/config.md).
+
+## Appended ext4 boot partition
+
+```sh
+make -C src test-boot-image
+make -C src test-mem-boot
+```
+
+The host image check extracts the packaged cloudberry.cnf, validates primary and
+backup GPT CRCs, confirms that its drivers.partition_guid selects exactly one
+Linux filesystem partition of at least 512 MiB and preserves an EFI partition.
+It extracts that partition to a disposable sparse regular file, runs e2fsck -fn
+and verifies the configured /boot/system/drivers directory through debugfs.
+Normal and fault boot fixtures use the shared image builder, with all formatting
+at build time. The real boot probe now validates the typed partition-GUID reference
+and five config entries. Latest one-CPU UEFI acceptance: 99222c353e564ba1b12adc9f87cbce3d.
+
+The image remains read-only in QEMU. These host image checks alone do not establish guest storage access;
+the separate storage tests below validate USB block reads and guest ext4 access. Persistent
+NVMe/SATA images are unchanged, and candidate images are never booted automatically.
+
+
+## USB storage and ext4 readers
+
+```sh
+make -C src test-usb-storage test-storage-fs
+make -C src test-storage-boot
+make -C src test-storage-boot QEMU_CPUS=4 QEMU_IOMMU=amd USB_HOTPLUG=1
+```
+
+Host tests exercise production BOT validation, command sense, transport failure,
+read bounds, retained-parent lifetime and GPT CRC/identity/OOM failures. Independently
+formatted ext4 fixtures cover 1/2/4 KiB blocks, explicit checksum seeds, 512-byte
+inodes, regular/fragmented extent trees, sparse data, EOF and metadata corruption.
+All host filesystem fixtures are disposable regular files under bin/tests/isolated.
+
+Storage boot probes remain test-only kmodule code. The harness populates the isolated
+ext4 driver directory with a deterministic 16 KiB probe file using the build-time
+`--drivers-source` option. Candidate images do not receive that fixture. The guest
+reads the actual USB boot device via BOT/SCSI, selects config.drivers.partition_guid,
+mounts ext4, lists and reads the file, checks lifetime pins/stale cookies, and closes
+all layers. Four-CPU AMD-IOMMU/QMP validation removes and re-adds USB storage, verifies
+failed access through the mounted filesystem, teardown, fresh USB identity and
+reopening. QEMU reattachment uses a fresh read-only block node for the same isolated
+image. No candidate VM or persistent developer disks are used.
+
+Acceptance evidence (2026-10-16): isolated one-CPU storage boot
+`4e5ee22d226e47be8e04161ce3b1d66f` and final four-CPU AMD-IOMMU storage
+unplug/replug boot `8326cddee63140c3a718bf69dc646fb7` passed with matching
+result/report IDs. These use TCG and do not establish native or physical-device
+acceptance. The final candidate image passed host GPT/ext4/configuration checks
+and contains no isolated probe file.
+
+
+## Writable ext4 and journal durability
+
+```sh
+make -C src test-usb-storage test-storage-fs test-ext4-runtime test-ext4-write
+make -C src test-storage-write-boot QEMU_CPUS=1 QEMU_IOMMU=intel
+make -C src test-storage-write-boot QEMU_CPUS=4 QEMU_IOMMU=amd
+```
+
+`test-ext4-write` creates ordinary disposable GPT/ext4 image files under
+bin/tests/isolated/tests/ext4-write. It exercises create/grow/append/overwrite,
+truncate/zero extension, remove, directories and rename; read-only remount checks
+persisted data and indexed directories. Independent e2fsck validates allocation,
+checksums, links and clean journal state. Trace-guided process termination tests
+journal descriptors, commits and checkpoints for creation/write/append/truncate/
+remove/rename. Six injected write/barrier failures check poison/parent retention
+and fresh-process recovery. Reports include a run ID and running/failed/passed state;
+failed reruns cannot leave an older passing report current.
+
+Crash tests model whole block writes followed by flush, not torn sectors or lying
+physical write caches. Kernel byte/sort primitives are checked separately against
+libc behavior; no host mount, loop device or persistent developer disk is used.
+
+Writable boot tests alone remove read-only attachment from the isolated USB test
+image. The guest executes USB WRITE and SYNCHRONIZE CACHE through the common block
+contract and GPT, mutates ext4, syncs/unmounts and verifies read-only remount data.
+After QEMU exits, host GPT/ext4 checks run again; any failure changes result.json
+and removes the successful report. The ordinary candidate run stays read-only and
+receives no probe file. These kmodules continue to arrive through Limine.
+
+Writable acceptance (2026-10-16): mem-boot-1cpu-intel-storage-write: `cc1eb884b5684c17821cccbae5fc8630`; mem-boot-4cpu-amd-storage-write: `7dcb91ebb7d74dcab6f81dab13759754`.
+The host journal run `b57ce593cdd04c7cba30cd8c712638b7` passes 29 crash cuts and six
+write/barrier failure cases, with independent fsck and no sanitizer errors.
+All guests use TCG; physical/torn-sector durability is still unqualified.
+
+## Focused NVMe/AHCI boot-device block tests
+
+```
+make -C src test-block-boot BLOCK_BACKEND=nvme QEMU_CPUS=4 QEMU_IOMMU=amd
+make -C src test-block-boot BLOCK_BACKEND=sata QEMU_CPUS=4 QEMU_IOMMU=intel
+```
+
+`block-boot.py` runs a dedicated test kernel and `probe.block` on disposable
+media below `bin/tests/isolated/tests/block-<backend>-<cpus>cpu-<iommu>`.
+The hybrid image itself boots through the selected NVMe or AHCI transport;
+no USB-storage boot shortcut and no developer disk image is attached.
+The probe uses the configured GPT GUID and existing partition/ext4 modules,
+reads a patterned fixture, creates/appends/renames/deletes a journaled file,
+and remounts readonly to check persisted bytes. It checks sector bounds, capacity,
+zero-length I/O, slice bounds, retain/close refusal, actual MSI/MSI-X delivery,
+lost-notification timeout/reset, fresh cookies and stale-descriptor refusal.
+NVMe additionally rejects invalid/inactive namespace IDs and explicitly reopens
+namespace 1. After VM termination, independent GPT/backup CRC and `e2fsck -fn`
+checks qualify the final image. `result.json` is always replaced per run; only
+passing runs get `report.json`. Failure removes any earlier passing report.
+
+PCI's focused host suite covers 32/64-bit single-vector MSI programming, MME
+clearing, masking, owner/entry rejection and truncated capability bounds, alongside
+existing MSI-X and DMA/IOMMU cases. Physical hardware, torn-sector durability,
+simultaneous storage instances, NCQ and SATA hotplug are not qualified.
+
+Latest isolated TCG qualification (2026-10-16 local date):
+
+- sata, 1 CPU(s), none IOMMU model: `f07052b863014a79a6a818d39b11b330`.
+- sata, 4 CPU(s), intel IOMMU model: `12251496e312483d93c83d3fb8027ba0`.
+- nvme, 4 CPU(s), amd IOMMU model: `a9c71348fc9a44e1ac0ed6200914b615`.

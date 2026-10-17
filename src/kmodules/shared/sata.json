@@ -1,0 +1,41 @@
+{
+  "name": "sata",
+  "exports": [
+    {
+      "name": "sata.init",
+      "symbol": "sata_surface_init"
+    },
+    {
+      "name": "sata.open",
+      "symbol": "sata_surface_open"
+    },
+    {
+      "name": "sata.read",
+      "symbol": "sata_surface_read"
+    },
+    {
+      "name": "sata.write",
+      "symbol": "sata_surface_write"
+    },
+    {
+      "name": "sata.flush",
+      "symbol": "sata_surface_flush"
+    },
+    {
+      "name": "sata.control",
+      "symbol": "sata_surface_control"
+    },
+    {
+      "name": "sata.info",
+      "symbol": "sata_surface_info"
+    },
+    {
+      "name": "sata.close",
+      "symbol": "sata_surface_close"
+    },
+    {
+      "name": "sata.interrupt",
+      "symbol": "sata_surface_interrupt"
+    }
+  ]
+}

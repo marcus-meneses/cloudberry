@@ -25,7 +25,9 @@ protocol headers when writing the kernel. The script builds the utility but
 does not execute it. No host bootloader, partition, EFI entry, or shell startup
 file is changed.
 
-Make, QEMU, `gdb-multiarch`, OVMF, `xorriso`, and `mtools` come from Ubuntu.
+Make, QEMU, `gdb-multiarch`, OVMF, `xorriso`, `mtools`, `e2fsprogs` and `gdisk`
+come from Ubuntu. Boot-image preparation uses `mke2fs` and `sgdisk` on generated
+regular image files; verification uses `e2fsck` and `debugfs`.
 Use `gdb-multiarch` to debug the kernel through QEMU's GDB server. OVMF is
 firmware for the virtual machine.
 

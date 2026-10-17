@@ -95,13 +95,13 @@ install_ubuntu_packages() (
         build-essential make bison flex texinfo libgmp-dev libmpfr-dev \
         libmpc-dev zlib1g-dev libisl-dev ca-certificates curl git xz-utils \
         qemu-system-x86 qemu-system-gui libcanberra-gtk3-module qemu-utils \
-        gdb-multiarch ovmf xorriso mtools
+        gdb-multiarch ovmf xorriso mtools e2fsprogs gdisk
 )
 if ! "$skip_apt"; then
     install_ubuntu_packages
 fi
 for command in gcc g++ make curl git tar xz sha512sum bison flex makeinfo \
-    qemu-system-x86_64 gdb-multiarch xorriso mcopy; do
+    qemu-system-x86_64 gdb-multiarch xorriso mcopy mke2fs sgdisk e2fsck debugfs; do
     command -v "$command" >/dev/null || {
         printf 'Missing dependency: %s (rerun without --skip-apt).\n' "$command" >&2
         exit 1

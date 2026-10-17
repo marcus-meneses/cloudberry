@@ -44,6 +44,10 @@
     {
       "name": "pci.firmware_write",
       "symbol": "pci_surface_firmware_write"
+    },
+    {
+      "name": "pci.msi",
+      "symbol": "pci_surface_msi"
     }
   ]
 }

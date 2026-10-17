@@ -104,7 +104,7 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     uncertain ownership, invalidate old identities and reuse connector records.
     Isolated tests cover keyboard/mouse/storage enumeration, class control,
     pending-I/O shutdown and hotplug with one/four CPUs and both IOMMU models.
-    HID/storage class drivers and physical USB acceptance remain open.
+    HID and physical USB acceptance remain open; BOT storage is provided by item 17.
 
 14. USB hubs: separate hub-class module and owned `usb.hubs` registry; dynamically
     sized port state, power/reset, interrupt change bitmaps and nested attachment.
@@ -123,24 +123,67 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
 15. Boot configuration: Limine-loaded `boot/cloudberry.cnf` is identified as data;
     the config kmodule owns strict schema parsing, copied typed values and
     `config.<key>` references. Batch hub publication is atomic. Inventory visibility
-    is applied; driver directory/timeout are future-consumer metadata, with no
-    fabricated partition GUID. Host tests and isolated one/four-CPU TCG acceptance
+    is applied; driver directory remains caller-owned; USB storage now consumes timeout metadata.
+    Image preparation supplies a real GPT partition GUID. Host tests and isolated one/four-CPU TCG acceptance
     validate ownership, failures and the handoff; missing/duplicate/invalid-file
     boots fail explicitly. Runtime reconfiguration remains outside this milestone.
 
+16. Driver-partition image preparation: the build appends a 512 MiB ext4 GPT
+    partition to the existing UEFI hybrid ISO. Its real partition GUID is stored
+    in `boot/cloudberry.cnf` and applied to both GPT copies; the configured driver
+    directory is created in ext4. Host checks validate GPT CRCs, filesystem size,
+    packaged identity, e2fsck cleanliness and directory contents. Isolated UEFI
+    boot validates the unchanged Limine FAT/ISO9660 path and typed GUID handoff.
+    Guest ext4 access follows in item 17; disk loading remains pending. Boot performs no formatting.
+
+17. Boot storage readers: separate Limine-loaded usb-storage, partition and
+    ext4-fs modules. USB BOT/SCSI exposes a retained, versioned read-only block
+    descriptor; GPT validates both header/array CRCs and matches the configured
+    unique GUID. Ext4 validates supported clean filesystem geometry and metadata
+    checksums and provides stat/list/read, extent trees and sparse/unwritten data.
+    Focused UBSan fixtures cover 1/2/4 KiB blocks, checksum seeds, fragmented files,
+    metadata damage, OOM rollback and lifetime pins. Isolated USB→GPT→ext4 boots
+    cover actual file reads and four-CPU AMD-IOMMU unplug/replug. HTree directories,
+    symlink traversal, journal replay, writes, UAS and physical USB remain open.
+    Runtime UNIT ATTENTION invalidates storage; initial readiness alone may consume
+    it before publication. Poisoned BOT transport may require core rebind.
+
+18. Writable ext4: USB BOT WRITE(10)/(16), MODE SENSE write-protection checks,
+    qualified SYNCHRONIZE CACHE and block ABI1.1 write/flush propagate through GPT
+    slices. Explicit writable mounts use a pinned, privately linked lwext4 engine,
+    journal replay, bounded full-data transactions and conservative write barriers.
+    Create/grow/append/truncate/remove, directories and no-replace rename are exposed.
+    Mount/device registries are dynamic; overlapping writable views are refused.
+    Normal mutations, independent fsck, abrupt journal commit/checkpoint cuts and
+    injected write/barrier failures validate acknowledged durability and fail-closed
+    ownership. One/four-CPU Intel/AMD-IOMMU QEMU boots validate real USB writes.
+    Normal boot remains read-only; only disposable test images are made writable.
+    Seeded-checksum writes, orphan-list recovery, physical durability, forced
+    abandonment of poisoned mounts, sparse extension and barrier batching remain open.
+
+19. Closed: common-block NVMe write/flush/lifetime adapter and AHCI SATA backend.
+    SATA uses owned PCI MSI, deferred IRQ completion, tracked IOMMU DMA, LBA48
+    read/write and flush. Explicit controller/namespace/port selection feeds the
+    existing configured-GUID GPT selector and ext4. Current modules stay Limine-
+    loaded. No automatic persistent-disk claiming or disk-module loading is added.
+    Focused disposable-media tests boot through each transport and exercise
+    journaled ext4, pins/bounds, IRQ loss/reset and stale identities. Automatic
+    boot provenance/duplicate-GUID selection and physical qualification remain open.
+
 ## Next priorities
 
-Review update: 2026-10-16. Hub lifecycle/descriptor closure is complete; retain
-the existing storage-first sequence.
+Review update: 2026-10-16. USB/GPT/ext4 access and journaled writes are implemented;
+retain the storage integration and disk-loaded-driver sequence.
 
-1. Storage before HID: implement USB mass-storage Bulk-Only Transport/SCSI reads
-   on USB core, exposing a common read-only block contract alongside NVMe. Then
-   add bounded partition discovery and an ext4 reader. Retain device transport
-   and correlate available Limine disk/partition identities with the boot volume;
-   absent or ambiguous matches remain explicit. Build-time boot-image preparation
-   may append the planned >=512 MiB ext4 driver partition; no boot formatting or
-   migrations. SATA/AHCI and UAS are separate later backends, not prerequisites
-   for reaching the current USB boot medium.
+1. Finish boot-device/driver-volume selection before HID. NVMe and AHCI SATA
+   now provide the common block read/write/flush contract alongside USB BOT.
+   USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
+   GUID across available devices without silently accepting duplicates or assuming
+   enumeration order. Retain transport identity; correlate available Limine identity
+   where usable and report unknown/ambiguous origin explicitly. No boot formatting
+   or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
+   and writes are implemented; optimize barrier batching only after preserving
+   commit/checkpoint ordering and repeating crash validation.
 2. Load driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
    USB/xHCI/mass-storage/partition/filesystem modules must initially arrive through
@@ -159,7 +202,7 @@ INTx routing also remain deferred until required by a consumer.
 Outstanding acceptance: native Intel CPU (including shared TSC), physical
 Intel/AMD firmware/device DMA takeover and posted-write drain. Both emulated
 IOMMU models on an AMD host do not establish those results. HPET-less SMP,
-hard latency bounds, NVMe writes/multiple controllers/namespaces/parallel queues,
+hard latency bounds, simultaneous storage controllers/namespaces/parallel queues,
 interrupt remapping and unsupported IOMMU firmware policies remain open.
 
 Tests stay on isolated builds/disposable media and never run candidate VMs or

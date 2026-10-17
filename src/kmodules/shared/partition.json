@@ -1,0 +1,37 @@
+{
+  "name": "partition",
+  "exports": [
+    {
+      "name": "partition.init",
+      "symbol": "partition_surface_init"
+    },
+    {
+      "name": "partition.find",
+      "symbol": "partition_surface_find",
+      "version": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "partition.read",
+      "symbol": "partition_surface_read"
+    },
+    {
+      "name": "partition.control",
+      "symbol": "partition_surface_control"
+    },
+    {
+      "name": "partition.close",
+      "symbol": "partition_surface_close"
+    },
+    {
+      "name": "partition.write",
+      "symbol": "partition_surface_write"
+    },
+    {
+      "name": "partition.flush",
+      "symbol": "partition_surface_flush"
+    }
+  ]
+}

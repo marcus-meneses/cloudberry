@@ -1,0 +1,41 @@
+{
+  "name": "usb-storage",
+  "exports": [
+    {
+      "name": "usb_storage.init",
+      "symbol": "usb_storage_surface_init"
+    },
+    {
+      "name": "usb_storage.open",
+      "symbol": "usb_storage_surface_open",
+      "version": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "usb_storage.read",
+      "symbol": "usb_storage_surface_read"
+    },
+    {
+      "name": "usb_storage.control",
+      "symbol": "usb_storage_surface_control"
+    },
+    {
+      "name": "usb_storage.info",
+      "symbol": "usb_storage_surface_info"
+    },
+    {
+      "name": "usb_storage.close",
+      "symbol": "usb_storage_surface_close"
+    },
+    {
+      "name": "usb_storage.write",
+      "symbol": "usb_storage_surface_write"
+    },
+    {
+      "name": "usb_storage.flush",
+      "symbol": "usb_storage_surface_flush"
+    }
+  ]
+}

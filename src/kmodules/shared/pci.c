@@ -5,7 +5,7 @@
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 struct dma_record {struct dma_record *next;struct mem_pages pages;int mapped;};
-struct device {struct pci_record *record;struct pci_device info;uintptr_t config;uint16_t command;int master,operations,attached;struct dma_record *dma;};
+struct device {struct pci_record *record;struct pci_device info;uintptr_t config;uint16_t command,msi_cap;int master,operations,attached;struct dma_record *dma;};
 static struct {const struct kernel_surfaces *hub;const struct hwenum_table *hw;const struct mmio_table *mmio;struct device *devices;struct pci_table table;uintptr_t heap;int iommu;kernel_surface_call cpu,map,alloc,free,pages,release,attach,map_dma,unmap,detach,ready;} state;
 static int bsp(void) {return state.cpu && !CALL(state.cpu,CPU_CURRENT,0,0).value;}
 static struct device *owned(size_t i,uint64_t owner) {return state.devices && i<state.hw->count && owner && state.devices[i].info.owner==owner?&state.devices[i]:NULL;}
@@ -72,7 +72,11 @@ static int capabilities(struct device *d) {
         if(offset<0x40 || offset>0xfc || (offset&3))return 0;
         uint64_t bit=UINT64_C(1)<<(offset/4);if(seen&bit)return 0;seen|=bit;
         unsigned kind=*(volatile uint8_t *)(d->config+offset);
-        if(kind==5)pci_write16(d->config+offset+2,pci_read16(d->config+offset+2)&~1u);
+        if(kind==5){
+            uint16_t control=pci_read16(d->config+offset+2);unsigned bytes=(control&128)?14:10;if(control&256)bytes=(control&128)?24:20;
+            if(d->msi_cap || offset+bytes>256)return 0;
+            d->msi_cap=offset;pci_write16(d->config+offset+2,control&~1u);
+        }
         if(kind==0x11) {
             if(offset>0xf4 || d->info.msix_cap)return 0;
             uint16_t control=pci_read16(d->config+offset+2);d->info.msix_cap=offset;d->info.msix_count=(control&2047)+1;
@@ -144,6 +148,22 @@ struct kernel_surface_result pci_surface_msix(MODULE_ARGS) {
     pci_write32(entry+12,1);pci_write32(entry,(uint32_t)r->route.message_address);pci_write32(entry+4,r->route.message_address>>32);pci_write32(entry+8,r->route.message_data);
     pci_write16(cap+2,pci_read16(cap+2)|0xc000);pci_write32(entry+12,r->masked);pci_write16(cap+2,pci_read16(cap+2)&~0x4000u);
     return module_result(1,1);
+}
+/* One MSI message per owner. MSI has no table; disable before modifying
+ * address/data and clear MME so an endpoint cannot select an unowned vector. */
+struct kernel_surface_result pci_surface_msi(MODULE_ARGS){
+    MODULE_UNUSED();const struct pci_msix *r=(const void *)a;if(!r || !bsp())return module_result(0,0);
+    struct device *dev=owned(r->hardware_index,r->owner);
+    if(!dev || !dev->msi_cap || r->entry || r->masked>1 || r->route.owner!=r->owner || r->route.kind!=IRQ_MSI || !r->route.id)return module_result(0,0);
+    uintptr_t cap=dev->config+dev->msi_cap;uint16_t control=pci_read16(cap+2);int wide=!!(control&128);
+    if(!wide && r->route.message_address>UINT32_MAX)return module_result(0,0);
+    if(r->route.message_data>UINT16_MAX)return module_result(0,0);
+    control&=~0x71u;pci_write16(cap+2,control);
+    pci_write32(cap+4,(uint32_t)r->route.message_address);
+    if(wide)pci_write32(cap+8,r->route.message_address>>32);
+    pci_write16(cap+(wide?12:8),r->route.message_data);
+    if(control&256)pci_write32(cap+(wide?16:12),r->masked?UINT32_MAX:0);
+    pci_write16(cap+2,control|(r->masked?0:1));return module_result(1,1);
 }
 static uint64_t lock(void) {return CALL(state.cpu,CPU_ENTER,0,0).value;}
 static void unlock(uint64_t flags) {CALL(state.cpu,CPU_LEAVE,flags,0);}

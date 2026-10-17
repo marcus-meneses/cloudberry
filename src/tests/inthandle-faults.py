@@ -19,10 +19,8 @@ for name in ('nvme.img','sata.img'):
 for scenario,vector in ((1,6),(2,14),(3,8)):
     shutil.copyfile(build/f'tests/src-fault-{scenario}.elf',stage/'boot/kernel.elf')
     iso=test/f'fault-{scenario}.iso'
-    subprocess.run(['xorriso','-as','mkisofs','-R','-r','-J','--efi-boot',
-        'boot/limine/limine-uefi-cd.bin','-efi-boot-part','--efi-boot-image',
-        '--protective-msdos-label',str(stage),'-o',str(iso)],check=True,
-        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    subprocess.run([sys.executable,str(root/'src/tools/build-boot-image.py'),str(stage),str(iso)],
+                   check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     plan=subprocess.check_output(['make','-s','-n','-C',str(root/'src'),'run',
         f'BUILD={build}','QEMU_DISPLAY=none','QEMU_ACCEL=tcg',f'ISO={iso}',
         f'NVME_DISK={test}/nvme.img',f'SATA_DISK={test}/sata.img'],text=True)

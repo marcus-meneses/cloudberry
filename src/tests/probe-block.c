@@ -1,0 +1,78 @@
+#include "../kmodules/shared/nvme.h"
+#include "../kmodules/shared/sata.h"
+#include "../kmodules/shared/partition.h"
+#include "../kmodules/shared/ext4-fs.h"
+#include "../kmodules/shared/config.h"
+#include "../kmodules/shared/hwenum.h"
+#include "../kmodules/shared/threads.h"
+#include "probe.h"
+#include "../kmodules/shared/irq.h"
+#define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
+static void print(const char *p){while(*p)__asm__ volatile("outb %0,$0xe9"::"a"(*p++));}
+struct kernel_surface_result probe_block_call(MODULE_ARGS){
+    MODULE_UNUSED();struct probe_usb *job=(void *)a;const struct kernel_surfaces *hub=job->hub;unsigned line=0;
+#define CHECK(x) do{if(!(x)){line=__LINE__;goto failed;}}while(0)
+    const struct kernel_hub_table *hwref=kernel_hub_find_table(hub,HWENUM_TABLE_NAME),*guid=kernel_hub_find_table(hub,"config.drivers.partition_guid");CHECK(hwref && guid);
+    const struct hwenum_table *hw=(const void *)hwref->address;const struct config_value *g=(const void *)guid->address;CHECK(g->type==CONFIG_GUID && g->bytes==16);
+    uint64_t index=hw->count;for(size_t i=0;i<hw->count;++i){const struct hwenum_descriptor *h=&hw->entries[i];if(h->kind==HWENUM_PCI && h->data.pci.class_code==1 && h->data.pci.subclass==(job->write==1?8:6)){CHECK(index==hw->count);index=i;}}
+    CHECK(index<hw->count);
+    kernel_surface_call close=kernel_surface_find(hub,job->write==1?"nvme.close":"sata.close"),open=kernel_surface_find(hub,job->write==1?"nvme.open":"sata.open"),select=kernel_surface_find(hub,"partition.find"),unselect=kernel_surface_find(hub,"partition.close"),mount=kernel_surface_find(hub,"ext4_fs.mount"),unmount=kernel_surface_find(hub,"ext4_fs.unmount"),read=kernel_surface_find(hub,"ext4_fs.read"),write=kernel_surface_find(hub,"ext4_fs.write"),stat=kernel_surface_find(hub,"ext4_fs.stat"),mutate=kernel_surface_find(hub,"ext4_fs.mutate");CHECK(close && open && select && unselect && mount && unmount && read && write && stat && mutate);
+    struct block_device disk,part;struct nvme_info ni={0};struct sata_info si={0};struct sata_open request={.hardware_index=index};
+    struct kernel_surface_result opened;
+    if(job->write==1){CHECK(CALL(open,index,&ni,UINT32_MAX).status);opened=CALL(open,index,&ni,0);if(opened.status){line=1000+opened.value;goto failed;}CHECK(!CALL(kernel_surface_find(hub,"nvme.block"),&disk,sizeof(disk),0).status);}
+    else {opened=CALL(open,&request,&disk,sizeof(disk));if(opened.status){line=2000+opened.value;goto failed;}}
+    CHECK(block_valid(&disk) && block_writable(&disk));uint64_t old_cookie=disk.cookie;unsigned char buffer[4096];
+    CHECK(!disk.read(disk.cookie,disk.blocks,0,0,0,0).status);
+    CHECK(disk.read(disk.cookie,disk.blocks,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    CHECK(disk.write(disk.cookie,disk.blocks,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    CHECK(disk.read(disk.cookie,0,1,(uintptr_t)buffer,1,0).status);
+    CHECK(disk.read(disk.cookie,0,4097/disk.block_bytes+1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    CHECK(!select((uintptr_t)&disk,(uintptr_t)g->data,(uintptr_t)&part,sizeof(part),0,0).status);
+    CHECK(CALL(close,job->write==1?0:disk.cookie,0,0).status);
+    CHECK(part.write(part.cookie,part.blocks,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    struct ext4_info fs;CHECK(!CALL(mount,&part,&fs,EXT4_MOUNT_WRITE).status && !fs.readonly);CHECK(CALL(unselect,part.cookie,0,0).status);
+    struct kernel_surface_result r=read(fs.cookie,(uintptr_t)"/boot/system/drivers/probe.bin",123,(uintptr_t)buffer,sizeof(buffer),0);CHECK(!r.status && r.value==sizeof(buffer));for(unsigned i=0;i<sizeof(buffer);++i)CHECK(buffer[i]==(uint8_t)((i+123)*37+11));
+    const char *path="/boot/system/drivers/backend-write.bin";
+    for(unsigned i=0;i<sizeof(buffer);++i)buffer[i]=i*13+7;
+    CHECK(!write(fs.cookie,(uintptr_t)path,0,(uintptr_t)buffer,sizeof(buffer),EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE).status);
+    CHECK(!write(fs.cookie,(uintptr_t)path,UINT64_MAX,(uintptr_t)"TAIL",4,EXT4_WRITE_APPEND).status);
+    struct ext4_stat st;CHECK(!CALL(stat,fs.cookie,path,&st).status && st.bytes==4100);
+    CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(mount,&part,&fs,0).status && fs.readonly);
+    r=read(fs.cookie,(uintptr_t)path,4096,(uintptr_t)buffer,sizeof(buffer),0);CHECK(!r.status && r.value==4 && buffer[0]=='T' && buffer[3]=='L');
+    CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(mount,&part,&fs,EXT4_MOUNT_WRITE).status);
+    CHECK(!mutate(fs.cookie,EXT4_MUTATE_RENAME,(uintptr_t)path,0,(uintptr_t)"/boot/system/drivers/renamed.bin",0).status);
+    CHECK(!mutate(fs.cookie,EXT4_MUTATE_REMOVE,(uintptr_t)"/boot/system/drivers/renamed.bin",0,0,0).status);
+    CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(unselect,part.cookie,0,0).status);
+    uint64_t route=0;struct irq_info irq;
+    if(job->write==1){CHECK(!CALL(kernel_surface_find(hub,"nvme.info"),&ni,0,0).status && ni.interrupts);route=ni.route_id;}
+    else{CHECK(!CALL(kernel_surface_find(hub,"sata.info"),disk.cookie,&si,0).status && si.interrupts && si.writes && si.flushes);route=si.route_id;}
+    CHECK(!CALL(kernel_surface_find(hub,"irq.info"),route,&irq,0).status && irq.delivered && irq.drained);
+    CHECK(!CALL(disk.control,disk.cookie,BLOCK_RETAIN,0).status && CALL(close,job->write==1?0:disk.cookie,0,0).status && !CALL(disk.control,disk.cookie,BLOCK_RELEASE,0).status);
+    /* Suppress notification delivery: deadline poisons the owner, cleanup and
+     * reopen must not revive the old cookie. No write is retried. */
+    CHECK(!CALL(kernel_surface_find(hub,"irq.enable"),route,irq.route.owner,0).status);
+    CHECK(disk.read(disk.cookie,0,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    CHECK(disk.flush(disk.cookie,0,0,0,0,0).status);
+    CHECK(!CALL(close,job->write==1?0:disk.cookie,0,0).status);
+    CHECK(disk.read(old_cookie,0,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    if(job->write==1){CHECK(!CALL(open,index,&ni,1).status && !CALL(kernel_surface_find(hub,"nvme.block"),&disk,sizeof(disk),0).status);}
+    else CHECK(!CALL(open,&request,&disk,sizeof(disk)).status);
+    CHECK(disk.cookie!=old_cookie && disk.read(old_cookie,0,1,(uintptr_t)buffer,sizeof(buffer),0).status && !disk.read(disk.cookie,0,1,(uintptr_t)buffer,sizeof(buffer),0).status);
+    CHECK(!CALL(close,job->write==1?0:disk.cookie,0,0).status);
+    if(job->write==1){
+        CHECK(CALL(open,index,&ni,2).status);
+        struct kernel_surface_result reopen=CALL(open,index,&ni,1);
+        if(reopen.status){line=3000+reopen.value;goto failed;}
+        CHECK(ni.namespace_id==1);
+        /* Admin queue setup can leave a deferred message in flight. Close
+         * deliberately retains ownership until that callback has drained. */
+        kernel_surface_call thread=kernel_surface_find(hub,"threads.control");CHECK(thread);
+        unsigned retry=0;
+        while(CALL(close,0,0,0).status && retry++<128)CHECK(!CALL(thread,THREAD_YIELD,0,0).status);
+        CHECK(retry<=128);
+    }
+    print(job->write==1?"PASS block NVMe: boot media, GPT GUID, ext4 journal writes/remount, MSI-X, bounds/pins, timeout/reset/stale identity\n":"PASS block SATA: boot media, GPT GUID, ext4 journal writes/remount, MSI, bounds/pins, timeout/reset/stale identity\n");
+    job->done=1;return module_result(1,1);
+failed:job->done=1;job->errors=line;return module_result(line,0);
+#undef CHECK
+}
