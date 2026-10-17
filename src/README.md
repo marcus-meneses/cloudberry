@@ -613,7 +613,7 @@ The latest two native runs each used six attempts with requested intervals of
 measurement, communication and other boot costs. End-to-end qualification time
 is not yet reported separately. Full raw profiling storage is retained per CPU.
 
-Current next priorities are module-image arena expansion, multiple NVMe/SATA
+Current next priorities are multiple NVMe/SATA
 instances and completion of USB device/hub hotplug cleanup, followed by bootstrap boot-volume selection and driver
 reading and loading driver modules from disk, followed by process isolation; see [roadmap](ROADMAP.md#next-priorities).
 

@@ -10,7 +10,7 @@ may supply new boot pages; no fixed physical address is assumed.
 | Kernel | `0xffffffff80000000` onward | Limine segments |
 | Initial stack and responses | Limine addresses | Retained bootloader memory |
 | Source module images | Limine HHDM addresses | Retained executable/modules memory |
-| Loaded kmodules | Sequential from `0xffffffffa0000000` | Exact reserved pages; RX code and RW/NX data/BSS; guard page between images |
+| Loaded kmodules | Sequential within 1 GiB from `0xffff920000000000` | Exact reserved pages; RX code and RW/NX data/BSS; guard page between images |
 | Hub header | `0xffffffffa1000000` | One retained page, RO/NX |
 | Hub methods | `0xffff900000000000` | Page-backed on demand, RO/NX |
 | Hub table references | `0xffff900001000000` | Page-backed on demand, RO/NX |

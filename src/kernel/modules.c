@@ -326,9 +326,9 @@ static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,c
         h->export_bytes != sizeof(struct kmodule_export) || !h->exports_count ||
         h->exports_offset < sizeof(*h) || h->exports_offset % 8 || h->exports_offset > h->writable_offset ||
         h->exports_count > (h->writable_offset - h->exports_offset) / sizeof(struct kmodule_export) ||
-        h->exports_count>UINT32_MAX-kernel_surface_count(hub_writable) || next_module > KERNEL_SURFACES_ADDRESS ||
-        h->memory_bytes > KERNEL_SURFACES_ADDRESS - next_module ||
-        h->memory_bytes > KERNEL_SURFACES_ADDRESS - next_module - 4096) return false;
+        h->exports_count>UINT32_MAX-kernel_surface_count(hub_writable) || next_module > KERNEL_MODULES_LIMIT ||
+        h->memory_bytes > KERNEL_MODULES_LIMIT - next_module ||
+        h->memory_bytes > KERNEL_MODULES_LIMIT - next_module - 4096) return false;
     const struct kmodule_export *exports = (const void *)((const unsigned char *)image + h->exports_offset);
     uint64_t code_start = h->exports_offset + h->exports_count * sizeof(*exports);
     for (size_t i = 0; i < h->exports_count; ++i) {

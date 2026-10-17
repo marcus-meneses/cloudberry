@@ -6,8 +6,12 @@
 #include "surfaces.h"
 #include "../kmodules/shared/module.h"
 #ifndef KERNEL_MODULES_ADDRESS
-#define KERNEL_MODULES_ADDRESS UINT64_C(0xffffffffa0000000)
+#define KERNEL_MODULES_ADDRESS UINT64_C(0xffff920000000000)
 #endif
+/* Image code/data use an independent 1 GiB virtual arena. Physical extents
+ * are committed on load; retired/failed extents are never reused yet. */
+#define KERNEL_MODULES_BYTES UINT64_C(0x40000000)
+#define KERNEL_MODULES_LIMIT (KERNEL_MODULES_ADDRESS+KERNEL_MODULES_BYTES)
 #ifndef KERNEL_HUB_ARRAYS_ADDRESS
 #define KERNEL_HUB_ARRAYS_ADDRESS UINT64_C(0xffff900000000000)
 #endif

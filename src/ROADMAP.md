@@ -182,23 +182,22 @@ Native Intel CPU and physical NVMe/IOMMU remain pending.
     Focused host and four-CPU guest checks pass. Active documentation was reviewed
     for current storage, hub capacity/layout and lifetime claims.
 
+21. Closed: module images use an independent 1 GiB virtual arena at
+    0xffff920000000000, with demand-allocated physical extents, RX/RW-NX
+    permissions and per-image guards. Retired/failed extents remain reserved.
+    Four-CPU AMD-Vi isolated validation loaded a 20 MiB BSS-heavy image, checked
+    guards/permissions and rejected oversized and unavailable-physical-memory
+    requests without publishing partial exports.
+
 ## Next priorities
 
 Review update: 2026-10-17. The resized dynamic hub has four-CPU guest validation.
-Arena expansion, multi-instance storage and completion of USB hotplug cleanup
+Multi-instance storage and completion of USB hotplug cleanup
 are planned next, before bootstrap storage selection and disk-loaded future modules.
 USB enumeration/hotplug already exists; the new priority closes lifecycle and
 storage-disconnection gaps rather than replacing that implementation.
 
-1. Remove the separate 16 MiB module-image arena ceiling. Introduce a larger,
-   explicitly reserved virtual arena with checked image-extent allocation and
-   per-image guard pages. Commit physical memory only as images are loaded;
-   preserve RX code and RW/NX state permissions. Loaded, retired and uncertain
-   failed-construction extents remain reserved until safe executable reclamation
-   exists. Keep this independent of the hub's 16 MiB array windows. Validate
-   loading beyond the old bound, non-overlap, guards and allocation failure using
-   isolated synthetic modules.
-2. Support multiple active NVMe/SATA instances without changing the common block
+1. Support multiple active NVMe/SATA instances without changing the common block
    contract. Allocate per-controller ownership, queue, IRQ and DMA state; NVMe
    namespaces and AHCI ports get distinct device records, cookies and lifetimes.
    AHCI ports share controller ownership safely: opening/closing one port must
@@ -207,7 +206,7 @@ storage-disconnection gaps rather than replacing that implementation.
    namespaces and two SATA ports, stale identities and closing/failing one device
    while another remains usable where the hardware failure boundary permits it.
    Simultaneous instances do not imply parallel command queues or SMP I/O dispatch.
-3. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
+2. Complete USB device and external-hub hotplug lifecycle support. Treat xHCI,
    AHCI/NVMe controllers and platform devices as boot-lifetime hardware; general
    PCI/controller removal, rediscovery and kernel-module unloading are excluded.
    Handle USB attachment, removal and nested hub subtree removal with fresh
@@ -221,7 +220,7 @@ storage-disconnection gaps rather than replacing that implementation.
    unsafe. Keep driver code and top-level registry tables loaded. Validate repeated
    attach/remove cycles, in-flight I/O, nested hub loss, cleanup and stale-reference
    rejection on disposable media; verify that unrelated devices keep working.
-4. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
+3. Implement bootstrap boot-device/driver-volume selection before HID. NVMe and AHCI SATA
    now provide the common block read/write/flush contract alongside USB BOT.
    USB BOT read/write/flush, GPT slices and journaled ext4 now exist; select the configured
    GUID across available devices without silently accepting duplicates or assuming
@@ -230,7 +229,7 @@ storage-disconnection gaps rather than replacing that implementation.
    or migrations. UAS remains a separate later backend. Extend unsupported filesystem coverage when a consumer needs it. Journal replay
    and writes are implemented; optimize barrier batching only after preserving
    commit/checkpoint ordering and repeating crash validation.
-5. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
+4. Load selected future driver modules from disk through the kernel: reuse image/contract checks,
    resolve hub dependencies and select drivers for discovered devices. Foundational
    modules, including all existing kmodules, remain Limine-loaded from the boot
    partition. Only explicitly selected future modules use the ext4 directory. Loading and safe hot

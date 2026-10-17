@@ -633,3 +633,8 @@ boot rebuilt the kernel and hub probe against 16 MiB windows and passed late
 registration, stable RO/RX mappings, CPU1 stub execution, caller/lease draining,
 retirement and stale-call rejection. GPT/ext4 host checks passed afterward.
 Run ID: `8ad19743be294d31aeefcb8b0d6c1209`. Candidate VM and persistent developer disks were not used.
+
+Module-image arena acceptance (2026-10-17): isolated four-CPU AMD-Vi boot
+loaded a 20 MiB BSS-heavy image beyond the former aggregate 16 MiB boundary,
+verified RX/RW-NX mappings and an unmapped guard, rejected an oversized virtual
+request and a 600 MiB physical request on a 512 MiB VM without new exports.

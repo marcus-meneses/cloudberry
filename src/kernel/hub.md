@@ -50,6 +50,11 @@ Name lookup is still linear. No hash index or performance claim is introduced.
 Remote instruction fetch is serialized after stub construction and before module
 publication, in addition to the mapping shootdown.
 
+Loaded images occupy a separate 1 GiB virtual arena starting at
+`0xffff920000000000`, with an unmapped guard after every image. It does not share
+capacity with the hub arrays or header. Physical image pages are allocated on load;
+retired and uncertain failed extents are not reused.
+
 Module image **format3** requires hub ABI3. Format2 images are rejected before
 allocation or publication. All bundled modules are rebuilt together. Argument
 contracts still live in C headers; C++ layouts are not part of the ABI.

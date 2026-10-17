@@ -81,7 +81,7 @@ clock and extended-state foundation; native xHCI and physical-device validation
 remain pending.
 
 The [current assessment](src/README.md#current-assessment-2026-10-16) separates
-implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: expand the module-image arena, support multiple NVMe/SATA instances and complete USB device/hub hotplug cleanup,
+implemented mechanisms, validation and remaining limits. Hub class-only restart and descriptor validation are complete. Next: support multiple NVMe/SATA instances and complete USB device/hub hotplug cleanup,
 then implement bootstrap boot-volume selection and load selected future modules from disk. Process isolation follows that
 foundation. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
 

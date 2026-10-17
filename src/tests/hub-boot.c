@@ -25,6 +25,19 @@ static struct kernel_hub_table tables[200];static uint64_t payload=123;
 bool kernel_hub_test(const struct kernel_surfaces *hub,struct boot_pages *pages){
     __asm__ volatile("sti":::"memory");
     const struct kernel_surface *stable_methods=kernel_surface_entries(hub);const struct kernel_hub_table *stable_config=kernel_hub_find_table(hub,"config.version");kernel_surface_call clock=kernel_surface_find(hub,"clock.now_ns"),publish=kernel_surface_find(hub,"hub.publish_tables"),control=kernel_surface_find(hub,"hub.owner_control"),inspect=kernel_surface_find(hub,"hub.owner_info"),pin=kernel_surface_find(hub,"hub.owner_pin");CHECK(stable_config && clock && publish && control && inspect && pin);
+    /* A sparse BSS-heavy module crosses the former aggregate 16 MiB bound. */
+    struct kmodule_image *large=fixture(pages,"arena-large","arena-large.m",1,NULL);CHECK(large);
+    large->memory_bytes=KERNEL_MODULES_BYTES+4096;
+    CHECK(!kernel_module_load_owned(pages,large,large->image_bytes,"arena-large",0));
+    large->memory_bytes=20*1024*1024;
+    CHECK(kernel_module_load_owned(pages,large,large->image_bytes,"arena-large",0));
+    struct kernel_hub_owner extent;uint64_t extent_id=kernel_surface_owner(hub,"arena-large.m0");
+    CHECK(!CALL(inspect,extent_id,&extent,0).status && extent.bytes==20*1024*1024 && extent.image>=KERNEL_MODULES_ADDRESS && extent.image+extent.bytes<KERNEL_MODULES_LIMIT);
+    CHECK(permissions(pages,extent.image,1) && permissions(pages,extent.image+large->writable_offset,UINT64_C(0x8000000000000003)) && !permissions(pages,extent.image+extent.bytes,1));
+    CHECK(CALL(kernel_surface_find(hub,"arena-large.m0"),37,0,0).value==42);
+    struct kmodule_image *oom=fixture(pages,"arena-oom","arena-oom.m",1,NULL);CHECK(oom);
+    oom->memory_bytes=600*1024*1024;uint32_t unchanged=kernel_surface_count(hub);
+    CHECK(!kernel_module_load_owned(pages,oom,oom->image_bytes,"arena-oom",0) && kernel_surface_count(hub)==unchanged && !kernel_surface_find(hub,"arena-oom.m0"));
     uint32_t before=kernel_surface_count(hub);struct kmodule_image *h=fixture(pages,"hub-grow","hub-grow.m",600,NULL);CHECK(h);h->format=2;uint64_t reservations=pages->reservations.count;
     CHECK(!kernel_module_load_owned(pages,h,h->image_bytes,"hub-grow",0) && kernel_surface_count(hub)==before && pages->reservations.count==reservations);h->format=KMODULE_FORMAT;
     CHECK(kernel_module_load_owned(pages,h,h->image_bytes,"hub-grow",0) && kernel_surface_count(hub)==before+600);
