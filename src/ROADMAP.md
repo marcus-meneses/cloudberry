@@ -310,18 +310,17 @@ are implemented. The three execution/handler priorities are closed:
    and native Intel CPU acceptance remain open.
 
 Current status (2026-10-18): repeated native AMD-host KVM process/input/handle
-acceptance is closed. Isolated phase profiling and simultaneous-client/lifecycle
-checks are implemented; the latest request-storage change still needs a native
-latency comparison. See [the profiling guide](tests/handle-profiling.md).
+acceptance, isolated phase profiling, bounded request-allocation tuning and
+simultaneous-client/lifecycle acceptance are closed. The uninstrumented nine-run
+session `20261018T153448.340455Z` is the new host baseline. All reported medians
+improve against the preceding baseline, with no correctness/clock rejection.
+See [the profiling guide](tests/handle-profiling.md).
 
-Current next steps:
-
-1. Native phase collection passes three four-CPU AMD-host KVM runs. Next compare
-   the uninstrumented request-storage change against the accepted baseline.
-2. Resolve any reproducible IPC/allocation regression using phase-specific
-   evidence; broad lock or mapping changes remain unjustified by whole-run peaks.
-3. After this performance closure, advance explicit application launch/installed
-   identity and lifecycle policy. Bootstrap remains a startup coordinator.
+Next architectural milestone: explicit application launch/installed identity and
+lifecycle policy, after discussion of that scope. Bootstrap remains a startup
+coordinator. Further performance work should target a reproducible workload and
+use isolated phase evidence; no additional mapping/lock rewrite or benchmark
+campaign is required to close the current three priorities.
 
 One boot input domain, pinned single-threaded processes, negotiated boot-keyboard
 HID and trusted unsigned development bundles remain intentional limits.
@@ -846,3 +845,39 @@ Next remains the ordinary uninstrumented native comparison against
 `20261018T063747.870742Z`. Profiling-only results cannot establish a production
 latency win or justify changing scheduling/locking on their own. No production
 code changed at this acceptance step.
+
+
+## Uninstrumented native handle acceptance (2026-10-18)
+
+Session `20261018T153448.340455Z` at revision `ab6a747` passes all nine
+uninstrumented KVM boots against `20261018T063747.870742Z`: three each on one
+CPU/no IOMMU, four CPUs/AMD-Vi and four CPUs/VT-d, on the same AMD host. All
+origin/begin/end snapshots retain qualified TSC, without runtime/qualification
+errors or unavailable/HPET lock samples. Every run also passes simultaneous
+clients, queued/dispatched deadlines, late results and page/stack cleanup.
+Exact broker heap restoration is separately accepted by the preceding profiled
+native session; the uninstrumented variant contains no heap-count probe.
+
+Raw median of boot medians, microseconds (change from reference):
+
+| Case | Acquire | Reflection | Empty echo | 4096-byte echo | Page allocate/free |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One CPU | 11.04 (-12.5%) | 15.19 (-11.8%) | 102.33 (-10.2%) | 136.85 (-12.7%) | 38.46 (-11.3%) |
+| Four CPUs, AMD-Vi | 11.20 (-7.0%) | 15.41 (-8.6%) | 125.98 (-9.0%) | 176.43 (-11.3%) | 39.30 (-5.7%) |
+| Four CPUs, VT-d | 11.18 (-17.5%) | 15.37 (-18.6%) | 111.99 (-22.8%) | 148.49 (-37.0%) | 39.22 (-42.1%) |
+
+All eight measured case medians improve in all configurations. Kernel-path
+boot medians are now tightly grouped; IPC remains more variable (AMD-Vi 4096-byte
+echo boot medians span 151.13–185.13 us). Three boots do not isolate host effects
+or establish statistical significance; the noisier preceding session especially
+limits attribution of large VT-d percentage changes to the code change alone.
+Accept this as the new observed native baseline and close the current performance/
+concurrency follow-up, without a hard latency guarantee or native Intel claim.
+
+The profiled and uninstrumented sessions have identical common kernel/probe/app
+binary hashes; the disposable broker variant and generated ISO differ. On the
+four-CPU AMD-Vi case, profiled/unprofiled medians are 3.24x for the clock bracket,
+3.37x for acquisition and 1.52x for empty echo. These cross-session observations
+show substantial probe perturbation; they are not universal correction factors.
+Do not optimize production scheduling from uncorrected instrumented totals alone.
+No further production code changed at this acceptance step.

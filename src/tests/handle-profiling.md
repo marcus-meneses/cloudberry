@@ -18,7 +18,7 @@ Run the ordinary native comparison separately:
 
 ```sh
 ./scripts/bench-handles-kvm.sh --runs 3 \
-  --reference-session bin/tests/kvm-handles/20261018T063747.870742Z
+  --reference-session bin/tests/kvm-handles/20261018T153448.340455Z
 ```
 
 Both commands save raw guest logs, parsed reports, source/binary/host identities
@@ -135,5 +135,24 @@ bracket is 25.14 us and empty echo median 190.93 us with instrumentation enabled
 Those are diagnostic values: the previous uninstrumented revision also differs
 in request storage, so comparing those sessions cannot isolate either total
 probe overhead or production speedup. The ordinary native comparison command
-above remains required before latency acceptance. No further production
+was still required at this diagnostic step; it is now closed below. No further production
 optimization is inferred solely from these instrumented timings.
+
+
+## Uninstrumented acceptance and current baseline
+
+Session `20261018T153448.340455Z` passes all nine native runs, with stable
+qualified TSC and concurrency/page/stack cleanup acceptance. All reported medians
+are lower than reference `20261018T063747.870742Z`. Acquisition is about
+11.0–11.2 us, empty echo 102–126 us and page allocation/free 38–39 us across
+configurations. Use this new session as the ordinary performance reference for
+future changes. The current profiling/tuning/concurrency priorities are closed;
+no further collection is required for their acceptance. This does not establish
+hard latency bounds, isolate all host variation or qualify physical Intel CPUs.
+
+The preceding profiled session uses identical common kernel/probe/application
+binaries. Its AMD-Vi clock-bracket median is 3.24x the uninstrumented result,
+acquisition 3.37x and empty echo 1.52x. The probes materially perturb short paths;
+the 296–300 ns empty clock-pair sample is only a lower bound, not the total
+tracing cost. Keep profiled and ordinary baselines separate, and do not subtract
+these cross-session ratios as fixed per-call corrections.

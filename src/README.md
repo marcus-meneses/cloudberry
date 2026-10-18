@@ -242,20 +242,23 @@ validated against their prefix before configuration. Automatic failed-provider
 recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
-The native handle baseline now passes nine AMD-host KVM boots across one/four CPUs
-and both emulated IOMMU models. Qualified TSC remains stable during measurement.
-Raw acquisition medians are about 14–15 µs and empty echo medians 119–154 µs,
-including a roughly 10 µs handle-based clock bracket. See the
-[accepted baseline and timing qualifications](ROADMAP.md#native-handle-baseline-acceptance-2026-10-18).
-Small gate inputs now use 256 bytes of per-call stack scratch; larger frames and
-retained request/reply storage remain separately allocated. Native comparison passes nine more correctness runs: acquisition/reflection
-medians improve, while four-CPU VT-d IPC/allocation results regress with substantial
-between-boot variation. Overall speedup remains unproven;
-[isolated phase attribution and concurrency checks](tests/handle-profiling.md) now
-separate broker work, copy/check work, blocking and provider handoff. Coallocating
-request metadata and its immutable input removes 1,288 of 5,782 allocations in
-the instrumented benchmark (22.3%); native latency improvement remains unmeasured.
-Physical and native Intel acceptance remain open.
+The current native handle baseline, `20261018T153448.340455Z`, passes nine
+AMD-host KVM boots across one/four CPUs and both emulated IOMMU models, including
+concurrent-client, deadline and resource-cleanup checks. Qualified TSC remains
+stable during measurement. Raw acquisition medians are about 11.0–11.2 µs,
+empty echo 102–126 µs and page allocation/free 38–39 µs, including a roughly
+7.7 µs handle-based clock bracket. All measured medians improve against the
+previous session; these are observed host results, not hard bounds or proof that
+request storage alone caused the full reduction. See the
+[accepted native comparison](ROADMAP.md#uninstrumented-native-handle-acceptance-2026-10-18).
+
+Small gate inputs use 256 bytes of per-call stack scratch. Larger temporary
+frames use the heap; retained metadata and immutable input share one owned
+request allocation. This removes 1,288 of 5,782 broker allocations in the benchmark
+(22.3%). Replies keep independent lifetime. [Isolated phase profiling](tests/handle-profiling.md)
+separates broker work, copies, blocking and handoff; it is absent from the candidate
+and materially affects timings. The current performance/concurrency follow-up is
+closed; physical and native Intel acceptance remain open.
 
 The hub grows within reserved virtual windows and allocates physical pages only
 as needed. Current production includes process, handle and I/O methods plus a bootstrap
