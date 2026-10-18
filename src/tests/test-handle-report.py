@@ -1,4 +1,7 @@
 import unittest
+import importlib.util
+import pathlib
+import hashlib
 from handle_report import parse_handles
 
 
@@ -11,6 +14,15 @@ def fixture():
 
 
 class Reports(unittest.TestCase):
+    def test_host_identity(self):
+        path=pathlib.Path(__file__).with_name('bench-handles-kvm.py')
+        spec=importlib.util.spec_from_file_location('handle_collector',path);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        a={'cpu':'vendor_id: AuthenticAMD\nmodel name: test\nflags: avx\nmicrocode: 1\ncpu MHz: 1000'}
+        b={'cpu':a['cpu'].replace('1000','2500')}
+        self.assertEqual(module.comparable_host(a),module.comparable_host(b))
+        self.assertNotEqual(module.comparable_host(a),module.comparable_host({'cpu':a['cpu'].replace('AuthenticAMD','GenuineIntel')}))
+        self.assertEqual(module.digest(path),hashlib.sha256(path.read_bytes()).hexdigest())
+
     def test_complete(self):
         result = parse_handles(fixture(), 1)
         self.assertEqual(result['measurements']['clock_bracket']['count'], 48)

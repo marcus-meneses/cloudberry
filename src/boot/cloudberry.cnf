@@ -10,6 +10,5 @@ drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
 # Explicit future module basenames, in dependency order; empty loads none.
 drivers.modules=
 
-# First privileged user-space provider, loaded from the driver partition.
-keyboard.enabled=true
-keyboard.layout=ibm
+# Provider bundle basenames in startup order; empty starts none.
+boot.providers=keyboard

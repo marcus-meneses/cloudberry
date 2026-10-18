@@ -10,8 +10,7 @@ static const struct schema {char key[25],fallback[32];unsigned type,flags;uint64
     {.key="drivers.modules",.fallback="",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="drivers.directory",.fallback="/boot/system/drivers",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="storage.timeout_ms",.fallback="1000",.type=CONFIG_UINT,.flags=DEFAULT,.min=1,.max=UINT32_MAX},
-    {.key="keyboard.enabled",.fallback="true",.type=CONFIG_BOOL,.flags=DEFAULT},
-    {.key="keyboard.layout",.fallback="ibm",.type=CONFIG_STRING,.flags=DEFAULT},
+    {.key="boot.providers",.fallback="keyboard",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="drivers.partition_guid",.type=CONFIG_GUID}
 };
 #define ITEMS (sizeof(schemas)/sizeof(schemas[0]))

@@ -17,5 +17,6 @@ int main(int argc,char **argv){assert(argc==3);struct keyboard_layout ibm=load(a
     report[2]=47;assert(keyboard_report(&s,&br,report,emit,NULL) && s.accent==0x301);report[2]=4;assert(keyboard_report(&s,&br,report,emit,NULL));assert(events[count-2].codepoint=='a' && events[count-1].codepoint==0x301 && !s.accent);
     report[0]=64;report[2]=20;assert(keyboard_report(&s,&br,report,emit,NULL) && events[count-1].codepoint=='/');keyboard_reset(&s,emit,NULL);assert(!s.pressed[230] && !s.pressed[20] && !s.repeat_key);
     const char *bad[]={"{}","{\"version\":1,\"keys\":[[4,55296,null,null,null]]}","{\"version\":1,\"keys\":[[256,1,2,3,4]]}","{\"version\":1,\"keys\":[[4,97,65,null,null],[4,1,2,3,4]]}","{\"version\":1,\"keys\":[],\"dead\":[[4,0]]}"};for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i){struct keyboard_layout l;assert(!keyboard_layout_parse(&l,bad[i],strlen(bad[i])));}
+    const char *selected;size_t selected_bytes;assert(keyboard_config_layout("layout=abnt2\n",13,&selected,&selected_bytes) && selected_bytes==5);assert(!keyboard_config_layout("layout=../bad\n",14,&selected,&selected_bytes));assert(!keyboard_config_layout("layout=ibm\nlayout=abnt2\n",24,&selected,&selected_bytes));
     puts("PASS keyboard: IBM/ABNT2 definitions, modifiers, repeats, Unicode/NUL/combining text, structured arrows, rollover/reset and malformed layouts");return 0;
 }

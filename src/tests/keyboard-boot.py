@@ -38,9 +38,9 @@ try:
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 text = log.read_text()
-                if any(marker in text for marker in ('FAULT', 'FAIL', 'inthandle: fatal', 'provider unavailable')):
+                if any(marker in text for marker in ('FAULT', 'FAIL', 'inthandle: fatal', 'provider startup failed')):
                     raise RuntimeError(text[-4000:])
-                if 'bootstrap: /@keyboard provider ready from ext4' in text and 'managed BSP event stack active' in text:
+                if 'bootstrap: provider ready: keyboard' in text and 'managed BSP event stack active' in text:
                     break
                 if process.poll() is not None:
                     raise RuntimeError(f'QEMU exited {process.returncode}: {text[-2000:]}')

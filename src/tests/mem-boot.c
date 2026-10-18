@@ -94,7 +94,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     if (r.status || !r.value) return test_failure(__LINE__);
     if (CALL(release, &heap, r.value, 0).status) return test_failure(__LINE__);
     kernel_surface_call config_info=find(page,"config.info"),batch=find(page,"hub.publish_tables");struct config_info configured;
-    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=8)return test_failure(__LINE__);
+    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=7)return test_failure(__LINE__);
     const struct kernel_hub_table *config_version=kernel_hub_find_table(page,"config.version"),*directory=kernel_hub_find_table(page,"config.drivers.directory");
     const struct kernel_hub_table *partition=kernel_hub_find_table(page,"config.drivers.partition_guid");
     if(!config_version || !directory || !partition)return test_failure(__LINE__);

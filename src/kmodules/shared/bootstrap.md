@@ -59,39 +59,73 @@ These check real transport selection, readonly ext4 fixture reads, duplicate
 rejection before mounting and complete enumeration across multiple namespaces.
 No candidate VM or developer persistent disk is run or attached by these tests.
 
-## First isolated boot provider
+## Isolated provider startup
 
-After starting volume selection, the core calls `bootstrap.apps`. With
-`keyboard.enabled=true` (default), a BSP worker waits for the selected readonly
-ext4 mount, then loads `keyboard/keyboard.elf`, `keyboard/manifest.json` and
-`keyboard/layouts/<keyboard.layout>.json` below `drivers.directory`. These bundle
-files are installed by the image builder, never copied/migrated during boot.
-`keyboard.layout` defaults to `ibm`; `abnt2` is also bundled. General installed-app
-identity/signature verification and interactive authorization remain future work.
+The core calls `bootstrap.apps` after volume selection starts. The startup worker
+waits for the selected readonly ext4 mount, then processes `boot.providers` in
+creation/readiness order. An empty list starts none; the default is `keyboard`.
+Each item is a bundle basename below `drivers.directory`. Bootstrap understands
+only the generic `provider.cnf` contract, never keyboard layouts or handler types.
+All foundational kmodules remain Limine-loaded and use their separate format3
+image loader; native handlers remain protected ring-3 processes.
 
-`bootstrap.keyboard(filesystem,optional_layout)` is the trusted kernel factory
-used by that worker and isolated acceptance. It validates the layout basename,
-loads a protected ELF, copies a read-only startup packet, admits the copied boot
-manifest and starts the process. It uses a stable development installation ID,
-not a verified signing key. Concurrent loads are rejected; a failed rollback that
-still needs reap retains its cleanup process ID. Foundational kmodules continue
-to load through Limine. The keyboard ELF is not a format3 kernel-module image.
+A descriptor is newline-delimited ASCII `key=value`, with blank/comment lines and
+CRLF accepted. Unknown/duplicate fields, invalid versions/identities and unsafe
+paths fail before admission. Required fields:
 
-The owned `bootstrap.applications` table and `bootstrap.apps_info` expose worker,
-keyboard process ID, state (0 idle, 1 awaiting volume, 2 starting, 3 ready, 4 failed)
-and error. These are BSP-owned advisory snapshots; readiness means publication,
-not physical keyboard presence. `apps_info` reaps an exited bootstrap worker. A
-provider failure retains its process identity for explicit owner cleanup; automatic
-restart/rebinding and arbitrary app launch policy are not part of this milestone.
+- `version=1`, `executable=<relative file>`, `manifest=<relative file>`.
+- `installation_id=<32 hex digits>`: a nonzero 16-byte development identity.
 
-Ordinary production startup passes on four-CPU AMD-Vi TCG, run
-`5d0ff656a58646828234075c05d1d731`, using the readonly hybrid image through
-explicit USB BOT/SCSI hard-disk attachment. This preserves its 512-byte GPT
-geometry. `tests/keyboard-boot.py` runs this acceptance without probe modules
-or fixture clients and never attaches developer persistent disks.
+Optional fields: `ready=<resource name>` (otherwise running process readiness),
+`cpu=0`, `stack_bytes=65536`, and `files=<comma-separated relative files>`.
+There is no fixed file/provider count ceiling. Absolute paths, empty path segments,
+`.`/`..` traversal and duplicate startup-file names are rejected. Bundle names
+are single path components. Values have no quoting or interpolation.
 
-Application status snapshots now recheck process state, stop requests and actual
-publication ownership. A failed/reaped/stopping provider or withdrawn publication
-cannot remain reported READY. This is an on-demand truthful snapshot, not an
-ongoing supervision daemon. Kernel owners use process.stop/reap and choose fresh
-launches explicitly; bootstrap retains startup coordination responsibilities.
+`bootstrap.launch(filesystem,bundle)` reads that definition, the named executable
+and manifest, and copies only the listed files into a generic startup packet.
+The process mechanism owns ELF validation/loading and private pages; handle
+mediation admits the copied manifest before execution. The C ABI startup packet
+in `interfaces/startup.h` contains named inline file data, with explicit lengths
+and no kernel pointers or implicit runtime resource grants. The handler interprets
+its own files. Keyboard consumes `config.cnf` and selects its own layout JSON.
+No keyboard header, filename convention, identity or layout parser exists in the
+bootstrap implementation. Signing/installed-app verification remains future work;
+these are trusted development image contents, not app-selected authority.
+
+The owned `bootstrap.applications` header contains worker, dynamic record count
+and aggregate state/error. Private records retain process ID, bundle, readiness
+name and state/error until explicit release. No reclaimable record/string pointer
+is published. `bootstrap.application_info(pid,out)` and
+`bootstrap.application_next(after_pid,out)` copy per-process status, with increasing
+never-reused IDs for enumeration. `bootstrap.apps_info`
+refreshes process/publication ownership and copies current aggregate status:
+0 idle, 1 awaiting volume, 2 starting, 3 ready, 4 failed/stopping. Reaped/faulted/
+stopping processes or withdrawn publications cannot remain READY. Snapshot APIs
+serialize with launch/release using a nonblocking BSP token, never a kernel-wide
+lock across I/O or waits. Callers retry a busy snapshot. The stable aggregate table is a trusted diagnostic reference; use the snapshot
+APIs for coherent state. Copied snapshots require no reader leases and remain
+valid values after metadata release.
+
+Launch failures report stage 1 directory/config, 2 definition, 3 data/allocations,
+4 ELF load, 5 manifest admission or 6 start in aggregate error. Live-record errors
+2/3 indicate process failure/stop or withdrawn readiness publication. Failed
+rollback retains its cleanup PID and record. Failed startup retains already
+started providers; it does not silently kill them or retry side effects.
+
+Lifecycle ownership is explicit: a trusted owner calls `process.stop`, waits for
+actual exit, calls `process.reap` until I/O is quiescent, then
+`bootstrap.release(process)` to free startup metadata. Release refuses a live or
+unreaped process; a retained bundle cannot be launched twice. Restart means a
+fresh load after these steps, with a fresh process/capability epoch. Bootstrap
+coordinates startup and supplies on-demand status; it is not an ongoing
+supervision daemon. Automatic restart/rebinding and forced cancellation remain
+separate policy/mechanism work.
+
+Acceptance uses host descriptor/startup/OOM checks and isolated real-process
+boots. An unrelated test bundle consumes arbitrary startup data through the same
+loader, proving the path does not depend on keyboard semantics. Test-only clients
+and fault providers never enter candidate images. `tests/keyboard-boot.py` boots
+the ordinary production image on disposable readonly USB BOT/SCSI disk media and
+waits for `bootstrap: provider ready: keyboard`. Its explicit disk attachment
+preserves the hybrid image's 512-byte GPT geometry. Developer disks are untouched.

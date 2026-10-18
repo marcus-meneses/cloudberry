@@ -21,6 +21,9 @@ The [application handle contract](interfaces/README.md) now defines the C bounda
 and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
 publishing `/@keyboard`. Headers are compile-tested in C/C++20; the [C system library and handle broker](kmodules/shared/handles.md) implement initial boot-policy authorization and isolated request/reply.
 The provider decodes boot-keyboard reports with bundled IBM/ABNT2 layouts.
+Bootstrap reads generic provider descriptors/startup files; keyboard interprets
+its own config.cnf. Lifecycle owners stop/reap explicitly, and status snapshots
+contain no reclaimable record pointers.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
@@ -128,7 +131,9 @@ passes its address/size to the separate [config kmodule](kmodules/shared/config.
 The module validates a typed schema, copies values into owned storage and
 atomically publishes `config.<key>` descriptor references through the hub.
 `boot.show_inventory` controls hardware listing. Bootstrap selects the driver
-volume; future module selection remains explicit. USB storage applies the
+volume; future module selection remains explicit. `boot.providers` selects
+provider bundles; each generic provider.cnf lists executable/manifest/startup files,
+and keyboard/config.cnf selects the keyboard layout. USB storage applies the
 configured command timeout. The source
 configuration supplies the GPT identity of the appended ext4 driver partition; image preparation uses that exact GUID. Missing/duplicate files and invalid configuration
 fail startup with a diagnostic. Parsing itself performs no disk access; bootstrap
@@ -335,20 +340,22 @@ src/
 ├── handlers/
 │   └── keyboard/
 │       ├── README.md
+│       ├── config.cnf
+│       ├── provider.cnf
 │       ├── hid.c
 │       ├── hid.h
 │       ├── keyboard.c
 │       ├── layouts/
 │       │   ├── abnt2.json
 │       │   └── ibm.json
-│       ├── manifest.json
-│       └── startup.h
+│       └── manifest.json
 ├── interfaces/
 │   ├── README.md
 │   ├── handle.h
 │   ├── io.h
 │   ├── memory.h
 │   ├── system.h
+│   ├── startup.h
 │   └── keyboard.h
 ├── kmodules/
 │   ├── amd/
@@ -499,6 +506,7 @@ src/
 │   │   ├── sata.h
 │   │   ├── sata.json
 │   │   ├── sata.md
+│   │   ├── provider-definition.h
 │   │   ├── process-elf.h
 │   │   ├── process-entry.S
 │   │   ├── process.c
@@ -577,6 +585,7 @@ src/
 │   │   ├── keyboard-denied.json
 │   │   ├── keyboard-read.json
 │   │   ├── keyboard-state.json
+│   │   ├── startup.c
 │   │   └── process.c
 │   ├── README.md
 │   ├── acpi-boot.c
@@ -644,6 +653,7 @@ src/
 │   ├── keyboard-stream.c
 │   ├── manifest.c
 │   ├── process-boot.c
+│   ├── provider-definition.c
 │   ├── process-elf.c
 │   ├── probe-process.c
 │   ├── probe-block.c

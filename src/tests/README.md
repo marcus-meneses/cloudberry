@@ -766,3 +766,21 @@ duplicate, malformed and wrong-topology data. No /dev/kvm is available here;
 native user-mode/input timing acceptance remains user-host work. The user process
 fixture now also preserves SSE and available AVX values across its gate and timer
 preemption; AVX execution requires guest CPUID/OSXSAVE/XCR0 support.
+
+Generic provider startup acceptance uses the production loader for keyboard and
+a separate startup-check bundle that reads arbitrary named data. Bootstrap has
+no keyboard-specific header or layout parser. Host tests cover descriptor paths,
+identity/version/unknown/duplicate rejection, copied packet framing and startup
+allocation rollback at each failing allocation. Status snapshots enumerate copied
+process/state values, and live/unreaped metadata release is refused. Layout
+configuration now belongs to keyboard/config.cnf; boot.providers selects bundles.
+
+Final generic-startup acceptance (2026-10-18): one-CPU TCG
+`1be5eb78706e49a28da981c9206e7b02`, four-CPU AMD-Vi TCG
+`6c8a1af5a72d4655b94ac7e98f2c638b`, and ordinary four-CPU AMD-Vi production boot
+`0a9842560b1a4e4ebbc53d015c467372` all pass. The final one-CPU collector/archive session
+is `20261018T055222.122944Z`. Host C/C++20 interface, provider-definition, config,
+keyboard, startup/OOM and status checks pass; parser/host-identity/hash checks
+pass after excluding volatile MHz from reference identity. Candidate bundle
+contents include only the real keyboard executable, descriptor, manifest, config
+and two layouts. Fault/startup-check/benchmark fixtures remain isolated.

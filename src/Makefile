@@ -943,7 +943,7 @@ $(BUILD)/tests/src-process-kernel.elf: $(BUILD)/tests/src-process-main.o $(BUILD
 .PHONY: test-process-boot _test-process-boot
 test-process-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-process-boot
-_test-process-boot: $(BUILD)/tests/apps/handle-bench.elf $(BUILD)/tests/apps/keyboard-fault.elf $(BUILD)/tests/apps/keyboard-client.elf $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
+_test-process-boot: $(BUILD)/tests/apps/startup.elf $(BUILD)/tests/apps/handle-bench.elf $(BUILD)/tests/apps/keyboard-fault.elf $(BUILD)/tests/apps/keyboard-client.elf $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --process-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
 .PHONY: test-process-elf
@@ -972,14 +972,14 @@ test-handles:
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
 	$(BUILD)/tests/handles
 
-$(BUILD)/apps/keyboard.elf: handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h handlers/keyboard/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
+$(BUILD)/apps/keyboard.elf: handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf handlers/keyboard/manifest.json $(wildcard handlers/keyboard/layouts/*.json)
+$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json)
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
-	cp handlers/keyboard/manifest.json $(BUILD)/src-handler-bundles/keyboard/manifest.json
+	cp handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(BUILD)/src-handler-bundles/keyboard/
 	cp handlers/keyboard/layouts/*.json $(BUILD)/src-handler-bundles/keyboard/layouts/
 	@touch $@
 .PHONY: test-keyboard
@@ -994,7 +994,7 @@ $(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-client.c sdk/system.c -o $@
 
-$(BUILD)/tests/apps/keyboard-fault.elf: tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
+$(BUILD)/tests/apps/keyboard-fault.elf: interfaces/startup.h tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-fault.c handlers/keyboard/hid.c sdk/system.c -o $@
 
@@ -1009,3 +1009,13 @@ test-bootstrap-apps:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/bootstrap-apps.c -o $(BUILD)/tests/bootstrap-apps
 	$(BUILD)/tests/bootstrap-apps
+
+.PHONY: test-provider-definition
+test-provider-definition:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/provider-definition.c -o $(BUILD)/tests/provider-definition
+	$(BUILD)/tests/provider-definition
+
+$(BUILD)/tests/apps/startup.elf: tests/apps/startup.c interfaces/startup.h sdk/system.c sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/startup.c sdk/system.c -o $@

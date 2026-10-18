@@ -157,3 +157,11 @@ are bridged through /@io for the keyboard provider. The disk-loaded provider pub
 acquire only manifest-authorized read/state operations. No general app installer, graphical interface, arbitrary
 device manager, networking or module image unloading is required for this step.
 See [the keyboard provider](../handlers/keyboard/README.md).
+
+`startup.h` defines the readonly native process startup-data envelope: versioned
+header plus named inline file entries. It carries bundle data explicitly selected
+by trusted startup policy, never handles, kernel pointers or additional runtime
+authority. The keyboard provider selects/interprets its own config/layout within
+that envelope. This is separate from handle invocation and from format3 kmodule
+initialization. Conventional argv/environment and runtime bundle filesystem access
+remain future work.

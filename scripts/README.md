@@ -92,3 +92,8 @@ It requires the same host/toolchain/QEMU and accelerator. Raw timings include
 clock endpoints, validation and result-record release. Bracket-adjusted medians
 are estimates, not pure IPC costs. Lock peaks include launch/owner-wait activity;
 this first baseline is not a contention stress test or a hard latency guarantee.
+
+Host comparisons use stable CPU vendor/model/features/microcode, excluding the
+instantaneous CPU MHz reading. Image hashes stream through bounded host buffers.
+The collector also covers user SSE/available AVX preservation, generic startup
+data and explicit provider fault/restart cleanup as part of each correctness boot.

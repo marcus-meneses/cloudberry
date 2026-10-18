@@ -1,7 +1,7 @@
 # Keyboard handler
 
 `keyboard.elf` is the first privileged isolated resource provider. Bootstrap loads
-its static native executable, JSON manifest and selected layout from the unique
+its static native executable, JSON manifest and declared startup files from the unique
 configured ext4 driver volume. It publishes **`/@keyboard`**, keyboard interface
 1.0, defined in [keyboard.h](../../interfaces/keyboard.h). Foundational kmodules
 remain Limine-loaded; the provider runs in ring 3 with its own private pages.
@@ -45,7 +45,10 @@ can retrieve state if authorized, or clear local state and resume at that anchor
 Each 64-byte event contains sequence, boot-unique device ID, monotonic emission
 time, kind/flags, physical HID usage and modifiers. TEXT carries Unicode scalars,
 including U+0000, correlated with the originating physical event. IBM and ABNT2
-JSON definitions live in `layouts/`; `keyboard.layout` selects a bundled filename.
+JSON definitions live in `layouts/`; the handler reads its own `config.cnf`
+(`layout=ibm` or `layout=abnt2`) and selects a bundled filename. Generic
+`provider.cnf` lists the startup files; bootstrap copies them without interpreting
+keyboard configuration. `boot.providers=keyboard` selects this bundle.
 Dead keys emit a base scalar plus combining mark, rather than claiming full IME
 or NFC composition. Repeat starts after 400 ms and continues at 33 ms intervals.
 Layout files, not terminal code or hardcoded named layouts, define text mapping.

@@ -24,8 +24,7 @@ is accepted. Type definitions, defaults and ranges belong to the module schema.
 | `boot.show_inventory` | boolean | `true`; controls the core's hardware inventory dump |
 | `drivers.directory` | string | `/boot/system/drivers`; selected module/handler bundle directory |
 | `drivers.modules` | string | Empty; explicit comma-separated future kmodule basenames |
-| `keyboard.enabled` | boolean | `true`; start the isolated keyboard provider |
-| `keyboard.layout` | string | `ibm`; layout basename under the keyboard bundle, also `abnt2` |
+| `boot.providers` | string | `keyboard`; comma-separated provider bundle basenames in startup/readiness order; empty starts none |
 | `storage.timeout_ms` | unsigned integer | `1000`, range 1–4294967295; BOT command deadline in usb-storage; future consumers may also use it |
 | `drivers.partition_guid` | GUID | Optional to parser; supplied in the boot config and required by image preparation |
 
@@ -61,8 +60,8 @@ Published descriptors and data live until reboot. Source text is never retained.
 They are immutable by trusted-kernel contract; heap pages are not separately
 write-protected and this is not a userland isolation boundary. Hub reference records
 and descriptor/data pointers remain stable across subsequent export registration.
-Configuration references identify the config provider, pinning its backing until reboot. The current schema retains eight 56-byte
-item slots plus string backing (directory, module list and layout), excluding
+Configuration references identify the config provider, pinning its backing until reboot. The current schema retains seven 56-byte
+item slots plus string backing (directory, module list and provider list), excluding
 allocator metadata. Temporary publication references are freed after init.
 
 `config.info(out)` reports readiness, published count, error code and source line.

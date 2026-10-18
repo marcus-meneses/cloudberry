@@ -42,3 +42,15 @@ int keyboard_report(struct keyboard_hid *s,const struct keyboard_layout *layout,
     return 1;
 }
 void keyboard_repeat(struct keyboard_hid *s,const struct keyboard_layout *layout,keyboard_emit emit,void *context){unsigned usage=s->repeat_key;if(!usage || !s->pressed[usage])return;uint64_t origin=emit(context,CB_KEY_REPEAT,usage,0,s->modifiers,s->origin[usage],CB_KEY_SYNTHETIC);text(s,layout,usage,origin,CB_KEY_SYNTHETIC,emit,context);}
+
+/* Handler-owned configuration, independent of bootstrap/provider definitions. */
+int keyboard_config_layout(const void *data,size_t bytes,const char **name,size_t *name_bytes){
+    const char *p=data;size_t at=0;int seen=0;
+    for(size_t i=0;i<bytes;++i)if(!p[i] || ((unsigned char)p[i]<32 && p[i]!='\r' && p[i]!='\n' && p[i]!='\t') || (unsigned char)p[i]>=127)return 0;
+    while(at<bytes){size_t first=at;while(at<bytes && p[at]!='\n')++at;size_t end=at;if(at<bytes)++at;while(first<end && (p[first]==' ' || p[first]=='\t'))++first;while(end>first && (p[end-1]==' ' || p[end-1]=='\t' || p[end-1]=='\r'))--end;
+        if(first==end || p[first]=='#')continue;
+        static const char key[]="layout=";if(seen || end-first<=sizeof(key)-1)return 0;for(unsigned i=0;i<sizeof(key)-1;++i)if(p[first+i]!=key[i])return 0;first+=sizeof(key)-1;
+        for(size_t i=first;i<end;++i)if(!((p[i]>='a'&&p[i]<='z') || (p[i]>='A'&&p[i]<='Z') || (p[i]>='0'&&p[i]<='9') || p[i]=='_' || p[i]=='-'))return 0;
+        *name=p+first;*name_bytes=end-first;seen=1;
+    }return seen;
+}

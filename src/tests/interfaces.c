@@ -2,11 +2,14 @@
 #include <stdio.h>
 #include <string.h>
 #include "../interfaces/keyboard.h"
+#include "../interfaces/startup.h"
 #ifdef __cplusplus
 #define ABI_ASSERT static_assert
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_startup)==24,"startup prefix");
+ABI_ASSERT(sizeof(struct cb_startup_file)==16,"startup file prefix");
 ABI_ASSERT(sizeof(struct cb_version)==8,"version prefix");
 ABI_ASSERT(sizeof(struct cb_call_header)==80,"call frame");
 ABI_ASSERT(sizeof(struct cb_delivery_header)==96,"provider delivery");

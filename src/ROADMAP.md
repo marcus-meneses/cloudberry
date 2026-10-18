@@ -670,3 +670,20 @@ explicit-reference comparisons. One-CPU TCG harness and four-CPU collection pass
 Native KVM results remain pending because /dev/kvm is absent here; performance
 optimizations await that evidence. SSE/available AVX user-context checks now
 exercise the gate and preemption rather than relying only on kernel-thread tests.
+
+Priority 3 implementation: generic provider.cnf descriptors and boot.providers
+replace the keyboard factory/configuration keys. The process mechanism loads
+ELFs; handle mediation admits manifests; bootstrap only coordinates declared
+startup/readiness. Generic readonly named files form the startup packet, with
+handler-owned config/layout interpretation. Private startup records are released
+only after process reap; aggregate/per-process snapshots expose no reclaimable
+metadata pointers. An unrelated startup-data app and the keyboard/fault providers
+exercise the same loader. No new installer, runtime filesystem or supervisor was
+introduced. Native KVM measurement remains pending user-host execution.
+
+Priority 3 closure: focused host tests, one/four-CPU TCG process/handler boots and
+ordinary automatic startup pass; the candidate image is rebuilt. Bootstrap has
+no keyboard implementation include or configuration interpretation. Public status
+contains only stable aggregate/copy values, with explicit private-record release.
+The remaining validation for priority 2 is user-host KVM collection through
+scripts/bench-handles-kvm.sh; no performance optimization is claimed from TCG.

@@ -193,12 +193,12 @@ Port arrays are freed on rebind and exited worker stacks are reaped. Interrupt
 bitmaps are bounded to 32 bytes by the USB descriptor's 255-port field. No USB
 class allocation occurs in the IRQ handler.
 
-Boot configuration now supplies five `config.<key>` descriptor references,
+Boot configuration now supplies seven `config.<key>` descriptor references,
 including the real appended drivers-partition GUID. The parser still permits
 omission of that optional schema item, but image building requires it.
-Each descriptor is 24 bytes and points into config-owned heap storage. The five
-schema slots occupy 280 bytes, plus copied strings (21 bytes for the configured
-`/boot/system/drivers` path) and allocator metadata.
+Each descriptor is 24 bytes and points into config-owned heap storage. The seven
+schema slots occupy 392 bytes, plus copied strings (31 bytes for the default
+directory/module/provider lists) and allocator metadata.
 Limine reports the source file's address/size; parsed pointers do not depend on
 that source buffer. Config initializes after the boot heap, before hardware/APs.
 `hub.publish_tables(refs,count)` validates a whole batch before publication under
@@ -215,3 +215,11 @@ image; it adds no hub tables. Ordinary mounts dynamically allocate a block cache
 and per-device/journal state, with dynamically owned mount/device registry nodes.
 File-write transactions are bounded at 64 KiB. Failed dirty transactions retain
 owned state and parent descriptors until reboot; normal unmount reclaims them.
+
+`bootstrap.applications` publishes a stable 24-byte aggregate header. Private
+40-byte process startup records plus copied bundle/readiness strings are released
+only after process reap. Per-process snapshots copy 16 bytes and expose no owned
+record pointers. Generic startup packets have a 24-byte header and 16-byte file
+prefixes, followed by inline names/data. Their backing becomes readonly/NX owned
+user pages and lives until process reap; temporary kernel assembly buffers are
+freed after loading. The bootstrap module does not interpret handler configuration.

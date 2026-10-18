@@ -31,6 +31,21 @@ def fingerprint():
             h.update(name.encode()+b'\0'+p.read_bytes())
     return h.hexdigest()
 
+def cpu_identity(text):
+    keep={'vendor_id','model name','flags','microcode'}
+    return {key.strip():value.strip() for line in text.splitlines() if ':' in line for key,value in [line.split(':',1)] if key.strip() in keep}
+
+def comparable_host(host):
+    out=dict(host)
+    if isinstance(out.get('cpu'),str):out['cpu']=cpu_identity(out['cpu'])
+    return out
+
+def digest(path):
+    h=hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda:source.read(1048576),b''):h.update(chunk)
+    return h.hexdigest()
+
 def logged(command, path):
     print('  log:', path.relative_to(ROOT), flush=True)
     with path.open('w') as out:
@@ -56,15 +71,15 @@ def main():
         build=args.build.resolve()
         if not build.is_relative_to(ROOT/'bin/tests'):raise RuntimeError('isolated build below bin/tests required')
         build.mkdir(parents=True,exist_ok=True)
-        host=dict(kernel=platform.release(),architecture=platform.machine(),cpu=Path('/proc/cpuinfo').read_text().split('\n\n')[0],qemu=capture(['qemu-system-x86_64','--version']),compiler=capture([str(ROOT/'.toolchain/cross/bin/x86_64-elf-gcc'),'--version']),affinity=sorted(os.sched_getaffinity(0)))
+        host=dict(kernel=platform.release(),architecture=platform.machine(),cpu=cpu_identity(Path('/proc/cpuinfo').read_text().split('\n\n')[0]),qemu=capture(['qemu-system-x86_64','--version']),compiler=capture([str(ROOT/'.toolchain/cross/bin/x86_64-elf-gcc'),'--version']),affinity=sorted(os.sched_getaffinity(0)))
         source=fingerprint();write(session/'host.json',host)
         summary=dict(status='running',accelerator=args.accel,runs=args.runs,source_sha256=source,git_revision=capture(['git','rev-parse','HEAD']),cases={})
         archive=Path(str(session)+'.tar.gz');failure=None
         try:
-            names=('cloudberry.iso','tests/src-process-kernel.elf','kmodules/probe.kmod','tests/apps/process-probe.elf','tests/apps/handles-probe.elf','tests/apps/keyboard-client.elf','tests/apps/keyboard-fault.elf','tests/apps/handle-bench.elf')
+            names=('cloudberry.iso','tests/src-process-kernel.elf','kmodules/probe.kmod','tests/apps/process-probe.elf','tests/apps/handles-probe.elf','tests/apps/keyboard-client.elf','tests/apps/keyboard-fault.elf','tests/apps/handle-bench.elf','tests/apps/startup.elf')
             command=['make','-C','src',f'-j{args.jobs}',f'BUILD={build}',f'ISO={build}/cloudberry.iso',f'KERNEL={build}/kernel.elf',f'STAGE={build}/src-iso-root']+[str(build/n) for n in names]
             logged(command,session/'build.log')
-            identities={n:hashlib.sha256((build/n).read_bytes()).hexdigest() for n in names};write(session/'binaries.json',identities)
+            identities={n:digest(build/n) for n in names};write(session/'binaries.json',identities)
             for case in args.case or ('1cpu-none','4cpu-amd','4cpu-intel'):
                 cpus=int(case[0]);iommu=case.split('-')[1];reports=[]
                 for repeat in range(1,args.runs+1):
@@ -84,10 +99,10 @@ def main():
                     if args.accel=='kvm' and (h['clock']['source']!=1 or any(m['unavailable_samples'] for m in h['locks'])):raise RuntimeError('native timing requires stable qualified TSC and available profiling samples; inspect the saved guest log')
                     reports.append(r)
                 summary['cases'][case]={name:dict(median_of_boot_medians=statistics.median(r['handles']['measurements'][name]['median'] for r in reports),boot_medians=[r['handles']['measurements'][name]['median'] for r in reports]) for name in reports[0]['handles']['measurements']}
-            if source!=fingerprint() or any(hashlib.sha256((build/n).read_bytes()).hexdigest()!=value for n,value in identities.items()):raise RuntimeError('sources/binaries changed during measurements')
+            if source!=fingerprint() or any(digest(build/n)!=value for n,value in identities.items()):raise RuntimeError('sources/binaries changed during measurements')
             if args.reference_session:
                 ref=args.reference_session.resolve();old=json.loads((ref/'session.json').read_text());old_host=json.loads((ref/'host.json').read_text())
-                if old.get('status')!='passed' or old.get('accelerator')!=args.accel or old_host!=host:raise RuntimeError('reference host/accelerator differs or reference failed')
+                if old.get('status')!='passed' or old.get('accelerator')!=args.accel or comparable_host(old_host)!=comparable_host(host):raise RuntimeError('reference host/accelerator differs or reference failed')
                 comparison={}
                 for case,values in summary['cases'].items():
                     if case not in old['cases']:raise RuntimeError('reference lacks case '+case)

@@ -38,8 +38,20 @@
       "symbol": "bootstrap_surface_apps_info"
     },
     {
-      "name": "bootstrap.keyboard",
-      "symbol": "bootstrap_surface_keyboard"
+      "name": "bootstrap.launch",
+      "symbol": "bootstrap_surface_launch"
+    },
+    {
+      "name": "bootstrap.release",
+      "symbol": "bootstrap_surface_release"
+    },
+    {
+      "name": "bootstrap.application_info",
+      "symbol": "bootstrap_surface_application_info"
+    },
+    {
+      "name": "bootstrap.application_next",
+      "symbol": "bootstrap_surface_application_next"
     }
   ]
 }

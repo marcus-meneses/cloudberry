@@ -1,6 +1,6 @@
 #include "../../sdk/system.h"
 #include "../../interfaces/io.h"
-#include "startup.h"
+#include "../../interfaces/startup.h"
 #include "hid.h"
 static cb_handle_t memory_handle,io_handle,publication;
 static uint64_t subscription,epoch,sequence,device_id,emitted_ns,repeat_at,evicted_sequence,evicted_ns;
@@ -63,10 +63,13 @@ static void publish(void){
     struct cb_reply_header h;copy(&h,outgoing,sizeof(h));copy(&d,outgoing+sizeof(h),sizeof(d));epoch=d.provider_epoch;if(!epoch)cb_exit(CB_PROVIDER_FAILED);(void)cb_system_request_release(h.request);
 }
 __attribute__((noreturn)) void _start(uint64_t argument){
-    const struct keyboard_startup *startup=(const void *)(uintptr_t)argument;
-    if(!startup || startup->version.bytes!=sizeof(*startup) || startup->version.major!=1 || !keyboard_layout_parse(&layout,(const unsigned char *)startup+sizeof(*startup),startup->layout_bytes))cb_exit(CB_BAD_REQUEST);
+    const struct cb_startup *startup=(const void *)(uintptr_t)argument;
     const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID;
-    if(cb_system_get_handle(CB_MEMORY_NAME,sizeof(CB_MEMORY_NAME)-1,&memory,1,0,&memory_handle) || cb_system_get_handle(CB_IO_NAME,sizeof(CB_IO_NAME)-1,&io,1,0,&io_handle))cb_exit(CB_DENIED);
+    if(!startup || cb_system_get_handle(CB_MEMORY_NAME,sizeof(CB_MEMORY_NAME)-1,&memory,1,0,&memory_handle) || cb_system_get_handle(CB_IO_NAME,sizeof(CB_IO_NAME)-1,&io,1,0,&io_handle))cb_exit(CB_DENIED);
+    const void *configuration,*definition;size_t configuration_bytes,definition_bytes,name_bytes;const char *name;
+    if(!cb_startup_find(startup,startup->bytes,"config.cnf",&configuration,&configuration_bytes) || !keyboard_config_layout(configuration,configuration_bytes,&name,&name_bytes) || name_bytes>SIZE_MAX-14)cb_exit(CB_BAD_REQUEST);
+    char *path=allocate(name_bytes+14);if(!path)cb_exit(CB_RESOURCE_FAILURE);copy(path,"layouts/",8);copy(path+8,name,name_bytes);copy(path+8+name_bytes,".json",6);
+    int valid=cb_startup_find(startup,startup->bytes,path,&definition,&definition_bytes) && keyboard_layout_parse(&layout,definition,definition_bytes);release(path);if(!valid)cb_exit(CB_BAD_REQUEST);
     struct cb_io_subscription subscribed;if(invoke(io_handle,io,CB_IO_KEYBOARD_SUBSCRIBE,NULL,0,&subscribed,sizeof(subscribed),NULL))cb_exit(CB_UNAVAILABLE);subscription=subscribed.id;publish();
     for(;;){emitted_ns=clock_ns();prune();if(repeat_at && emitted_ns>=repeat_at){keyboard_repeat(&keyboard,&layout,emit,NULL);repeat_at=keyboard.repeat_key?emitted_ns+33000000:0;}serve_pending();
         uint64_t deadline=repeat_at;for(struct pending *p=pending;p;p=p->next)if(p->delivery.call.deadline_ns && (!deadline || p->delivery.call.deadline_ns<deadline))deadline=p->delivery.call.deadline_ns;

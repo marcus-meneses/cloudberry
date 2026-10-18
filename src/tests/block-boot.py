@@ -23,7 +23,15 @@ try:
         for name in ('bench-client.json','bench-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
     if args.process_only:
-        shutil.copy2(build/'tests/apps/keyboard-fault.elf',fixture/'keyboard-fault.elf');shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
+        shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
+        plain=fixture/'startup-check';plain.mkdir(exist_ok=True)
+        shutil.copy2(build/'tests/apps/startup.elf',plain/'entry.elf')
+        (plain/'manifest.json').write_text('{"version":1,"resources":[]}')
+        (plain/'arbitrary.data').write_text('generic-startup')
+        (plain/'provider.cnf').write_text('version=1\nexecutable=entry.elf\nmanifest=manifest.json\ninstallation_id=01020304050607080910111213141516\nfiles=arbitrary.data\n')
+        shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard-fault',dirs_exist_ok=True)
+        shutil.copy2(build/'tests/apps/keyboard-fault.elf',fixture/'keyboard-fault/keyboard.elf')
+        definition=fixture/'keyboard-fault/provider.cnf';definition.write_text(definition.read_text().replace('636c6f756462657272792e6b62643100','01020304050607080910111213141517'))
         for policy in ('read','state','denied'):shutil.copy2(root/f'src/tests/apps/keyboard-{policy}.json',fixture/f'keyboard-{policy}.json')
     if args.disk_modules:
         config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)

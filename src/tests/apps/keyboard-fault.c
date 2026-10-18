@@ -13,10 +13,7 @@ static cb_status_t fault_receive(void *data,uint64_t capacity_bytes,uint64_t *by
     }
     return status;
 }
-__attribute__((noreturn)) void _start(void){
-    static const struct {struct keyboard_startup header;char json[sizeof("{\"version\":1,\"keys\":[]}")];} packet={
-        .header={.version={sizeof(struct keyboard_startup),1,0},.layout_bytes=sizeof("{\"version\":1,\"keys\":[]}")-1},
-        .json="{\"version\":1,\"keys\":[]}"};
-    /* No fixture path, trigger or fault branch is compiled into the real bundle. */
-    keyboard_entry((uintptr_t)&packet);
+__attribute__((noreturn)) void _start(uint64_t argument){
+    /* Only the isolated fixture adds the fault trigger. Startup stays generic. */
+    keyboard_entry(argument);
 }

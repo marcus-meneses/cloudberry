@@ -78,6 +78,7 @@ Implemented foundations include:
 - Static ext4 ELF processes, ring-3 fault containment and owned address-space cleanup.
 - Copied capability calls, boot manifest grants, filtered reflection and scoped memory/I/O.
 - A disk-loaded isolated `/@keyboard` provider with IBM/ABNT2 layouts and USB hotplug.
+- Declarative provider startup, handler-owned configuration, explicit stop/reap ownership and copied status snapshots.
 
 The first isolated keyboard provider now runs through the handle boundary.
 General installed-app policy, interactive approval, automatic provider recovery,

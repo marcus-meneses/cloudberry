@@ -27,13 +27,13 @@ int main(void){
     const char *names[]={"cpu.control","mem.calloc","mem.free","hub.publish_tables"};kernel_surface_call calls[]={cpu,allocate,release,publish};
     for(unsigned i=0;i<4;++i){strcpy(fixture.methods[i].name,names[i]);fixture.methods[i].major=1;fixture.methods[i].call=calls[i];}
     char input[]=" # comment\r\nversion = 1\r\nboot.show_inventory=false\ndrivers.directory=/syst\xc3\xa9m\nstorage.timeout_ms=4294967295\ndrivers.partition_guid=550E8400-e29b-41d4-a716-446655440000";
-    assert(!parse(input,sizeof(input)-1).status && info.ready && info.count==8 && live==4 && publications==1);
+    assert(!parse(input,sizeof(input)-1).status && info.ready && info.count==7 && live==4 && publications==1);
     const struct config_value *v=get("config.version");assert(v->major==1 && v->type==CONFIG_UINT && v->bytes==8 && *(const uint64_t *)v->data==1);
     assert(!*(const uint8_t *)get("config.boot.show_inventory")->data);
     const struct config_guid *g=get("config.drivers.partition_guid")->data;assert(g->a==0x550e8400 && g->b==0xe29b && g->c==0x41d4 && g->d[0]==0xa7 && g->d[7]==0);
     memset(input,'?',sizeof(input));assert(!strcmp(get("config.drivers.directory")->data,"/syst\xc3\xa9m"));
     assert(parse("version=1",9).value==CONFIG_ALREADY_READY && info.ready && live==4);reset();
-    assert(!parse("version=1",9).status && info.count==7 && !kernel_hub_find_table(&fixture.hub,"config.drivers.partition_guid"));
+    assert(!parse("version=1",9).status && info.count==6 && !kernel_hub_find_table(&fixture.hub,"config.drivers.partition_guid"));
     assert(*(const uint8_t *)get("config.boot.show_inventory")->data==1 && *(const uint64_t *)get("config.storage.timeout_ms")->data==1000);reset();
     struct {const char *text;unsigned error,line;} bad[]={
         {"",CONFIG_REQUIRED,0},{"version",CONFIG_SYNTAX,1},{"unknown=1",CONFIG_UNKNOWN,1},

@@ -61,7 +61,8 @@ reap waits for retained kernel I/O workers before freeing process backing.
 Loader request ABI1 passes a scalar entry argument. ABI2 additionally copies a
 trusted startup packet into owned read-only/NX user pages, finds a nonoverlapping
 lower-half gap and passes its user address in RDI. The keyboard bundle uses this
-for the selected layout; no kernel pointer crosses into the process. Failed packet
+for generic named startup files; the provider owns their interpretation and
+no kernel pointer crosses into the process. Failed packet
 construction follows the same cleanup-ID/rollback ownership rules as ELF loading.
 
 The integrated process boot also loads the production keyboard provider from
