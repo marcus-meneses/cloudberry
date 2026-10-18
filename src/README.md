@@ -262,7 +262,9 @@ separates broker work, copies, blocking and handoff; it is absent from the candi
 and materially affects timings. The current performance/concurrency follow-up is
 closed; physical and native Intel acceptance remain open. Application lifecycle
 work now adds an installed userland launcher, argv/cwd startup metadata, deferred
-waits, cooperative stop and owner-scoped retained results. See the
+waits, cooperative stop and owner-scoped retained results. Isolated four-CPU
+AMD-host KVM lifecycle correctness acceptance passes with stable qualified TSC.
+See the
 [applications provider](handlers/applications/README.md) and [built-in apps](apps/README.md).
 
 The hub grows within reserved virtual windows and allocates physical pages only

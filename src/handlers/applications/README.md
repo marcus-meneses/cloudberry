@@ -82,8 +82,12 @@ context parsing, provider BAD_REQUEST completion and pre-mutation native reply
 reservation pass regression checks. Disposable one/four-CPU TCG boots execute
 registered runtime apps, including the real `launch` app. The final traced
 four-CPU run also verifies exact broker heap restoration after manager teardown;
-ordinary candidate boot publishes both providers with no fixtures. Native KVM
-acceptance of this new lifecycle milestone remains pending:
+ordinary candidate boot publishes both providers with no fixtures. Native
+four-CPU AMD-host KVM correctness acceptance passes in run
+`535b22562f0d45b4b0752e72a5ade1e6` (2026-10-18), with qualified TSC throughout.
+Application lifecycle, handle concurrency, page/stack restoration and keyboard
+checks all pass. This is correctness acceptance, not a new performance baseline;
+physical hardware and native Intel CPU acceptance remain open. Reproduce with:
 
 ```sh
 make -C src -j4 test-process-boot QEMU_ACCEL=kvm QEMU_CPUS=4 QEMU_IOMMU=amd

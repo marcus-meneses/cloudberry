@@ -320,9 +320,9 @@ Application launch/installed identity and lifecycle policy are now implemented:
 a privileged userland `/@applications` handler, build-owned installation records,
 ordinary `launch`/`true` apps, authenticated ownership, wake-driven completion,
 cooperative stop and separate execution/result reclamation. Bootstrap remains a
-startup coordinator. Isolated one/four-CPU TCG runtime acceptance passes; native
-KVM acceptance of this new milestone remains separate from the earlier handle
-baseline. No further performance campaign is required to close that earlier work.
+startup coordinator. Isolated one/four-CPU TCG runtime acceptance and four-CPU
+AMD-host KVM correctness acceptance pass. The native lifecycle run is separate
+from the earlier handle performance baseline; no new performance campaign is required.
 
 One boot input domain, pinned single-threaded processes, negotiated boot-keyboard
 HID and trusted unsigned development bundles remain intentional limits.
@@ -921,7 +921,8 @@ Initial isolated TCG acceptance: one CPU run
 `07a0c41cca5543029186a25fef92dd62`. These are correctness tests, not a new native
 performance baseline. Processes remain pinned/single-threaded, stop is cooperative,
 cwd is metadata rather than filesystem permission, and automatic provider recovery
-is not part of this milestone. Native/physical acceptance remains open.
+is not part of this milestone. Native acceptance follows below; physical hardware
+and native Intel CPU acceptance remain open.
 
 
 Final runtime verification: the traced four-CPU AMD-Vi TCG run
@@ -931,5 +932,15 @@ candidate boot `d9b455b12ffc434b8dda53de79961f4d` publishes both providers using
 only the read-only hybrid boot image: no test modules or developer data disks.
 Packaging checks confirm four OS installation records (keyboard, applications,
 launch, true), an empty production initial-launch file and no profiling export.
-The candidate is rebuilt. These changes still need a focused native KVM correctness
-run; they do not claim a new native performance baseline.
+The candidate is rebuilt.
+
+Native lifecycle correctness acceptance (2026-10-18): isolated four-CPU AMD-Vi
+KVM run `535b22562f0d45b4b0752e72a5ade1e6` passes installed launch, argv/cwd,
+manifest isolation, concurrent children, deferred waits, cooperative stop, fault
+notification, owner abandonment and cleanup. Existing handle concurrency,
+page/stack baseline restoration and keyboard hotplug/decommission checks pass.
+TSC remains qualified through measurement on all four CPUs (480 qualification
+samples); participating lock samples use TSC without HPET/unavailable samples.
+Reports are in `bin/tests/isolated/tests/process-4cpu-amd/`. This uninstrumented
+correctness run does not establish exact broker live-block restoration (covered
+by the traced TCG run above) or replace the accepted performance baseline.
