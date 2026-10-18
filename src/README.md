@@ -248,8 +248,11 @@ Raw acquisition medians are about 14–15 µs and empty echo medians 119–154 �
 including a roughly 10 µs handle-based clock bracket. See the
 [accepted baseline and timing qualifications](ROADMAP.md#native-handle-baseline-acceptance-2026-10-18).
 Small gate inputs now use 256 bytes of per-call stack scratch; larger frames and
-retained request/reply storage remain separately allocated. Native performance
-comparison of this change is pending; physical and native Intel acceptance remain open.
+retained request/reply storage remain separately allocated. Native comparison passes nine more correctness runs: acquisition/reflection
+medians improve, while four-CPU VT-d IPC/allocation results regress with substantial
+between-boot variation. Overall speedup remains unproven;
+[phase attribution is next](ROADMAP.md#small-gate-input-native-comparison-2026-10-18).
+Physical and native Intel acceptance remain open.
 
 The hub grows within reserved virtual windows and allocates physical pages only
 as needed. Current production includes process, handle and I/O methods plus a bootstrap

@@ -741,3 +741,37 @@ four-CPU AMD-Vi TCG process/handler acceptance, run
 `5134829661d04033b248b454739cead3`, including keyboard hotplug, provider fault/
 restart, copied IPC and benchmark collection. The candidate image and developer
 disks were not used for these tests. TCG confirms correctness only.
+
+
+## Small gate input native comparison (2026-10-18)
+
+Session `20261018T063747.870742Z`, revision `cad0297`, passes all nine KVM
+correctness/timing runs against `20261018T062204.486040Z`. Host compatibility
+checks pass. All phase snapshots retain qualified TSC; participating-CPU lock
+samples contain no HPET or unavailable timestamps. Both IOMMU cases still use
+the same AMD host, not separate native Intel CPU acceptance.
+
+Raw median of boot medians, microseconds (percentage change from baseline):
+
+| Case | Acquire memory | Reflection | Empty echo | 4096-byte echo | Allocate/free page |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| One CPU | 12.62 (-10.9%) | 17.22 (-11.4%) | 114.02 (-4.2%) | 156.80 (+4.5%) | 43.37 (-6.1%) |
+| Four CPUs, AMD-Vi | 12.05 (-19.5%) | 16.86 (-17.0%) | 138.38 (-10.0%) | 198.91 (-2.7%) | 41.70 (-14.7%) |
+| Four CPUs, VT-d | 13.56 (-10.2%) | 18.88 (-12.8%) | 145.08 (+15.4%) | 235.83 (+31.2%) | 67.74 (+34.3%) |
+
+The small-request medians improve across all configurations, but this is not an
+overall performance acceptance: VT-d IPC/allocation regressions remain unresolved.
+Three separate boots per case do not establish statistical significance or
+attribute variation to a particular subsystem. For example, current VT-d
+acquisition boot medians span 11.62–22.09 us and clock brackets 8.12–15.17 us.
+The single-CPU clock bracket also spans 8.41–19.58 us. Timings include endpoint
+and lifecycle overhead; subtracting independent group medians cannot isolate
+pure IPC or remove host scheduling variation.
+
+Retain both sessions and the bounded scratch implementation. Before further
+performance changes, add test-only phase attribution for user-copy/validation,
+broker work, provider execution and block/wakeup handoff, with scoped lock
+measurement and explicit instrumentation overhead. Compare those phases in
+isolated repeated native runs; do not infer a mapping/lock bottleneck from
+whole-run peaks that also include process launch and teardown. No new production
+optimization or clock acceptance relaxation was made from this mixed result.
