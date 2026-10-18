@@ -316,7 +316,7 @@ latency comparison. See [the profiling guide](tests/handle-profiling.md).
 
 Current next steps:
 
-1. Collect the isolated native phase report, including probe overhead, and compare
+1. Native phase collection passes three four-CPU AMD-host KVM runs. Next compare
    the uninstrumented request-storage change against the accepted baseline.
 2. Resolve any reproducible IPC/allocation regression using phase-specific
    evidence; broad lock or mapping changes remain unjustified by whole-run peaks.
@@ -831,3 +831,18 @@ pass; candidate module exports contain no `handles.profile`, and its module/bund
 staging contains no test fixtures. The updated collector passes a complete
 one-CPU profiled TCG session `20261018T152345.941848Z`, preserving raw logs,
 identities and archive. This is harness/correctness acceptance, not native timing.
+
+
+Native phase collection closes in session `20261018T152958.059166Z`: all three
+four-CPU AMD-Vi KVM runs pass stable-clock, concurrency and resource acceptance.
+Allocation counts reproduce the deterministic reduction (4,494 each run), with
+six ending broker blocks and no allocation failures or invalid spans. Mean IPC
+queue/delivery time is 60.65–61.78 us, delivery/reply 16.68–21.02 us and
+reply/client-resume 51.32–56.59 us across the instrumented runs. These elapsed
+handoff spans include notification, scheduling, broker and lock work; no single
+cause is established. See [the native phase analysis](tests/handle-profiling.md#native-phase-acceptance-2026-10-18).
+
+Next remains the ordinary uninstrumented native comparison against
+`20261018T063747.870742Z`. Profiling-only results cannot establish a production
+latency win or justify changing scheduling/locking on their own. No production
+code changed at this acceptance step.

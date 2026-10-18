@@ -99,3 +99,41 @@ passes session `20261018T152345.941848Z`; its source/binary fingerprints and raw
 archive exercise the same collection path intended for KVM. Ordinary candidate
 rebuild and staging/export checks confirm that no tracing surface or fixture
 application is packaged there.
+
+
+## Native phase acceptance (2026-10-18)
+
+AMD-host KVM session `20261018T152958.059166Z` passes all three four-CPU
+AMD-Vi runs at revision `563f967`. All phases retain qualified TSC without a
+runtime/qualification error. Each run records 4,494 allocations, 4,518 frees,
+six ending live broker blocks, no allocation failures and no invalid clock spans.
+Concurrent-client, timeout, late-result and exact heap/page/stack cleanup
+acceptance passes in every run. The additional frees include objects allocated
+before profiling was enabled; they do not imply unmatched allocation ownership.
+
+| Instrumented mean per completed IPC | Run 1 | Run 2 | Run 3 |
+| --- | ---: | ---: | ---: |
+| Queue to delivery (us) | 60.65 | 61.08 | 61.78 |
+| Delivery to provider reply (us) | 20.01 | 16.68 | 21.02 |
+| Reply to client resume (us) | 54.40 | 51.32 | 56.59 |
+
+Each row covers 168 completed requests, including warmup and all three payload
+sizes. Queue time starts before provider wakeup; resume time includes broker
+completion/wakeup, scheduling and lock reacquisition. These are not isolated
+scheduler or context-switch costs. Per-gate phases and handoff spans overlap;
+they must not be added together as independent costs.
+
+Client capture averages about 1.1–1.3 us per invoke, while the mixed invoke
+blocking phase averages 14.4–15.4 us across kernel and userland calls. Provider
+reply broker work averages 22.4–24.8 us. This points to delivery/completion and
+wake handoff as the next diagnostic area if the uninstrumented baseline confirms
+it, rather than a broad user-copy or mapping rewrite. It does not establish the
+cause of handoff delay.
+
+Empty mediated clock-pair medians are 296–300 ns. The full benchmark clock
+bracket is 25.14 us and empty echo median 190.93 us with instrumentation enabled.
+Those are diagnostic values: the previous uninstrumented revision also differs
+in request storage, so comparing those sessions cannot isolate either total
+probe overhead or production speedup. The ordinary native comparison command
+above remains required before latency acceptance. No further production
+optimization is inferred solely from these instrumented timings.
