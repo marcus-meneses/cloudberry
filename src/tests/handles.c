@@ -9,11 +9,26 @@ static struct kernel_surface_result heap_free(MODULE_ARGS){MODULE_UNUSED();asser
 static struct kernel_surface_result cpu_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
 static struct kernel_surface_result info_stub(MODULE_ARGS){MODULE_UNUSED();*(struct process_info *)b=(struct process_info){.id=a,.state=PROCESS_READY};return module_result(1,1);}
 static struct kernel_surface_result control_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
+static struct kernel_surface_result copy_stub(MODULE_ARGS){MODULE_UNUSED();if(e)memcpy((void *)b,(const void *)c,d);else memcpy((void *)c,(const void *)b,d);return module_result(d,1);}
 int main(void){
     struct kernel_surfaces hub={0};state.hub=&hub;state.heap=1;state.alloc=heap_alloc;state.free=heap_free;state.cpu=cpu_stub;state.process_info=info_stub;state.control=control_stub;state.clock=cpu_stub;
     const char server_manifest[]="{\"version\":1,\"resources\":[{\"name\":\"@host\",\"publish\":true,\"operations\":[\"read\",\"secret\"]}]}";
     const char client_manifest[]="{\"version\":1,\"resources\":[{\"name\":\"@host\",\"operations\":[\"read\"]}]}";
     struct handle_policy admission={.process=1,.manifest=server_manifest,.bytes=sizeof(server_manifest)-1};assert(!CALL(handles_surface_admit,&admission,0,0).status);admission=(struct handle_policy){.process=2,.manifest=client_manifest,.bytes=sizeof(client_manifest)-1};assert(!CALL(handles_surface_admit,&admission,0,0).status);
+    /* Small gate inputs remain usable under allocator exhaustion; a larger
+       frame still fails cleanly without leaking or freeing stack storage. */
+    state.copy=copy_stub;state.check=cpu_stub;
+    unsigned char gate_input[257]={0};
+    struct cb_system_gate gate={.bytes=sizeof(gate),.operation=UINT32_MAX,.input=(uintptr_t)gate_input};
+    long gate_blocks=blocks;
+    remaining=0;
+    assert(handles_surface_gate(2,(uintptr_t)&gate,0,0,0,0).value==CB_BAD_REQUEST);
+    gate.input_bytes=256;
+    assert(handles_surface_gate(2,(uintptr_t)&gate,0,0,0,0).value==CB_BAD_REQUEST);
+    gate.input_bytes=257;
+    assert(handles_surface_gate(2,(uintptr_t)&gate,0,0,0,0).value==CB_RESOURCE_FAILURE);
+    remaining=-1;
+    assert(handles_surface_gate(2,(uintptr_t)&gate,0,0,0,0).value==CB_BAD_REQUEST && blocks==gate_blocks);
     unsigned char bytes[1024]={0};struct cb_interface_id interface={{1}};
     struct cb_publication h={.version={sizeof(h),1,0},.interface=interface,.interface_major=1,.name_bytes=5};
     struct cb_description d={.version={sizeof(d),1,0},.interface=interface,.interface_major=1,.operation_count=2,.facts_bytes=2};size_t offset=sizeof(h)+5+sizeof(d);

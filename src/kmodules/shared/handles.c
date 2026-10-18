@@ -234,8 +234,12 @@ static cb_status_t respond(struct policy *owner,const unsigned char *input,size_
 struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     MODULE_UNUSED();uint64_t pid=a;struct cb_system_gate *g=(void *)b;if(!g || g->bytes!=sizeof(*g) || g->reserved || g->input_bytes>CB_FRAME_LIMIT-512 || g->output_capacity>CB_FRAME_LIMIT || !range(pid,g->input,g->input_bytes,0) || !range(pid,g->output,g->output_capacity,1))return module_result(CB_BAD_REQUEST,1);
     uint64_t owner_flags=lock();struct policy *owner=policy(pid);unlock(owner_flags);if(!owner)return module_result(CB_DENIED,1);
-    unsigned char *input=g->input_bytes?allocate(g->input_bytes):NULL,*output=NULL;size_t bytes=0;
-    if(g->input_bytes && (!input || !transfer(pid,g->input,input,g->input_bytes,0))){release(input);return module_result(CB_RESOURCE_FAILURE,1);}
+    /* Per-call scratch survives blocking on this thread's kernel stack. Retained
+       requests/replies always own separate copies; larger frames use the heap. */
+    unsigned char scratch[256];
+    unsigned char *owned_input=g->input_bytes>sizeof(scratch)?allocate(g->input_bytes):NULL;
+    unsigned char *input=g->input_bytes?(g->input_bytes<=sizeof(scratch)?scratch:owned_input):NULL,*output=NULL;size_t bytes=0;
+    if(g->input_bytes && (!input || !transfer(pid,g->input,input,g->input_bytes,0))){release(owned_input);return module_result(CB_RESOURCE_FAILURE,1);}
     cb_status_t status=CB_BAD_REQUEST;uint64_t flags;
     if(g->operation==CB_SYSTEM_ACQUIRE){flags=lock();status=acquire(owner,input,g->input_bytes,&g->value);unlock(flags);}
     else if(g->operation==CB_SYSTEM_PUBLISH){flags=lock();status=publish(owner,input,g->input_bytes,&g->value);unlock(flags);}
@@ -245,7 +249,7 @@ struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     else if(g->operation==CB_SYSTEM_RELEASE && g->input_bytes==8){uint64_t id;copy_bytes(&id,input,8);flags=lock();struct capability *cap=capability(pid,id);status=cap?CB_OK:CB_BAD_HANDLE;if(cap){if(cap->publisher)retire_publication(cap->publication,0);struct request *r=state.requests;while(r){struct request *next=r->next;if(r->pid==pid && r->cap==id)drop_request(r);r=next;}drop_capability(cap);}unlock(flags);}
     else if(g->operation==CB_SYSTEM_FORGET && g->input_bytes==sizeof(struct cb_request_id)){struct cb_request_id id;copy_bytes(&id,input,sizeof(id));flags=lock();struct request *r=state.requests;while(r && (r->pid!=pid || r->id.namespace_id!=id.namespace_id || r->id.serial!=id.serial))r=r->next;status=r?(r->done && (!r->dispatched || r->completed)?CB_OK:CB_BUSY):CB_BAD_REQUEST;if(r && status==CB_OK)drop_request(r);unlock(flags);}
     g->result_bytes=bytes;if(output){if(g->output_capacity<bytes){status=CB_BUFFER_TOO_SMALL;if(g->operation==CB_SYSTEM_INVOKE && g->output_capacity>=sizeof(struct cb_reply_header) && !transfer(pid,g->output,output,sizeof(struct cb_reply_header),1))status=CB_BAD_REQUEST;}else if(!transfer(pid,g->output,output,bytes,1))status=CB_BAD_REQUEST;}
-    release(input);release(output);return module_result(status,1);
+    release(owned_input);release(output);return module_result(status,1);
 }
 struct kernel_surface_result handles_surface_exit(MODULE_ARGS){
     MODULE_UNUSED();uint64_t flags=lock();struct policy *owner=policy(a);if(!owner){unlock(flags);return module_result(1,1);}

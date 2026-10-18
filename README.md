@@ -84,8 +84,9 @@ The first isolated keyboard provider now runs through the handle boundary.
 General installed-app policy, interactive approval, automatic provider recovery,
 general HID formats and runtime ACPI notification/driver policy remain ahead.
 QEMU acceptance includes isolated one/four-CPU runs with emulated IOMMU models.
-AMD-host KVM validates the earlier SMP, clock and extended-state foundation;
-native user-mode/input and physical-device validation remain pending.
+AMD-host KVM validates SMP, clocks, extended state and the native process/input/handle
+boundary across nine repeated one/four-CPU boots. Physical-device and native Intel
+CPU acceptance remain pending.
 
 The [current assessment](src/README.md#current-assessment-2026-10-17) separates
 implemented mechanisms, validation and remaining limits. Foundational kmodules

@@ -704,3 +704,40 @@ offset bound is 680 ns. This validates the diagnostic path and targeted native
 process/keyboard boundary. It does not explain the previous HPET selection or
 replace the full repeated topology/IOMMU baseline. Next native action remains
 bench-handles-kvm.sh --runs 3, followed by evidence-based handle-path tuning.
+
+
+## Native handle baseline acceptance (2026-10-18)
+
+Session `20261018T062204.486040Z` passes all nine KVM boots: three each
+with one CPU/no IOMMU, four CPUs/AMD-Vi and four CPUs/VT-d. Origin/begin/end
+snapshots retain qualified TSC without runtime fallback or unavailable profiling
+samples. This closes the repeated native process/keyboard/handle baseline for
+priority 2. Both emulated IOMMU models ran on an AMD host; physical Intel/AMD
+device acceptance remains open. The earlier HPET selection remains unexplained.
+
+Median of per-boot medians, raw microseconds:
+
+| Case | Clock bracket | Acquire memory | Reflection | Empty echo | 4096-byte echo | Allocate/free page |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| One CPU | 9.80 | 14.15 | 19.43 | 118.96 | 150.11 | 46.17 |
+| Four CPUs, AMD-Vi | 10.36 | 14.96 | 20.31 | 153.73 | 204.52 | 48.91 |
+| Four CPUs, VT-d | 10.49 | 15.09 | 21.66 | 125.74 | 179.71 | 50.42 |
+
+These include handle-based timestamp endpoints, validation and request release;
+they are not pure IPC latency. Lock peaks cover process startup/teardown and
+owner waits as well as measured calls, so they do not isolate an RPC bottleneck.
+
+First bounded tuning: gate input frames up to 256 bytes use per-call kernel-stack
+scratch instead of temporary heap allocation. Larger messages retain the heap
+path; retained requests/replies keep independent owned copies. All user-range,
+authorization, lifecycle and lock checks remain. This removes one allocation/free
+pair per small nonempty gate call without introducing a shared cache or ABI limit.
+Host boundary/OOM tests cover empty, 256-byte and 257-byte frames. Native speedup
+is not yet measured. Compare the next native collection against the accepted
+session using `--reference-session bin/tests/kvm-handles/20261018T062204.486040Z`.
+
+The scratch change passes handle/manifest/report host tests and the isolated
+four-CPU AMD-Vi TCG process/handler acceptance, run
+`5134829661d04033b248b454739cead3`, including keyboard hotplug, provider fault/
+restart, copied IPC and benchmark collection. The candidate image and developer
+disks were not used for these tests. TCG confirms correctness only.

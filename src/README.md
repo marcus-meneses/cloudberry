@@ -242,6 +242,15 @@ validated against their prefix before configuration. Automatic failed-provider
 recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
+The native handle baseline now passes nine AMD-host KVM boots across one/four CPUs
+and both emulated IOMMU models. Qualified TSC remains stable during measurement.
+Raw acquisition medians are about 14–15 µs and empty echo medians 119–154 µs,
+including a roughly 10 µs handle-based clock bracket. See the
+[accepted baseline and timing qualifications](ROADMAP.md#native-handle-baseline-acceptance-2026-10-18).
+Small gate inputs now use 256 bytes of per-call stack scratch; larger frames and
+retained request/reply storage remain separately allocated. Native performance
+comparison of this change is pending; physical and native Intel acceptance remain open.
+
 The hub grows within reserved virtual windows and allocates physical pages only
 as needed. Current production includes process, handle and I/O methods plus a bootstrap
 application-state table; counts are reported on each boot. Capacity and committed backing are
