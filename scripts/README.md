@@ -64,3 +64,31 @@ session. `native-comparison.md/.json` contains before/after KVM measurements;
 `comparison.md/.json` retains the TCG comparison. Raw HPET-based instrumentation
 measurements are in each report. KVM must already be accessible to your user; the script never
 uses sudo or falls back to TCG. See the [method and output details](../src/tests/address-space-profiling.md).
+
+## KVM process and handle measurements
+
+```sh
+./scripts/bench-handles-kvm.sh --runs 3
+```
+
+This validates the protected-process/keyboard boundary and records 48 samples
+per operation after eight warmups: memory acquisition, reflection, kernel clock
+invocation, same/cross-CPU echo at 0/128/4096 bytes and a 4 KiB allocation/free
+pair. A separate empty clock bracket exposes endpoint measurement overhead.
+Every internal completed request is released. Raw samples, median/p95/max,
+per-CPU kernel lock counts/peaks and symbolic peak attribution are retained.
+
+The default runs one CPU and four CPUs with both emulated IOMMUs, using only
+isolated builds/disposable media. `--case 4cpu-amd` selects one case. KVM must
+already be accessible; no sudo or fallback is attempted. Native timings require
+stable qualified TSC and available profiling samples. `--accel tcg` is solely for
+harness validation and cannot establish native performance. Host metadata,
+source/binary hashes, commands, correctness logs and report archives live under
+`bin/tests/kvm-handles/`; `latest.json` locates the last session. Nothing is fed
+back into compilation or clock configuration.
+
+Use `--reference-session bin/tests/kvm-handles/SESSION` for an explicit comparison.
+It requires the same host/toolchain/QEMU and accelerator. Raw timings include
+clock endpoints, validation and result-record release. Bracket-adjusted medians
+are estimates, not pure IPC costs. Lock peaks include launch/owner-wait activity;
+this first baseline is not a contention stress test or a hard latency guarantee.

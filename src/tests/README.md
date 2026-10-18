@@ -746,3 +746,23 @@ trace and UNKNOWN outcome. Explicit reap releases I/O ownership; a fresh real
 provider reacquires the device, stops cooperatively and returns stack ownership
 to baseline. No fault trigger enters the production bundle. Host status checks
 cover publication, faults, stop requests, withdrawal and reaped processes.
+
+## Process/handle measurement harness
+
+`./scripts/bench-handles-kvm.sh --runs 3` collects native one/four-CPU acceptance
+and handle measurements with both IOMMU models. See scripts/README.md. Every
+case retains 48 samples after eight warmups, separate clock brackets, raw
+median/p95/max, kernel lock counts/peaks and caller/method/source attribution.
+The client validates results and releases retained request records. Timings
+include these costs. Empty-bracket subtraction is only an estimate. Metrics reset
+on each participating CPU before client launch; peaks still include process
+launch and owner waits. This is a baseline, not a saturation/load test.
+
+The collection/comparison/archive flow passed under single-CPU TCG in session
+`20261018T053801.212505Z`; separate four-CPU AMD-Vi guest collection passed.
+TCG empty brackets were about 0.42 ms (one CPU) and 2.17 ms (four CPUs); these
+validate collection, not native performance. Parser tests reject incomplete,
+duplicate, malformed and wrong-topology data. No /dev/kvm is available here;
+native user-mode/input timing acceptance remains user-host work. The user process
+fixture now also preserves SSE and available AVX values across its gate and timer
+preemption; AVX execution requires guest CPUID/OSXSAVE/XCR0 support.

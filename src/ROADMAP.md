@@ -662,3 +662,11 @@ That transport-only revision exported 162 methods and five table references
    provider bundles/startup data; the handler owns its layout interpretation.
    Bootstrap coordinates startup, process owns execution/reap and handle mediation
    owns grants; ongoing supervision must not silently become bootstrap work.
+
+Priority 2 collector implemented: isolated native process/keyboard acceptance,
+raw clock/acquisition/reflection/kernel/IPC/allocation timings, participating-CPU
+lock attribution, strict parser, source/binary/host identities and archived
+explicit-reference comparisons. One-CPU TCG harness and four-CPU collection pass.
+Native KVM results remain pending because /dev/kvm is absent here; performance
+optimizations await that evidence. SSE/available AVX user-context checks now
+exercise the gate and preemption rather than relying only on kernel-thread tests.

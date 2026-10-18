@@ -566,6 +566,9 @@ src/
 │   └── system.h
 ├── tests/
 │   ├── apps/
+│   │   ├── bench-client.json
+│   │   ├── bench-server.json
+│   │   ├── handle-bench.c
 │   │   ├── handles-client.json
 │   │   ├── handles-server.json
 │   │   ├── handles.c
@@ -617,6 +620,10 @@ src/
 │   ├── space_report.py
 │   ├── test-space-report.py
 │   ├── address-space-profiling.md
+│   ├── bench-handles-kvm.py
+│   ├── handle-bench.h
+│   ├── handle_report.py
+│   ├── test-handle-report.py
 │   ├── bench-spaces-kvm.py
 │   ├── baselines/
 │   │   └── address-spaces-tcg.json

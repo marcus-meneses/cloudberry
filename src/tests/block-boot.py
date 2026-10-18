@@ -19,6 +19,8 @@ try:
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
+        shutil.copy2(build/'tests/apps/handle-bench.elf',fixture/'handle-bench.elf')
+        for name in ('bench-client.json','bench-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
     if args.process_only:
         shutil.copy2(build/'tests/apps/keyboard-fault.elf',fixture/'keyboard-fault.elf');shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
@@ -84,6 +86,9 @@ try:
     if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')
     if args.bootstrap and not args.duplicate and 'PASS bootstrap unique GUID' not in log.read_text():raise RuntimeError('unique volume was not selected')
+    if args.process_only:
+        from handle_report import parse_handles
+        result['handles']=parse_handles(log.read_text(),args.cpus)
     if args.spaces_only:
         from space_report import parse_spaces
         if 'PASS address-space profiling' not in log.read_text():raise RuntimeError('profiling acceptance did not run')

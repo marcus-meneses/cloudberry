@@ -1,0 +1,1 @@
+{"version":1,"resources":[{"name":"/@io","scope":"keyboard","operations":["now_ns"]},{"name":"/@memory","scope":"self","operations":["allocate","free"]},{"name":"@bench","operations":["echo"]}]}
