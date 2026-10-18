@@ -926,7 +926,7 @@ $(BUILD)/kmodules/process-entry.o: kmodules/shared/process-entry.S
 $(BUILD)/kmodules/process.elf: $(BUILD)/kmodules/process-pic.o $(BUILD)/kmodules/process-entry.o $(BUILD)/kmodules/process.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
-$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe-handle-stress.inc tests/handles-profile.h tests/probe.h kmodules/shared/process.h
+$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe-handle-stress.inc tests/probe-applications.inc tests/handles-profile.h tests/probe.h kmodules/shared/process.h
 	@mkdir -p $(@D)
 	$(CC) $(MODULE_CFLAGS) -c $< -o $@
 $(BUILD)/tests/apps/process-probe.elf: tests/apps/process.c sdk/application.ld
@@ -1052,3 +1052,14 @@ $(BUILD)/apps/launch.elf: interfaces/startup.h interfaces/handle.h interfaces/sy
 $(BUILD)/apps/true.elf: interfaces/startup.h interfaces/handle.h interfaces/system.h interfaces/memory.h apps/true/true.c sdk/system.c sdk/system.h sdk/application.h sdk/application.ld interfaces/applications.h
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld apps/true/true.c sdk/system.c -o $@
+
+$(BUILD)/tests/apps/application-runtime.elf: interfaces/startup.h interfaces/handle.h interfaces/system.h interfaces/memory.h interfaces/io.h tests/apps/application-runtime.c sdk/system.c sdk/system.h sdk/application.h sdk/application.ld interfaces/applications.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/application-runtime.c sdk/system.c -o $@
+_test-process-boot: $(BUILD)/tests/apps/application-runtime.elf
+
+.PHONY: test-installations
+test-installations:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/installation-contract.c -o $(BUILD)/tests/installation-contract
+	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests

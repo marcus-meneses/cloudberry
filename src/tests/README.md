@@ -830,3 +830,11 @@ one/four-CPU/both-IOMMU baseline remains pending before performance changes.
 Handle phase profiling and simultaneous-client/resource acceptance are described
 in [handle-profiling.md](handle-profiling.md). `--profile-handles` selects a
 separate disposable broker; ordinary candidate builds contain no probes.
+
+
+`make -C src test-installations` checks installation framing, identity/path binding,
+privilege ceilings, C/C++ startup contracts and load/admission allocation rollback.
+The process boot acceptance also runs a disposable registered lifecycle launcher:
+concurrent ordinary apps, argv/cwd, manifest/owner denial, cooperative stop,
+deferred wait timeout/replay, child fault, caller abandonment and service cleanup.
+The candidate contains only `launch` and `true`, with no automatic test launch.

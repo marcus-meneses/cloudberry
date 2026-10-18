@@ -316,11 +316,13 @@ session `20261018T153448.340455Z` is the new host baseline. All reported medians
 improve against the preceding baseline, with no correctness/clock rejection.
 See [the profiling guide](tests/handle-profiling.md).
 
-Next architectural milestone: explicit application launch/installed identity and
-lifecycle policy, after discussion of that scope. Bootstrap remains a startup
-coordinator. Further performance work should target a reproducible workload and
-use isolated phase evidence; no additional mapping/lock rewrite or benchmark
-campaign is required to close the current three priorities.
+Application launch/installed identity and lifecycle policy are now implemented:
+a privileged userland `/@applications` handler, build-owned installation records,
+ordinary `launch`/`true` apps, authenticated ownership, wake-driven completion,
+cooperative stop and separate execution/result reclamation. Bootstrap remains a
+startup coordinator. Isolated one/four-CPU TCG runtime acceptance passes; native
+KVM acceptance of this new milestone remains separate from the earlier handle
+baseline. No further performance campaign is required to close that earlier work.
 
 One boot input domain, pinned single-threaded processes, negotiated boot-keyboard
 HID and trusted unsigned development bundles remain intentional limits.
@@ -881,3 +883,53 @@ four-CPU AMD-Vi case, profiled/unprofiled medians are 3.24x for the clock bracke
 show substantial probe perturbation; they are not universal correction factors.
 Do not optimize production scheduling from uncorrected instrumented totals alone.
 No further production code changed at this acceptance step.
+
+
+## Installed application lifecycle milestone (2026-10-18)
+
+1. Implemented `/@applications` in privileged userland under `handlers/applications`.
+   Public C launch/info/wait/stop/release operations use copied frames. The service
+   uses authenticated broker PID/installation context, retains deferred waits,
+   authorizes launcher installations and enforces child ownership. Startup context
+   carries argv/cwd without kernel pointers. Kernel additions remain mechanisms:
+   installed-image loading/admission through the I/O bridge, owned completion/
+   owner-exit channels, join wakeups and safe reap. No kernel application manager
+   or bootstrap runtime supervisor was introduced.
+2. Implemented a build-generated immutable `installed.bin` registry outside app
+   bundles, binding image paths, embedded manifests, identity, role and execution
+   settings. Build-time privilege/path/duplicate checks and kernel framing/admission
+   checks fail closed. The manager's process authority is separately bound by the
+   kernel installed-image loader; a manifest cannot grant that binding. Current
+   trust root is the read-only image, without installer/signature or user policy.
+3. Packaged ordinary `launch` and `true` apps and the shared C startup helper.
+   Disposable registered fixtures validate concurrent children, whitespace/case
+   preservation, cwd, denied arbitrary/provider launches, manifest isolation,
+   foreign-child denial, deferred timeout/late wait result, cooperative stop,
+   child fault containment and abandonment cleanup. Ordinary boot starts only
+   keyboard/application providers; test apps and initial test launches stay out.
+
+A valid provider BAD_REQUEST now completes rather than being confused with error
+normalization failure. Native kernel-resource copied replies are reserved before
+mutation, preventing a post-launch allocation failure from hiding the child ID.
+Focused host tests cover both cases, plus registry parsing, binding and OOM
+rollback; C/C++ contracts and keyboard regressions pass. Existing process/USB/
+concurrency acceptance remains enabled. Runtime details and limits are documented
+in [the applications provider](handlers/applications/README.md).
+
+Initial isolated TCG acceptance: one CPU run
+`1497bd2b991a4f4fabdca50d1705a999`, four CPUs/AMD-Vi run
+`07a0c41cca5543029186a25fef92dd62`. These are correctness tests, not a new native
+performance baseline. Processes remain pinned/single-threaded, stop is cooperative,
+cwd is metadata rather than filesystem permission, and automatic provider recovery
+is not part of this milestone. Native/physical acceptance remains open.
+
+
+Final runtime verification: the traced four-CPU AMD-Vi TCG run
+`9c46c95a82c148f298f53f328fd3b48e` passes all runtime scenarios and exact broker
+live-block restoration after lifecycle-provider teardown. The ordinary four-CPU
+candidate boot `d9b455b12ffc434b8dda53de79961f4d` publishes both providers using
+only the read-only hybrid boot image: no test modules or developer data disks.
+Packaging checks confirm four OS installation records (keyboard, applications,
+launch, true), an empty production initial-launch file and no profiling export.
+The candidate is rebuilt. These changes still need a focused native KVM correctness
+run; they do not claim a new native performance baseline.

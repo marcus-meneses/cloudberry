@@ -21,8 +21,10 @@ try:
         if not args.process_only:raise RuntimeError('handle profiling requires process test')
         shutil.copy2(build/'tests/handles-profile.kmod',stage/'boot/kmodules/handles.kmod')
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
-    fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
+    fixture=test/'drivers';fixture.mkdir(exist_ok=True);shutil.copytree(build/'src-handler-bundles',fixture,dirs_exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('runtime_fixture',root/'src/tests/runtime-fixture.py');runtime_fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(runtime_fixture);runtime_fixture.install(fixture,build)
         shutil.copy2(build/'tests/apps/handle-stress.elf',fixture/'handle-stress.elf')
         for name in ('stress-client.json','stress-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/handle-bench.elf',fixture/'handle-bench.elf')
@@ -96,7 +98,7 @@ try:
             process.terminate()
             try:process.wait(timeout=5)
             except subprocess.TimeoutExpired:process.kill();process.wait()
-    if args.process_only and ('PASS handle concurrency:' not in log.read_text() or 'PASS handle resources:' not in log.read_text()):raise RuntimeError('handle concurrency/resource acceptance incomplete')
+    if args.process_only and ('PASS handle concurrency:' not in log.read_text() or 'PASS handle resources:' not in log.read_text() or 'PASS application runtime:' not in log.read_text()):raise RuntimeError('handle concurrency/resource acceptance incomplete')
     if args.process_only and not (typed and removed and added and right and 'PASS keyboard handler' in log.read_text()):raise RuntimeError('keyboard input/hotplug acceptance incomplete')
     if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')

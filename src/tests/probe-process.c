@@ -60,6 +60,7 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
     text("PASS handle benchmark: acquired/reflected/kernel and cross-process calls, owned allocation and raw clock/lock attribution\n");return 1;
 }
 #include "probe-handle-stress.inc"
+#include "probe-applications.inc"
 struct kernel_surface_result probe_process_call(MODULE_ARGS){
     MODULE_UNUSED();struct probe_process *probe=(void *)a;const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     kernel_surface_call boot_info=kernel_surface_find(hub,"bootstrap.info"),load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),pages=kernel_surface_find(hub,"mem.pages_info");
@@ -141,6 +142,7 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     }
     CHECK(benchmark(hub,volume.filesystem.cookie,probe));
     CHECK(handle_stress(hub,volume.filesystem.cookie,probe));
+    CHECK(application_runtime(hub,volume.filesystem.cookie,probe));
     text("PASS provider lifecycle: active USB/read fault, original UNKNOWN outcome, explicit stop/reap and two fresh restart cycles\n");
     text("PASS keyboard handler: disk-loaded isolated /@keyboard, authorized independent clients, Unicode input, structured arrows, USB hotplug/reset and quiescent decommission\n");
     return module_result(1,1);

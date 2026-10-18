@@ -223,3 +223,15 @@ record pointers. Generic startup packets have a 24-byte header and 16-byte file
 prefixes, followed by inline names/data. Their backing becomes readonly/NX owned
 user pages and lives until process reap; temporary kernel assembly buffers are
 freed after loading. The bootstrap module does not interpret handler configuration.
+
+
+Application runtime adds an immutable copied OS installation catalog owned by the
+I/O kmodule, selected at first trusted provider launch. Each managed child has
+one dynamically allocated I/O descriptor, preallocated completion/owner-exit
+mailboxes and a kernel wait worker with an owned stack until completion is
+consumed. Reaping execution frees the child mappings/stacks and worker; retaining
+an exit result keeps only the descriptor/owner-exit notification until release.
+The privileged userland `/@applications` provider separately owns dynamic child
+and deferred-wait records through its private `/@memory` handle. Its readonly
+startup catalog and initial-launch data are copied by the existing process loader.
+Neither catalog pointers nor kernel process records cross into caller messages.

@@ -221,14 +221,16 @@ controllers, platform drivers and PCI INTx firmware routing remain deferred.
 ## Current assessment (2026-10-18)
 
 The kernel foundation now includes storage selection, future disk-module loading
-and protected native processes. The first application-facing handler now runs
-through copied, manifest-authorized capability calls: `/@keyboard` is loaded
-from the readonly ext4 bundle and serves independent isolated clients.
+and protected native processes. The disk-loaded `/@keyboard` and `/@applications` providers run through copied,
+manifest-authorized capability calls. The application lifecycle provider launches
+ordinary installed native applications and reports exit/fault completion without
+blocking its receive loop. Both providers run in isolated privileged userland.
 
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; no demand growth, dynamic linking, migration or forced cancellation |
-| Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | One boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
+| Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures, sessions, forced termination or automatic manager recovery |
+| Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, boot-keyboard HID provider implemented; general HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
@@ -258,7 +260,10 @@ request allocation. This removes 1,288 of 5,782 broker allocations in the benchm
 (22.3%). Replies keep independent lifetime. [Isolated phase profiling](tests/handle-profiling.md)
 separates broker work, copies, blocking and handoff; it is absent from the candidate
 and materially affects timings. The current performance/concurrency follow-up is
-closed; physical and native Intel acceptance remain open.
+closed; physical and native Intel acceptance remain open. Application lifecycle
+work now adds an installed userland launcher, argv/cwd startup metadata, deferred
+waits, cooperative stop and owner-scoped retained results. See the
+[applications provider](handlers/applications/README.md) and [built-in apps](apps/README.md).
 
 The hub grows within reserved virtual windows and allocates physical pages only
 as needed. Current production includes process, handle and I/O methods plus a bootstrap
@@ -356,6 +361,7 @@ src/
 │   ├── spaces.c
 │   └── spaces.h
 ├── handlers/
+│   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
 │   └── keyboard/
 │       ├── README.md
 │       ├── config.cnf
@@ -369,6 +375,9 @@ src/
 │       └── manifest.json
 ├── interfaces/
 │   ├── README.md
+│   ├── admission.h
+│   ├── applications.h
+│   ├── installations.h
 │   ├── handle.h
 │   ├── io.h
 │   ├── memory.h
@@ -461,6 +470,8 @@ src/
 │   │   ├── handles.h
 │   │   ├── handles.json
 │   │   ├── handles.md
+│   │   ├── io-process.c
+│   │   ├── io-process.h
 │   │   ├── io.c
 │   │   ├── io.h
 │   │   ├── io.json
@@ -586,7 +597,13 @@ src/
 │   └── README.md
 ├── maps/
 │   └── startup.md
+├── apps/
+│   ├── README.md
+│   ├── installed.json
+│   ├── launch/ (launch.c, manifest.json)
+│   └── true/ (true.c, manifest.json)
 ├── sdk/
+│   ├── application.h
 │   ├── application.ld
 │   ├── system.c
 │   └── system.h
@@ -594,6 +611,7 @@ src/
 │   ├── apps/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
+│   │   ├── application-runtime.c
 │   │   ├── handle-bench.c
 │   │   ├── handle-stress.c
 │   │   ├── stress-client.json
@@ -626,6 +644,9 @@ src/
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
 │   ├── cpu-profile.c
+│   ├── installation-contract.c
+│   ├── installations.py
+│   ├── runtime-fixture.py
 │   ├── interfaces.c
 │   ├── future.c / future.json / future-fail.c / future-fail.json (disk-only fixtures)
 │   ├── events-boot.c
@@ -680,6 +701,7 @@ src/
 │   ├── provider-definition.c
 │   ├── process-elf.c
 │   ├── probe-process.c
+│   ├── probe-applications.inc
 │   ├── probe-handle-stress.inc
 │   ├── probe-block.c
 │   ├── probe-hubs.c
@@ -711,6 +733,7 @@ src/
 │   ├── xhci.c
 │   └── xstate-host.c
 ├── tools/
+│   ├── build-installations.py
 │   ├── build-boot-image.py
 │   ├── check-acpi-image.py
 │   ├── check-module-pic.py

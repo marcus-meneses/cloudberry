@@ -79,9 +79,11 @@ Implemented foundations include:
 - Copied capability calls, boot manifest grants, filtered reflection and scoped memory/I/O.
 - A disk-loaded isolated `/@keyboard` provider with IBM/ABNT2 layouts and USB hotplug.
 - Declarative provider startup, handler-owned configuration, explicit stop/reap ownership and copied status snapshots.
+- A privileged userland `/@applications` lifecycle service, build-owned installation bindings, and ordinary `launch`/`true` apps.
 
-The first isolated keyboard provider now runs through the handle boundary.
-General installed-app policy, interactive approval, automatic provider recovery,
+The keyboard and applications providers run through the handle boundary.
+Installation identity is bound by the read-only image catalog; general per-user
+installation policy, interactive approval, automatic provider recovery,
 general HID formats and runtime ACPI notification/driver policy remain ahead.
 QEMU acceptance includes isolated one/four-CPU runs with emulated IOMMU models.
 AMD-host KVM validates SMP, clocks, extended state and the native process/input/handle
