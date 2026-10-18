@@ -58,3 +58,34 @@ make -C src test-bootstrap-boot BOOTSTRAP_BACKEND=nvme BLOCK_MULTI=1 QEMU_CPUS=4
 These check real transport selection, readonly ext4 fixture reads, duplicate
 rejection before mounting and complete enumeration across multiple namespaces.
 No candidate VM or developer persistent disk is run or attached by these tests.
+
+## First isolated boot provider
+
+After starting volume selection, the core calls `bootstrap.apps`. With
+`keyboard.enabled=true` (default), a BSP worker waits for the selected readonly
+ext4 mount, then loads `keyboard/keyboard.elf`, `keyboard/manifest.json` and
+`keyboard/layouts/<keyboard.layout>.json` below `drivers.directory`. These bundle
+files are installed by the image builder, never copied/migrated during boot.
+`keyboard.layout` defaults to `ibm`; `abnt2` is also bundled. General installed-app
+identity/signature verification and interactive authorization remain future work.
+
+`bootstrap.keyboard(filesystem,optional_layout)` is the trusted kernel factory
+used by that worker and isolated acceptance. It validates the layout basename,
+loads a protected ELF, copies a read-only startup packet, admits the copied boot
+manifest and starts the process. It uses a stable development installation ID,
+not a verified signing key. Concurrent loads are rejected; a failed rollback that
+still needs reap retains its cleanup process ID. Foundational kmodules continue
+to load through Limine. The keyboard ELF is not a format3 kernel-module image.
+
+The owned `bootstrap.applications` table and `bootstrap.apps_info` expose worker,
+keyboard process ID, state (0 idle, 1 awaiting volume, 2 starting, 3 ready, 4 failed)
+and error. These are BSP-owned advisory snapshots; readiness means publication,
+not physical keyboard presence. `apps_info` reaps an exited bootstrap worker. A
+provider failure retains its process identity for explicit owner cleanup; automatic
+restart/rebinding and arbitrary app launch policy are not part of this milestone.
+
+Ordinary production startup passes on four-CPU AMD-Vi TCG, run
+`5d0ff656a58646828234075c05d1d731`, using the readonly hybrid image through
+explicit USB BOT/SCSI hard-disk attachment. This preserves its 512-byte GPT
+geometry. `tests/keyboard-boot.py` runs this acceptance without probe modules
+or fixture clients and never attaches developer persistent disks.

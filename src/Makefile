@@ -10,7 +10,7 @@ CC := $(CROSS_PREFIX)gcc
 KERNEL := $(BUILD)/kernel.elf
 ISO := $(BUILD)/cloudberry.iso
 BOOT_DRIVERS_MIB ?= 512
-BOOT_DRIVERS_SOURCE ?=
+BOOT_DRIVERS_SOURCE ?= $(BUILD)/src-handler-bundles
 # Distinct object/staging names keep archived implementation artifacts out.
 STORAGE_WRITE_TEST ?= 0
 STORAGE_TEST ?= 0
@@ -82,7 +82,8 @@ QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
     -device VGA -device qemu-xhci,id=xhci \
     -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
     -drive if=none,id=bootmedia,format=raw,readonly=on,file="$(ISO)" \
-    -device usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1 \
+    -device usb-bot,id=bootusb,bus=xhci.0 \
+    -device scsi-hd,bus=bootusb.0,drive=bootmedia,bootindex=1 \
     -drive if=none,id=nvmedisk,format=raw,file="$(NVME_DISK)" \
     -device nvme,drive=nvmedisk,serial=CLOUDBERRY2NVME \
     -drive if=none,id=satadisk,format=raw,file="$(SATA_DISK)" \
@@ -115,7 +116,7 @@ $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h
 $(KERNEL): $(OBJECTS) boot/linker.ld FORCE
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
+$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
@@ -837,7 +838,7 @@ test-hub-boot:
 _test-hub-boot: $(ISO) $(BUILD)/tests/src-hub-kernel.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=nvme --hub-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
-$(BUILD)/kmodules/bootstrap.elf: $(BUILD)/kmodules/bootstrap-load-pic.o $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+$(BUILD)/kmodules/bootstrap.elf: $(BUILD)/kmodules/bootstrap-apps-pic.o $(BUILD)/kmodules/bootstrap-load-pic.o $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld tools/check-module-pic.py
 	python3 tools/check-module-pic.py $(filter %.o,$^)
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
@@ -942,7 +943,7 @@ $(BUILD)/tests/src-process-kernel.elf: $(BUILD)/tests/src-process-main.o $(BUILD
 .PHONY: test-process-boot _test-process-boot
 test-process-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-process-boot
-_test-process-boot: $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
+_test-process-boot: $(BUILD)/tests/apps/keyboard-client.elf $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --process-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
 .PHONY: test-process-elf
@@ -970,3 +971,25 @@ test-handles:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
 	$(BUILD)/tests/handles
+
+$(BUILD)/apps/keyboard.elf: handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h handlers/keyboard/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
+$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf handlers/keyboard/manifest.json $(wildcard handlers/keyboard/layouts/*.json)
+	rm -rf $(BUILD)/src-handler-bundles
+	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts
+	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
+	cp handlers/keyboard/manifest.json $(BUILD)/src-handler-bundles/keyboard/manifest.json
+	cp handlers/keyboard/layouts/*.json $(BUILD)/src-handler-bundles/keyboard/layouts/
+	@touch $@
+.PHONY: test-keyboard
+test-keyboard:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/keyboard.c handlers/keyboard/hid.c -o $(BUILD)/tests/keyboard
+	$(BUILD)/tests/keyboard handlers/keyboard/layouts/ibm.json handlers/keyboard/layouts/abnt2.json
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/keyboard-stream.c handlers/keyboard/hid.c -o $(BUILD)/tests/keyboard-stream
+	$(BUILD)/tests/keyboard-stream
+
+$(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-client.c sdk/system.c -o $@

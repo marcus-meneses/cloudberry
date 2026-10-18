@@ -49,8 +49,8 @@ reclaiming context memory after replacement/release.
 The few instructions needed to load this first module still precede owned fault
 handling; a corrupt loader cannot be diagnosed by a module it has not loaded.
 
-Validation: the normal boot test binds a test-only module method to vector128,
-executes int80, checks context and return-register preservation, checks delivery
+Validation: the normal boot test binds a test-only module method to vector129,
+executes int81, checks context and return-register preservation, checks delivery
 count and unbinds. `test-inthandle-faults` uses separate kernels to raise #UD,
 #PF (checking CR2/error code), and #DF with an unusable original stack. Each
 must print the expected context and halt. No injection is in the production ISO.
@@ -77,3 +77,11 @@ RTC and verifies the mask remains set before restoring the previous policy.
 
 Hard-ISR bindings require boot-pinned providers. Retirable modules use foreground
 deferred IRQ callbacks, whose routes lease provider lifetime. See [hub lifetime](../../kernel/hub.md).
+
+The protected-process mechanism reserves vector 128 as a DPL3 interrupt gate;
+tests use vector 129 rather than displacing its owned callback. User selectors
+are data 0x2b and code 0x33. `user_stack(top)` updates this CPU's TSS RSP0 only
+with interrupts disabled; thread restore installs its saved entry-stack top.
+Entry/return distinguishes CPL3 for SWAPGS, preserves kernel GS ownership and
+sanitizes user RFLAGS. `user_fault` registers the process fault-containment
+callback; kernel faults and NMI/DF/MCE retain fatal behavior. See process.md.

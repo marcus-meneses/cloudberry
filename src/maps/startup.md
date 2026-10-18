@@ -57,8 +57,11 @@ virtual reservation; this consumes no corresponding physical RAM upfront. Record
 are 56/72/96 bytes for methods/tables/providers, 16 bytes for invocation metadata,
 and 32 bytes per stub. The old shared 16 KiB capacity and static metadata arrays
 are gone. Header counters report mapped backing and fully committed slot capacity.
-Current production has 243 methods (250 with IOMMU), sixteen table references,
-and a provider record per loaded module plus the kernel. Growth does not move
+Current production adds process/handle/I/O methods, keyboard boot configuration
+and bootstrap application-state references. Boot header counters give the actual
+method/table counts; there is one provider record per loaded kmodule plus the kernel.
+The isolated keyboard provider has its own process/capability records, not a hub
+provider record. Growth does not move
 published pointers. Read-only records, RX stubs and private RW/NX aliases remain
 mapped until reboot, even after cooperative provider retirement.
 
@@ -143,7 +146,9 @@ root and seeds absent upper PDPT slots before AP startup (at most 1 MiB shared
 boot backing). Kernel mappers always edit that root; process leaves are U/S,
 owned and W^X. Space-aware shootdowns synchronize with thread root selection.
 Private roots/tables can be reclaimed after active CPUs and thread leases drain;
-PCID, ring-3 execution and user-copy boundaries remain deferred.
+Protected processes enter ring 3 through private TSS entry stacks; checked copies
+mediate handle frames through owned physical aliases. Process heaps and readonly
+startup packets are owned lower-half mappings. PCID remains deferred.
 
 
 SMP preparation allocates CPU-local GDT/TSS/IDT storage plus four guarded 32 KiB

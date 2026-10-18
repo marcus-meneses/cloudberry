@@ -8,7 +8,7 @@ are refused. Empty segments are ignored only when their file size is also zero.
 Each process has one CPU-pinned preemptible thread, a guarded kernel execution
 stack and a separate guarded kernel-entry stack. User stack size is supplied by
 trusted bootstrap policy (64 KiB default), committed eagerly; demand growth,
-TLS, dynamic linking, arguments/environment and multi-threaded processes are
+TLS, dynamic linking, conventional argv/environment and multi-threaded processes are
 not part of this initial milestone. IDs are never reused in one boot.
 
 The GDT includes user selectors 0x2b/0x33. Per-CPU TSS RSP0 follows the saved
@@ -57,3 +57,21 @@ checks pass under UBSan. Native KVM/physical user-entry acceptance remains open.
 self-scoped memory handle; they grow owned user pages and reuse released virtual
 holes. Process exit also initiates scoped I/O cleanup and releases broker policy;
 reap waits for retained kernel I/O workers before freeing process backing.
+
+Loader request ABI1 passes a scalar entry argument. ABI2 additionally copies a
+trusted startup packet into owned read-only/NX user pages, finds a nonoverlapping
+lower-half gap and passes its user address in RDI. The keyboard bundle uses this
+for the selected layout; no kernel pointer crosses into the process. Failed packet
+construction follows the same cleanup-ID/rollback ownership rules as ELF loading.
+
+The integrated process boot also loads the production keyboard provider from
+ext4 and runs independent manifest-authorized clients, real emulated HID reports,
+hotplug and cooperative kernel-requested decommission. The provider remains an
+ordinary protected process rather than a hub callback.
+
+Integrated keyboard acceptance passes on one CPU/no IOMMU
+(`4b52f2ae41564258972e34143507c949`), four CPUs/VT-d
+(`5416fd1d535b47899f1eeafd75001032`) and four CPUs/AMD-Vi
+(`a6fcf05306744aa3b13f59b96e329531`). These include isolated handle clients,
+USB input/hotplug and provider cleanup. The broader one/four-CPU thread/SMP
+regression also passes after moving its test interrupt to unowned vector 129.

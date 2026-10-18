@@ -24,6 +24,22 @@
     {
       "name": "bootstrap.driver_info",
       "symbol": "bootstrap_surface_driver_info"
+    },
+    {
+      "name": "bootstrap.apps",
+      "symbol": "bootstrap_surface_apps"
+    },
+    {
+      "name": "bootstrap.apps_worker",
+      "symbol": "bootstrap_surface_apps_worker"
+    },
+    {
+      "name": "bootstrap.apps_info",
+      "symbol": "bootstrap_surface_apps_info"
+    },
+    {
+      "name": "bootstrap.keyboard",
+      "symbol": "bootstrap_surface_keyboard"
     }
   ]
 }

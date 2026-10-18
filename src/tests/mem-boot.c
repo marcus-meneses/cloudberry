@@ -94,7 +94,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     if (r.status || !r.value) return test_failure(__LINE__);
     if (CALL(release, &heap, r.value, 0).status) return test_failure(__LINE__);
     kernel_surface_call config_info=find(page,"config.info"),batch=find(page,"hub.publish_tables");struct config_info configured;
-    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=6)return test_failure(__LINE__);
+    if(!config_info || !batch || CALL(config_info,&configured,0,0).status || !configured.ready || configured.count!=8)return test_failure(__LINE__);
     const struct kernel_hub_table *config_version=kernel_hub_find_table(page,"config.version"),*directory=kernel_hub_find_table(page,"config.drivers.directory");
     const struct kernel_hub_table *partition=kernel_hub_find_table(page,"config.drivers.partition_guid");
     if(!config_version || !directory || !partition)return test_failure(__LINE__);
@@ -185,11 +185,11 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
         kernel_surface_find_version(page,"probe.arguments",2,4)) return test_failure(__LINE__);
     kernel_surface_call bind=find(page,"inthandle.bind"), check=find(page,"inthandle.check");
     if (!bind || !check || CALL(bind,14,"probe.interrupt",42).status!=KERNEL_SURFACE_FAILED ||
-        CALL(bind,128,"probe.interrupt",42).status) return test_failure(__LINE__);
+        CALL(bind,129,"probe.interrupt",42).status) return test_failure(__LINE__);
     uint64_t returned;
-    __asm__ volatile("int $0x80" : "=a"(returned) : "a"(0) : "memory","cc");
-    if (returned!=UINT64_C(0x123456789abcdef0) || CALL(check,128,0,0).value!=1 ||
-        CALL(bind,128,0,0).status) return test_failure(__LINE__);
+    __asm__ volatile("int $0x81" : "=a"(returned) : "a"(0) : "memory","cc");
+    if (returned!=UINT64_C(0x123456789abcdef0) || CALL(check,129,0,0).value!=1 ||
+        CALL(bind,129,0,0).status) return test_failure(__LINE__);
     extern bool kernel_mmio_test(const struct kernel_surfaces *);
     extern bool kernel_clock_test(const struct kernel_surfaces *);
     extern bool kernel_events_test(const struct kernel_surfaces *);

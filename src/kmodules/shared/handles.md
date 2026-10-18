@@ -22,7 +22,8 @@ token does not confer authority. Operation grants are frozen at acquisition;
 reflection returns only those operations and the authenticated data scope.
 Unscoped provider facts are withheld. `/@memory` grants only self-owned mappings;
 `/@io` currently requires keyboard scope; `/@keyboard` clients require boot-input
-scope. The single boot input domain is explicit, not a multi-session input router.
+scope. Keyboard delivery context carries the authenticated boot stream and
+capability grant timestamp. The single boot input domain is explicit, not a multi-session input router.
 
 Calls capture/validate input and the complete output range before dispatch.
 Preallocated kernel I/O channels and FIFO request queues wake blocked provider/
@@ -39,16 +40,26 @@ larger result than its buffer returns the required size and the reply header wit
 the kernel-assigned request ID. Retrying that ID with the next attempt and identical
 payload retrieves the retained result; it never silently dispatches again. A
 changed payload, guessed request ID or a reply from another provider is rejected.
-Request records live until capability release or caller exit. There is no automatic
+Request records live until explicit `cb_system_request_release(id)`, capability
+release or caller exit. Forgetting a completed record relinquishes result replay;
+busy records cannot be forgotten. Providers release internal completed clock/I/O
+records so ongoing input does not accumulate a permanent request cache. There is no automatic
 exactly-once guarantee or automatic side-effect retry. Explicit status/vow APIs
 and transport implementations for remote providers are not implemented yet.
 
 A deadline can stop a queued call before dispatch. A timeout after dispatch has
 UNKNOWN outcome and preserves the captured request; a later provider result can
 replace that provisional timeout. Errors include original payload and a redacted
-broker trace frame, without kernel addresses. Provider-specific private trace text
+broker trace frame, without kernel addresses. Authorized provider result data
+(such as an INPUT_RESYNC anchor) remains alongside that error information. Provider-specific private trace text
 is currently withheld. C callers receive statuses and structured frames; C++
 exception/RAII wrappers remain future SDK work.
+
+`handles.decommission(pid)` is a kernel-owned cooperative lifecycle operation:
+it stops publication admission and queues a preallocated base-release event to
+the provider, which can finish admitted work and shut down. It is not a forced
+kill. `handles.inspect` copies publication identity and request counters for trusted
+diagnostics; it does not expose other clients through application reflection.
 
 Explicit publication release stops admission and fails queued calls, while already
 dispatched work may finish. Provider exit removes discovery immediately and wakes
@@ -70,6 +81,7 @@ Local acceptance: UBSan manifest/broker tests pass, including mailbox backpressu
 and OOM cleanup. Protected process/handle boots pass on one CPU
 (`367e08baf1eb47cbba4cc33f2f4bfb25`) and four CPUs/VT-d
 (`01b61ef8068547feac50ef81bbe04d9e`) under TCG. The latter uses a
-provider on the BSP and client on an AP. Physical HID report decoding and the
-new I/O worker's live subscription lifecycle are validated with the next keyboard
-milestone; these broker tests do not claim hardware keyboard acceptance.
+provider on the BSP and client on an AP. The subsequent keyboard acceptance exercises real emulated USB reports,
+independent read/state grants, grant-time-filtered replay, unplug/replug and
+cooperative shutdown through the production isolated provider. See
+[the keyboard handler](../../handlers/keyboard/README.md).

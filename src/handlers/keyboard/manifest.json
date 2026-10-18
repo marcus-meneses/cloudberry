@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "resources": [
+    {"name":"/@memory","scope":"self","operations":["allocate","free"]},
+    {"name":"/@io","scope":"keyboard","operations":["keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns"]},
+    {"name":"/@keyboard","scope":"boot-input","publish":true,"operations":["read","state"]}
+  ]
+}

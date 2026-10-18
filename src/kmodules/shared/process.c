@@ -36,6 +36,10 @@ static int cleanup(struct process *p){
     if(p->trap.id && CALL(state.stack_free,p->trap.id,p->info.id,0).status)return 0;
     p->trap.id=0;while(p->allocations){struct allocation *record=p->allocations;p->allocations=record->next;release(record);}return 1;
 }
+static struct kernel_surface_result load_failure(struct process *p){
+    if(!cleanup(p)){p->info.state=PROCESS_CLEANUP;uint64_t flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,0);}
+    release(p);return module_result(0,0);
+}
 static int elf_load(struct process *p,const unsigned char *image,size_t bytes,uint64_t stack_bytes){
     if(!process_elf_valid(image,bytes))return 0;
     const struct elf_header *h=(const void *)image;
@@ -62,7 +66,7 @@ struct kernel_surface_result process_surface_init(MODULE_ARGS){
 #include "ext4-fs.h"
 struct kernel_surface_result process_surface_load(MODULE_ARGS){
     MODULE_UNUSED();const struct process_request *r=(const void *)a;
-    if(!state.hub || !r || r->abi!=1 || !r->path || !r->filesystem)return module_result(0,0);
+    if(!state.hub || !r || (r->abi!=1 && r->abi!=2) || !r->path || !r->filesystem)return module_result(0,0);
     struct ext4_stat st;if(CALL(state.stat,r->filesystem,r->path,&st).status || !st.bytes || st.bytes>SIZE_MAX)return module_result(0,0);
     unsigned char *image=allocate(st.bytes);if(!image)return module_result(0,0);
     struct kernel_surface_result got=state.read(r->filesystem,(uintptr_t)r->path,0,(uintptr_t)image,st.bytes,0);
@@ -73,11 +77,16 @@ struct kernel_surface_result process_surface_load(MODULE_ARGS){
     if(ok)ok=elf_load(p,image,st.bytes,r->stack_bytes?r->stack_bytes:65536);
     release(image);
     if(ok)ok=!CALL(state.stack_alloc,65536,p->info.id,&p->trap).status;
-    if(!ok){
-        if(!cleanup(p)){p->info.state=PROCESS_CLEANUP;flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,0);}
-        release(p);return module_result(0,0);
+    if(!ok)return load_failure(p);
+    p->argument=r->argument;
+    if(r->abi==2){
+        if(!r->startup || !r->startup_bytes || r->startup_bytes>SIZE_MAX-4095){return load_failure(p);}
+        uint64_t rounded=(r->startup_bytes+4095)&~UINT64_C(4095),va=65536;int gap=0;
+        while(va<p->stack_bottom-4096 && rounded<=p->stack_bottom-4096-va){uint64_t next=va;for(struct page *page=p->pages;page;page=page->next)if(page->address>=va && page->address-va<rounded && page->address+4096>next)next=page->address+4096;if(next==va){gap=1;break;}va=next;}
+        if(gap)for(uint64_t off=0;off<rounded;off+=4096){size_t n=off<r->startup_bytes?(r->startup_bytes-off<4096?r->startup_bytes-off:4096):0;if(!add_page(p,va+off,0,(const unsigned char *)r->startup+off,n)){gap=0;break;}}
+        if(!gap){return load_failure(p);}p->argument=va;
     }
-    p->argument=r->argument;p->info.state=PROCESS_READY;flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,1);
+    p->info.state=PROCESS_READY;flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,1);
 }
 struct kernel_surface_result process_surface_start(MODULE_ARGS){
     MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);if(!p || p->info.state!=PROCESS_READY){unlock(flags);return module_result(0,0);}p->info.state=PROCESS_LOADING;unlock(flags);

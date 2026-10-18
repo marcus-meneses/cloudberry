@@ -88,6 +88,10 @@ __attribute__((noreturn)) void kmain(void) {
     if(!storage_start || storage_start(0,0,0,0,0,0).status){debug("Cloudberry v2: storage lifecycle startup failed\n");halt();}
     kernel_surface_call bootstrap_start=kernel_surface_find(kmodule_hub,"bootstrap.start");
     if(!bootstrap_start || bootstrap_start(0,0,0,0,0,0).status){debug("Cloudberry v2: bootstrap startup failed\n");halt();}
+#if !defined(BOOT_PROCESS_TEST) && !defined(BOOT_BOOTSTRAP_TEST)
+    kernel_surface_call apps_start=kernel_surface_find(kmodule_hub,"bootstrap.apps");
+    if(!apps_start || apps_start(0,0,0,0,0,0).status){debug("Cloudberry v2: application startup failed\n");halt();}
+#endif
 #endif
 #ifdef BOOT_PROCESS_TEST
     extern _Bool kernel_process_test(const struct kernel_surfaces *);

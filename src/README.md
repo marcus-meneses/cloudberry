@@ -16,16 +16,16 @@ request ABI2, with ownership, leases, context-switch root selection and targeted
 TLB invalidation. [Protected processes](kmodules/shared/process.md) now load static
 ELF executables from ext4, enter ring 3 and contain user faults. Application
 handle transport now uses copied, manifest-authorized capability calls; the first
-keyboard handler is the next application milestone. See [mem spaces](kmodules/shared/mem-spaces.md).
+keyboard handler now runs as an isolated disk-loaded process. See [mem spaces](kmodules/shared/mem-spaces.md).
 The [application handle contract](interfaces/README.md) now defines the C boundary
 and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
 publishing `/@keyboard`. Headers are compile-tested in C/C++20; the [C system library and handle broker](kmodules/shared/handles.md) implement initial boot-policy authorization and isolated request/reply.
-Keyboard handler loading and HID decoding follow.
+The provider decodes boot-keyboard reports with bundled IBM/ABNT2 layouts.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
 Application handles now provide process-local acquisition, filtered reflection,
-self-owned memory and scoped I/O. Privileged HID decoding remains the next handler milestone. The xHCI transport supplies root/downstream
+self-owned memory and scoped I/O. Privileged HID decoding runs in that isolated keyboard provider. The xHCI transport supplies root/downstream
 slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe and AHCI are kernel-only block backends. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
@@ -179,7 +179,7 @@ baseline, with latency/scalability work still needed; it is not unrestricted
 kernel preemption. New kmodules must define their critical/reentrancy contracts.
 Threads eagerly preserve x87/SSE and available AVX through the shared xstate
 kmodule; dispatcher/ISR infrastructure still builds with mgeneral-regs-only.
-Forced thread cancellation/process teardown, CPU hotplug, migration and load
+Forced thread cancellation, CPU hotplug, migration and load
 balancing are not implemented. USB device/hub hotplug is implemented.
 
 Single-CPU clock selection prefers a validated invariant TSC with HPET fallback.
@@ -191,13 +191,14 @@ fallback on later instability. Migration remains disabled. CMOS/NMI policy stays
 describes reservations, mapping references, release/reuse and cross-CPU TLB
 invalidation. Heap backing, shared kernel page tables and original boot allocations
 remain reserved; private tables are reclaimed when their inactive space is destroyed.
-Owned private page tables are available to kernel threads; user-mode
-process isolation and application execution remain future work.
+Owned private page tables support kernel threads and protected user processes;
+normal exit/fault cleanup waits for actual execution and I/O quiescence.
 
 A successful boot prints module/table names and addresses, hardware descriptors,
 BOOT OK, then "managed BSP event stack active". The candidate creates scheduler and IRQ deferred workers, a USB bus worker per
 controller, the hub-class manager and a worker per discovered external hub. It
-submits no demo/test tasks; idle workers block on notifications or deadlines.
+also launches the production keyboard bundle after the ext4 volume is ready.
+It submits no demo/test tasks; idle workers block on notifications or deadlines.
 
 The [profiling surfaces](kmodules/shared/profiling.md) report lock wait/hold/attribution,
 managed IRQ-off intervals and runnable waiting; raw local TSC ticks include host
@@ -215,15 +216,16 @@ controllers, platform drivers and PCI INTx firmware routing remain deferred.
 ## Current assessment (2026-10-17)
 
 The kernel foundation now includes storage selection, future disk-module loading
-and private address-space infrastructure. It does not
-implement the original application's handler/handle model yet; that layer must
-follow process isolation and safe boundary transfer.
+and protected native processes. The first application-facing handler now runs
+through copied, manifest-authorized capability calls: `/@keyboard` is loaded
+from the readonly ext4 bundle and serves independent isolated clients.
 
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
-| Execution | Preemptible pinned kernel threads, SMP, deadlines, deferred IRQs, xstate | Private roots available to kernel threads; no user-mode execution, process manager, migration or forced cancellation |
+| Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; no demand growth, dynamic linking, migration or forced cancellation |
+| Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | One boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
-| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, no HID or UAS driver; BOT storage is implemented |
+| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, boot-keyboard HID provider implemented; general HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
 | Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies and hidden init/start; table withdrawal and executable reclamation remain future work |
 
@@ -236,15 +238,17 @@ recovery and executable image unloading remain deferred. See the
 [hub contract](kmodules/shared/usb-hub.md) and [next priorities](ROADMAP.md#next-priorities).
 
 The hub grows within reserved virtual windows and allocates physical pages only
-as needed. Its current production registry has 243 methods, or 250 with a selected
-IOMMU backend, plus sixteen table references. Capacity and committed backing are
+as needed. Current production includes process, handle and I/O methods plus a bootstrap
+application-state table; counts are reported on each boot. Capacity and committed backing are
 reported by the header rather than as a percentage of a fixed 16 KiB allocation.
 Provider records expose ownership and lifetime. All current boot modules are
 pinned; selected future providers can drain calls and leases and retire without
 image unmapping. Published-table owners remain pinned until table-reader lifetime
 tracking exists. These mechanisms do not establish a throughput/latency bound.
 
-Current QEMU boot media is a read-only USB mass-storage ISO. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
+Current QEMU boot media is a read-only USB BOT disk backed by the hybrid ISO.
+An explicit `usb-bot`/`scsi-hd` attachment preserves its 512-byte GPT layout;
+the readonly medium must not be inferred as a 2048-byte optical device. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
 driver partition by its configured GUID. Normal startup runs the bootstrap
 coordinator, which claims supported transports as needed and mounts the unique
 configured driver volume read-only. Other mounts remain explicit caller-owned
@@ -275,7 +279,7 @@ no formatting or migration. Test fixtures never enter the candidate image.
 ```sh
 make -C src test-portability
 make -C src test-threads-state test-threads-smp
-make -C src test-process-elf test-manifest test-handles test-process-boot
+make -C src test-process-elf test-manifest test-handles test-keyboard test-process-boot
 make -C src BUILD=../bin/tests/isolated test-clock test-tsc-validation test-irq test-timer test-apic test-pages
 make -C src test-inthandle-faults
 make -C src test-ext4-write test-ext4-runtime
@@ -330,7 +334,15 @@ src/
 │   └── spaces.h
 ├── handlers/
 │   └── keyboard/
-│       └── README.md
+│       ├── README.md
+│       ├── hid.c
+│       ├── hid.h
+│       ├── keyboard.c
+│       ├── layouts/
+│       │   ├── abnt2.json
+│       │   └── ibm.json
+│       ├── manifest.json
+│       └── startup.h
 ├── interfaces/
 │   ├── README.md
 │   ├── handle.h
@@ -386,6 +398,8 @@ src/
 │   │   ├── apic.md
 │   │   ├── block-util.h
 │   │   ├── boot-origin.h
+│   │   ├── bootstrap-apps.c
+│   │   ├── bootstrap-apps.h
 │   │   ├── bootstrap-load.c
 │   │   ├── bootstrap-load.h
 │   │   ├── bootstrap.c
@@ -555,6 +569,10 @@ src/
 │   │   ├── handles-client.json
 │   │   ├── handles-server.json
 │   │   ├── handles.c
+│   │   ├── keyboard-client.c
+│   │   ├── keyboard-denied.json
+│   │   ├── keyboard-read.json
+│   │   ├── keyboard-state.json
 │   │   └── process.c
 │   ├── README.md
 │   ├── acpi-boot.c
@@ -612,6 +630,9 @@ src/
 │   ├── nvme-boot.c
 │   ├── pci.c
 │   ├── handles.c
+│   ├── keyboard.c
+│   ├── keyboard-boot.py
+│   ├── keyboard-stream.c
 │   ├── manifest.c
 │   ├── process-boot.c
 │   ├── process-elf.c

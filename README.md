@@ -49,7 +49,7 @@ The design calls for:
 
 These are architectural goals. The current kernel modules are trusted, coupled
 kernel components in a shared address space; they are the foundation underneath
-that future handler/handle layer.
+the isolated handler/handle layer.
 
 ## What runs today
 
@@ -75,18 +75,21 @@ Implemented foundations include:
 - Multiple active NVMe controllers/namespaces and AHCI controllers/ports, with independent lifetimes.
 - USB removal cleanup through storage, partition views and abortable ext4 mounts.
 - An xHCI transport with asynchronous transfers, hotplug detection and controlled controller restart.
+- Static ext4 ELF processes, ring-3 fault containment and owned address-space cleanup.
+- Copied capability calls, boot manifest grants, filtered reflection and scoped memory/I/O.
+- A disk-loaded isolated `/@keyboard` provider with IBM/ABNT2 layouts and USB hotplug.
 
-User processes, application-facing handles, HID class drivers and runtime
-ACPI notification/driver policy are still ahead. QEMU acceptance includes isolated one/four-CPU
-runs with both emulated IOMMU models. AMD-host KVM validates the earlier SMP,
-clock and extended-state foundation; native xHCI and physical-device validation
-remain pending.
+The first isolated keyboard provider now runs through the handle boundary.
+General installed-app policy, interactive approval, automatic provider recovery,
+general HID formats and runtime ACPI notification/driver policy remain ahead.
+QEMU acceptance includes isolated one/four-CPU runs with emulated IOMMU models.
+AMD-host KVM validates the earlier SMP, clock and extended-state foundation;
+native user-mode/input and physical-device validation remain pending.
 
-The [current assessment](src/README.md#current-assessment-2026-10-16) separates
-implemented mechanisms, validation and remaining limits. The storage/hub priorities
-are complete, including bootstrap selection and disk loading for explicitly selected
-future modules. All existing modules remain Limine-loaded. Process isolation and
-privilege boundaries are the next architectural phase. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
+The [current assessment](src/README.md#current-assessment-2026-10-17) separates
+implemented mechanisms, validation and remaining limits. Foundational kmodules
+remain Limine-loaded; the first isolated keyboard handler comes from the ext4
+bundle. The full sequence is tracked in the [roadmap](src/ROADMAP.md).
 
 ## Build and run
 

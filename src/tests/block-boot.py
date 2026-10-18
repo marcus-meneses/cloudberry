@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
-import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl
+import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket
 p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--spaces-only',action='store_true');p.add_argument('--process-only',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
 if not build.is_relative_to(root/'bin/tests'):raise SystemExit('isolated build required')
@@ -20,13 +20,16 @@ try:
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
         shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
+    if args.process_only:
+        shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
+        for policy in ('read','state','denied'):shutil.copy2(root/f'src/tests/apps/keyboard-{policy}.json',fixture/f'keyboard-{policy}.json')
     if args.disk_modules:
         config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
         for name in ('future','future-fail'):shutil.copy2(build/f'kmodules/{name}.kmod',fixture/f'{name}.kmod')
         (fixture/'future.driver').write_text('version=1\nmodule=future\ninit=future.init\nstart=future.start\nrequires=clock.now_ns@1.0\npci.class=030000\n')
         (fixture/'future-fail.driver').write_text('version=1\nmodule=future-fail\ninit=future_fail.init\nrequires=future.value@1.2\nmatch=always\n')
     image=test/'boot.img';subprocess.run([sys.executable,str(root/'src/tools/build-boot-image.py'),str(stage),str(image),'--drivers-source',str(fixture)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    cmd=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',args.accel,'-cpu',args.cpu,'-smp',str(args.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,bus=xhci.0','-drive',f'if=none,id=bootmedia,format=raw,file={image}','-device',('nvme,drive=bootmedia,serial=CLOUDBERRYTEST,bootindex=1' if args.backend=='nvme' else 'usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1' if args.backend=='usb' else 'ide-hd,bus=ide.0,drive=bootmedia,bootindex=1'),'-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-no-reboot','-no-shutdown']
+    cmd=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',args.accel,'-cpu',args.cpu,'-smp',str(args.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,id=test-keyboard,bus=xhci.0,port=1','-device','usb-mouse,bus=xhci.0','-drive',f'if=none,id=bootmedia,format=raw,file={image}','-device',('nvme,drive=bootmedia,serial=CLOUDBERRYTEST,bootindex=1' if args.backend=='nvme' else 'usb-storage,bus=xhci.0,drive=bootmedia,bootindex=1' if args.backend=='usb' else 'ide-hd,bus=ide.0,drive=bootmedia,bootindex=1'),'-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-no-reboot','-no-shutdown']
     if args.duplicate:
         if not args.bootstrap:raise RuntimeError('duplicate fixture is a bootstrap test')
         duplicate=test/'duplicate.img';shutil.copyfile(image,duplicate)
@@ -43,14 +46,32 @@ try:
         if args.backend=='nvme':cmd+=['-device','nvme,id=controller0,serial=MULTI0','-device','nvme-ns,drive=data0,bus=controller0,nsid=1','-device','nvme-ns,drive=data1,bus=controller0,nsid=2','-device','nvme,drive=data2,serial=MULTI1']
         else:cmd+=['-device','ich9-ahci,id=controller1','-device','ide-hd,bus=controller1.0,drive=data0','-device','ide-hd,bus=controller1.1,drive=data1','-device','ide-hd,bus=ide.0,drive=data2']
     if args.iommu!='none':cmd+=['-device',f'{args.iommu}-iommu,intremap=off']
+    qmp_path=test/'qmp.sock';qmp_path.unlink(missing_ok=True)
+    if args.process_only:cmd+=['-qmp',f'unix:{qmp_path},server=on,wait=off']
     log=test/'boot.log'
     with log.open('w') as output:
         process=subprocess.Popen(['bash',str(root/'src/boot/run-qemu.sh')]+cmd,cwd=root/'src',stdout=output,stderr=subprocess.STDOUT)
         try:
+            qmp=None;qmp_file=None;qmp_id=0;typed=False;removed=False;added=False;right=False;removed_at=0
+            def qmp_call(command,arguments=None):
+                global qmp,qmp_file,qmp_id
+                if qmp is None:
+                    qmp=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);qmp.settimeout(3);qmp.connect(str(qmp_path));qmp_file=qmp.makefile('rwb',buffering=0);json.loads(qmp_file.readline());qmp_call('qmp_capabilities')
+                qmp_id+=1;identifier=qmp_id;qmp_file.write((json.dumps({'execute':command,'arguments':arguments or {},'id':identifier})+'\n').encode())
+                while True:
+                    reply=json.loads(qmp_file.readline())
+                    if reply.get('id')==identifier:
+                        if 'error' in reply:raise RuntimeError('QMP '+command+': '+str(reply['error']))
+                        return reply.get('return')
             deadline=time.monotonic()+90
             while time.monotonic()<deadline:
                 text=log.read_text()
                 if 'FAIL' in text or 'FAULT' in text or 'inthandle: fatal' in text or 'module startup failed' in text:raise RuntimeError(text[-4000:])
+                if args.process_only:
+                    if 'READY keyboard input' in text and not typed:qmp_call('send-key',{'keys':[{'type':'qcode','data':'a'}],'hold-time':100});typed=True
+                    if 'READY keyboard unplug' in text and not removed:qmp_call('device_del',{'id':'test-keyboard'});removed=True;removed_at=time.monotonic()
+                    if removed and not added and time.monotonic()-removed_at>.3:qmp_call('device_add',{'driver':'usb-kbd','id':'test-keyboard-replug','bus':'xhci.0','port':'1'});added=True
+                    if 'READY keyboard replug input' in text and not right:qmp_call('send-key',{'keys':[{'type':'qcode','data':'right'}],'hold-time':100});right=True
                 if ('PASS process test' if args.process_only else 'PASS address spaces test' if args.spaces_only else 'PASS bootstrap test' if args.bootstrap else 'PASS dynamic hub test' if args.hub_only else 'PASS block backend test') in text and 'managed BSP event stack active' in text:break
                 if process.poll() is not None:raise RuntimeError(f'QEMU exited {process.returncode}: {text[-2000:]}')
                 time.sleep(.1)
@@ -59,6 +80,7 @@ try:
             process.terminate()
             try:process.wait(timeout=5)
             except subprocess.TimeoutExpired:process.kill();process.wait()
+    if args.process_only and not (typed and removed and added and right and 'PASS keyboard handler' in log.read_text()):raise RuntimeError('keyboard input/hotplug acceptance incomplete')
     if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')
     if args.bootstrap and not args.duplicate and 'PASS bootstrap unique GUID' not in log.read_text():raise RuntimeError('unique volume was not selected')

@@ -697,3 +697,44 @@ Module-image arena acceptance (2026-10-17): isolated four-CPU AMD-Vi boot
 loaded a 20 MiB BSS-heavy image beyond the former aggregate 16 MiB boundary,
 verified RX/RW-NX mappings and an unmapped guard, rejected an oversized virtual
 request and a 600 MiB physical request on a 512 MiB VM without new exports.
+
+## Protected processes and first isolated handler (2026-10-17)
+
+```sh
+make -j4 -C src BUILD=../bin/tests/process TEST_BUILD=../bin/tests/process test-process-elf test-manifest test-handles test-keyboard test-interfaces
+make -j4 -C src TEST_BUILD=../bin/tests/process test-process-boot QEMU_CPUS=1 QEMU_IOMMU=none
+make -j4 -C src TEST_BUILD=../bin/tests/process test-process-boot QEMU_CPUS=4 QEMU_IOMMU=amd
+python3 src/tests/keyboard-boot.py bin/tests/process
+```
+
+The process probe checks same-VA isolation, preemption, user fault containment,
+owned cleanup, copied handle calls, boot manifest authorization, filtered
+reflection and cross-CPU request/reply. It then loads the production keyboard
+ELF/manifest/layout bundle from ext4, admits independent full/readonly/denied
+clients, injects actual QMP USB key events, removes/replaces the keyboard and
+checks structured arrows and empty replacement state. Cooperative decommission
+removes discovery, closes the I/O worker and reaps owned process/stack state.
+
+Host UBSan checks cover layouts/Unicode/modifiers/repeat, replayable event cursors,
+grant-time filtering, retention/deadlines, resynchronization anchors and preserved
+error payload/results. General HID, multisession policy, automatic provider rebind,
+installer/signatures and native KVM/physical user-mode input remain open.
+
+Accepted integrated TCG runs: one CPU/no IOMMU
+`4b52f2ae41564258972e34143507c949`; four CPUs/VT-d
+`5416fd1d535b47899f1eeafd75001032`; four CPUs/AMD-Vi
+`a6fcf05306744aa3b13f59b96e329531`. JSON reports/boot logs live below
+`bin/tests/process/tests/process-*`.
+
+`keyboard-boot.py` separately boots the ordinary production image, without probe
+modules or fixture applications, using readonly disposable USB media. It waits
+for automatic `/@keyboard` publication. The explicit USB BOT/SCSI hard-disk
+attachment preserves the hybrid image's 512-byte GPT sectors; automatic readonly
+optical selection had hidden that partition during the first check. Candidate
+VMs and persistent developer disks are never attached by these tests.
+
+Final production startup acceptance: four-CPU AMD-Vi TCG run
+`5d0ff656a58646828234075c05d1d731`. The one/four-CPU thread/SMP regression
+also passes, including xstate, block/wake, remote TLB reuse, deferred IRQ delivery
+and NVMe timeout/reset. Its interrupt fixture uses vector 129 because vector 128
+is now owned by the process gate; boot config acceptance expects all eight items.

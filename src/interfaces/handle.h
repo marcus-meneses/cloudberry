@@ -94,6 +94,7 @@ cb_status_t cb_system_release(cb_handle_t handle);
 cb_status_t cb_system_publish(const void *publication,uint64_t bytes,cb_handle_t *out);
 cb_status_t cb_system_receive(void *call,uint64_t capacity,uint64_t *call_bytes,uint64_t deadline_ns);
 cb_status_t cb_system_reply(const void *reply,uint64_t bytes);
+cb_status_t cb_system_request_release(struct cb_request_id request);
 #ifdef __cplusplus
 }
 #endif

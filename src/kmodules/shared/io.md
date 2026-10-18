@@ -17,7 +17,7 @@ claimed by this initial bridge.
 
 An attach notification lets the handler explicitly select boot protocol through
 `keyboard_protocol`. That operation transports the narrowly validated SET_PROTOCOL
-request; decoding remains in the handler. The handler acknowledges each consumed
+request and SET_IDLE(0); decoding remains in the handler. The handler acknowledges each consumed
 notification before the worker submits another read. Preallocated broker mailboxes
 apply backpressure without allocating or overwriting queued reports. Kernel-event
 delivery flags cannot be supplied by ordinary clients. The provider receives
@@ -38,4 +38,8 @@ the OS monotonic clock. Manifests grant each I/O operation independently: permis
 to read the clock does not grant keyboard subscription or protocol changes.
 
 Hub surfaces are `io.init`, `io.invoke` (kernel-owned invocation record),
-`io.worker` and `io.exit`; these are not application handles or public syscalls.
+`io.worker`, `io.info` (owned subscription/worker snapshot) and `io.exit`; these are not application handles or public syscalls.
+
+The keyboard integration test exercises actual eight-byte reports and USB topology
+notifications, a replacement device identity, cleared pressed state, worker close
+and process reap. Native KVM/physical HID acceptance remains open.

@@ -17,7 +17,7 @@ numeric ID that another process may reuse. Zero is invalid. A stale capability
 must never alias a new grant. Transport adapters translate capability references;
 they never send local token integers as remote authority.
 
-The first loaded driver/handler will be the privileged **keyboard handler**. Its
+The first loaded driver/handler is the privileged **keyboard handler**. Its
 single named resource is **`/@keyboard`**, interface `keyboard` 1.0. Foundational
 kmodules still load before it. `/@` is reserved for OS resources; custom `@` names
 are per-user and userland-owned. One logical handle has one name; a provider can
@@ -153,8 +153,7 @@ kmodules; it cannot silently substitute for a handler executable loader.
 
 Initial ring-3 entry/return, fault containment, owned process lifetime, static
 ext4 ELF loading and the copying/admission gate are implemented. Scoped USB HID facilities
-are bridged through /@io for the keyboard provider. Next publish `/@keyboard`
-and verify a second isolated client can acquire only its manifest-authorized
-read/state operations. No general app installer, graphical interface, arbitrary
+are bridged through /@io for the keyboard provider. The disk-loaded provider publishes `/@keyboard`; independent isolated clients
+acquire only manifest-authorized read/state operations. No general app installer, graphical interface, arbitrary
 device manager, networking or module image unloading is required for this step.
-See [the keyboard provider plan](../handlers/keyboard/README.md).
+See [the keyboard provider](../handlers/keyboard/README.md).

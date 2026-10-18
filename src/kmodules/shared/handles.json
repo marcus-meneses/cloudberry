@@ -32,6 +32,14 @@
     {
       "name": "handles.unsubscribe",
       "symbol": "handles_surface_unsubscribe"
+    },
+    {
+      "name": "handles.inspect",
+      "symbol": "handles_surface_inspect"
+    },
+    {
+      "name": "handles.decommission",
+      "symbol": "handles_surface_decommission"
     }
   ]
 }

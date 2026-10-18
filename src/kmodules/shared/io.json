@@ -16,6 +16,10 @@
     {
       "name": "io.exit",
       "symbol": "io_surface_exit"
+    },
+    {
+      "name": "io.info",
+      "symbol": "io_surface_info"
     }
   ]
 }

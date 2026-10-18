@@ -14,3 +14,5 @@ cb_status_t cb_system_publish(const void *publication,uint64_t bytes,cb_handle_t
 cb_status_t cb_system_receive(void *call,uint64_t capacity,uint64_t *bytes,uint64_t deadline){struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_RECEIVE,.output=(uintptr_t)call,.output_capacity=capacity,.deadline_ns=deadline};cb_status_t status=cb_system_gate(&gate);if(bytes)*bytes=gate.result_bytes;return status;}
 cb_status_t cb_system_reply(const void *reply,uint64_t bytes){struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_REPLY,.input=(uintptr_t)reply,.input_bytes=bytes};return cb_system_gate(&gate);}
 __attribute__((noreturn)) void cb_exit(uint64_t code){__asm__ volatile("int $0x80"::"a"(UINT64_C(0)),"D"(code):"memory");__builtin_unreachable();}
+
+cb_status_t cb_system_request_release(struct cb_request_id request){struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_FORGET,.input=(uintptr_t)&request,.input_bytes=sizeof(request)};return cb_system_gate(&gate);}

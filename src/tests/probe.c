@@ -9,7 +9,7 @@ struct kernel_surface_result probe_add(MODULE_ARGS) {
 
 struct kernel_surface_result probe_interrupt(MODULE_ARGS) {
     MODULE_UNUSED(); struct inthandle_frame *frame=(void *)a;
-    if (!frame || frame->vector!=128 || frame->error || frame->cs!=8 || b!=42 || c!=INTHANDLE_CPU_ENTRY) return module_result(0,0);
+    if (!frame || frame->vector!=129 || frame->error || frame->cs!=8 || b!=42 || c!=INTHANDLE_CPU_ENTRY) return module_result(0,0);
     frame->rax=UINT64_C(0x123456789abcdef0); return module_result(1,1);
 }
 
@@ -25,7 +25,7 @@ struct kernel_surface_result probe_failed(MODULE_ARGS) {
 
 struct kernel_surface_result probe_deferred(MODULE_ARGS) {
     MODULE_UNUSED(); const struct inthandle_frame *frame=(const void *)a;
-    return module_result(1,frame && frame->vector==128 && frame->error==0 && frame->cs==8 &&
+    return module_result(1,frame && frame->vector==129 && frame->error==0 && frame->cs==8 &&
                            b==42 && c==INTHANDLE_DEFERRED);
 }
 

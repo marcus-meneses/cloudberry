@@ -102,11 +102,17 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     uint64_t id;copy(&id,r->input,8);uint64_t flags=lock();struct subscription *s=find(r->process,id);if(!s){unlock(flags);r->status=CB_BAD_HANDLE;return module_result(1,1);}
     if(r->operation==CB_IO_KEYBOARD_ACK){if(s->waiting){__atomic_store_n(&s->ack,1,__ATOMIC_RELEASE);CALL(state.thread,THREAD_WAKE,s->thread,0);r->status=CB_OK;}unlock(flags);return module_result(1,1);}
     if(r->operation==CB_IO_KEYBOARD_PROTOCOL){struct cb_io_protocol protocol;copy(&protocol,r->input,sizeof(protocol));if(protocol.reserved || protocol.protocol || !s->claimed || !s->waiting || s->active || stopped(s)){unlock(flags);return module_result(1,1);}struct usb_io control={.device=s->ref,.owner=(uintptr_t)s,.interface=s->interface,.setup={0x21,0x0b,0,0,s->interface,0,0,0}};unlock(flags);struct host_transfer_result result;
-        struct kernel_surface_result configured=CALL(state.control,&control,&result,0);flags=lock();if(!configured.status){s->negotiated=1;r->status=CB_OK;}else r->status=CB_UNAVAILABLE;unlock(flags);return module_result(1,1);}
+        struct kernel_surface_result configured=CALL(state.control,&control,&result,0);if(!configured.status){control.setup[1]=0x0a;configured=CALL(state.control,&control,&result,0);}flags=lock();if(!configured.status){s->negotiated=1;r->status=CB_OK;}else r->status=CB_UNAVAILABLE;unlock(flags);return module_result(1,1);}
     unlock(flags);if(r->operation==CB_IO_KEYBOARD_CLOSE)r->status=close_subscription(s,1);return module_result(1,1);
 }
 struct kernel_surface_result io_surface_exit(MODULE_ARGS){
     MODULE_UNUSED();if(!state.hub)return module_result(1,1);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;unlock(flags);if(!s)return module_result(1,1);
     if(CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
     cb_status_t result=close_subscription(s,0);return module_result(result,result==CB_OK);
+}
+
+struct kernel_surface_result io_surface_info(MODULE_ARGS){
+    MODULE_UNUSED();if(!b)return module_result(0,0);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;
+    if(s)*(struct io_provider_info *)b=(struct io_provider_info){s->thread,s->id,s->ref.id,s->ref.generation,s->active,s->claimed,s->stop,s->waiting};
+    unlock(flags);return module_result(s!=NULL,s!=NULL);
 }

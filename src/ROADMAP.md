@@ -1,7 +1,7 @@
 # Cloudberry v2 roadmap
 
 Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
-Kmodules are coupled kernel mechanisms; handlers/handles are a future layer.
+Kmodules are coupled kernel mechanisms; isolated handlers use a separate handle layer.
 
 Completed foundation: dynamic ABI3 hub and provider ownership/draining, heap, hardware/MMIO inventory, clock/RTC,
 vector and CMOS/NMI ownership, APIC timers, deadline callbacks, owned page reuse,
@@ -290,22 +290,31 @@ Bootstrap storage selection and selected future disk-module loading are implemen
 The five requested storage/hub priorities are closed.
 
 Activation hardening and private address-space infrastructure are implemented.
-The initial application-facing C contract is defined in interfaces/README.md and
-compile-tested headers. The first loaded driver/handler will be a privileged
-keyboard process publishing /@keyboard. It follows foundational kmodules, uses
-scoped OS I/O and memory handles and has no direct application access to the hub.
-Protected process milestone implemented: static ext4 ELF loading, ring-3 entry,
-CPU-local kernel entry stacks/GS transitions, preemption, user fault containment
-and explicit quiescent cleanup. Isolated one/four-CPU boots and malformed-ELF
-UBSan checks pass; native user-mode acceptance remains open. Copied/admitted handle transport and the C system library are now implemented,
-with immutable boot JSON grants, owner-local tokens, filtered reflection, retained
-results, blocked request/reply and scoped memory/I/O managers. UBSan grammar/broker
-checks and isolated one/four-CPU user-process tests pass, including cross-CPU
-provider/client delivery and scoped clock access. Next:
-keyboard publication and an isolated authorized client. Boot manifests are enforced; installed-app authorization and actual keyboard
-HID execution remain separate work.
-HID/input and native display follow the
-storage/driver-loading foundation rather than preceding it. CPU pinning can remain.
+The application-facing C contract, protected processes and copied handle transport
+are implemented. The three execution/handler priorities are closed:
+
+1. Static ext4 ELF loading into private roots, ring-3 entry/return, CPU-local entry
+   stacks/GS ownership, preemption, contained user faults and quiescent owned reap.
+   One/four-CPU guest tests and malformed-ELF UBSan tests pass.
+2. C system-library acquisition/publication/invocation, immutable boot JSON grants,
+   owner-local tokens, filtered reflection, checked copies, retained result/error
+   records, blocked request/reply and scoped memory/I/O managers. Host and real
+   cross-CPU process tests pass. Explicit request release bounds internal caches.
+3. The production privileged keyboard ELF/manifest/layout bundle loads from ext4,
+   acquires /@memory and /@io and publishes /@keyboard. Independent protected
+   clients validate denied/readonly/full grants, input delivery, structured arrows,
+   USB removal/reconnection, cleared state and cooperative shutdown. IBM/ABNT2,
+   Unicode, repeat, cursor replay/eviction and admission boundaries pass host tests.
+   Focused one/four-CPU TCG acceptance uses disposable media; fixture clients never
+   enter candidate boot. Native user-entry/input and physical HID remain open.
+
+Next architectural work should build on this boundary: native user-mode/input
+acceptance, then explicit application launch/installed identity and lifecycle policy.
+One boot input domain, pinned processes, negotiated boot-keyboard HID and trusted
+unsigned development bundles are intentional current limits. Interactive approval,
+installer/signature enforcement, safe automatic provider rebind/recovery, general
+HID/multiple keyboards, networking and graphical applications remain separate
+milestones. No new implementation beyond the requested first three is included.
 
 Completed performance sequence (native acceptance 2026-10-17):
 
@@ -374,7 +383,8 @@ Follow-up requested after that acceptance:
 3. Defined the versioned C handle boundary and keyboard 1.0 event/read/state
    contract under interfaces, plus handlers/keyboard's loading/authorization plan.
    /@keyboard is the first handler milestone; C++ object layouts stay out of the
-   ABI. Keyboard runtime implementation follows the process/transport foundation.
+   ABI. This contract milestone is now followed by the implemented protected
+   keyboard provider and isolated clients described above.
 
 Native follow-up closed: session 20261017T214448.656303Z passes all nine KVM
 boots, three per topology/IOMMU case, with stable TSC, zero rejection reasons,

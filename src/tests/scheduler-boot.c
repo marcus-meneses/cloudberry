@@ -46,24 +46,24 @@ bool kernel_scheduler_test(const struct kernel_surfaces *hub) {
         CALL(run,1,0,0).value!=1 || CALL(result,second,&completion,1).status ||
         completion.result.status || completion.result.value!=42) return false;
     if (CALL(result,cancelled,&completion,1).status || completion.state!=SCHEDULER_CANCELLED) return false;
-    uint64_t before=CALL(check,128,0,0).value;
-    if (CALL(bind,128,"probe.deferred",42).status) return false;
-    struct inthandle_frame frame={.vector=128,.cs=8};
-    request=(struct scheduler_request){.abi=SCHEDULER_REQUEST_ABI,.process_id=1,.kind=SCHEDULER_INTERRUPT,.entry_vector=128,.entry_major=1,
+    uint64_t before=CALL(check,129,0,0).value;
+    if (CALL(bind,129,"probe.deferred",42).status) return false;
+    struct inthandle_frame frame={.vector=129,.cs=8};
+    request=(struct scheduler_request){.abi=SCHEDULER_REQUEST_ABI,.process_id=1,.kind=SCHEDULER_INTERRUPT,.entry_vector=129,.entry_major=1,
         .payload={.data=&frame,.bytes=sizeof(frame)}};
     r=CALL(submit,&request,0,0);if (r.status || !r.value) return false;
     uint64_t irq=r.value;frame.vector=129;
     if (CALL(run,1,0,0).value!=1 || CALL(result,irq,&completion,1).status || completion.result.status ||
-        CALL(check,128,0,0).value!=before+1) return false;
-    frame.vector=128;r=CALL(submit,&request,0,0);if (r.status || !r.value) return false;
+        CALL(check,129,0,0).value!=before+1) return false;
+    frame.vector=129;r=CALL(submit,&request,0,0);if (r.status || !r.value) return false;
     irq=r.value;
-    if (CALL(bind,128,0,0).status || CALL(run,1,0,0).value!=1 ||
+    if (CALL(bind,129,0,0).status || CALL(run,1,0,0).value!=1 ||
         CALL(result,irq,&completion,1).status || completion.result.status!=KERNEL_SURFACE_FAILED) return false;
-    if (CALL(bind,128,"probe.failed",0).status) return false;
+    if (CALL(bind,129,"probe.failed",0).status) return false;
     r=CALL(submit,&request,0,0);if (r.status || !r.value) return false;
     irq=r.value;
     if (CALL(run,1,0,0).value!=1 || CALL(result,irq,&completion,1).status ||
-        completion.result.status!=KERNEL_SURFACE_FAILED || CALL(bind,128,0,0).status) return false;
+        completion.result.status!=KERNEL_SURFACE_FAILED || CALL(bind,129,0,0).status) return false;
     request=(struct scheduler_request){.abi=SCHEDULER_REQUEST_ABI,.process_id=42,.kind=SCHEDULER_METHOD,
         .entry_vector=(uintptr_t)payload_entry,.entry_major=1,
         .payload={.arguments={0,sizeof(payload),7},.data=&payload,.bytes=sizeof(payload)}};

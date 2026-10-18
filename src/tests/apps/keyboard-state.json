@@ -1,0 +1,1 @@
+{"version":1,"resources":[{"name":"/@keyboard","scope":"boot-input","operations":["read","state"]}]}
