@@ -32,6 +32,7 @@ int main(void){
     struct cb_call_header original={.version={sizeof(original),1,0},.payload_bytes=3};unsigned char captured_call[sizeof(original)+3];copy_bytes(captured_call,&original,sizeof(original));copy_bytes(captured_call+sizeof(original),"abc",3);
     struct request failure={.publication=cap->publication,.input=captured_call,.bytes=sizeof(captured_call)};uint64_t anchor=991;
     assert(error_result(&failure,CB_INPUT_RESYNC,CB_NOT_COMMITTED,&anchor,sizeof(anchor))==CB_INPUT_RESYNC);
+    unsigned char *retained=failure.reply;remaining=0;assert(error_result(&failure,CB_PROVIDER_FAILED,CB_OUTCOME_UNKNOWN,NULL,0)==CB_RESOURCE_FAILURE && failure.failure==CB_RESOURCE_FAILURE && failure.reply==retained);remaining=-1;
     struct cb_reply_header normalized;copy_bytes(&normalized,failure.reply,sizeof(normalized));assert(normalized.result_bytes==8 && !memcmp(failure.reply+sizeof(normalized),&anchor,8));
     struct cb_error_header detail;copy_bytes(&detail,failure.reply+sizeof(normalized)+8,sizeof(detail));assert(detail.original_payload_bytes==3 && !memcmp(failure.reply+sizeof(normalized)+8+sizeof(detail),"abc",3) && detail.trace_bytes);release(failure.reply);
     assert(!handles_surface_decommission(1,0,0,0,0,0).status && cap->publication->dead);

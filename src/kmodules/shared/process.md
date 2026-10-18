@@ -75,3 +75,10 @@ Integrated keyboard acceptance passes on one CPU/no IOMMU
 (`a6fcf05306744aa3b13f59b96e329531`). These include isolated handle clients,
 USB input/hotplug and provider cleanup. The broader one/four-CPU thread/SMP
 regression also passes after moving its test interrupt to unowned vector 129.
+
+`process.stop(id)` is a trusted owner-only cooperative request. It decommissions
+publications, queues the lifecycle event and records stop_requested. Repeated
+requests are idempotent; running memory/stack state remains owned until normal
+exit and explicit reap. It never force-unwinds a kernel or provider thread.
+The kernel caller owns retry/restart policy and must reap an old process before
+loading a fresh identity; no automatic capability rebind is implied.

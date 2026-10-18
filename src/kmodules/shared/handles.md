@@ -85,3 +85,7 @@ provider on the BSP and client on an AP. The subsequent keyboard acceptance exer
 independent read/state grants, grant-time-filtered replay, unplug/replug and
 cooperative shutdown through the production isolated provider. See
 [the keyboard handler](../../handlers/keyboard/README.md).
+
+Provider reply allocation failure does not mark an earlier provisional timeout as
+a final provider completion. The reply can be retried; captured input and retained
+reply state remain owned. Host OOM checks cover preserved prior result storage.

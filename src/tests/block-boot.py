@@ -21,7 +21,7 @@ try:
     if args.process_only:
         shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
     if args.process_only:
-        shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
+        shutil.copy2(build/'tests/apps/keyboard-fault.elf',fixture/'keyboard-fault.elf');shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
         for policy in ('read','state','denied'):shutil.copy2(root/f'src/tests/apps/keyboard-{policy}.json',fixture/f'keyboard-{policy}.json')
     if args.disk_modules:
         config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)

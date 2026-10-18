@@ -10,6 +10,14 @@ __attribute__((noreturn)) void _start(uint64_t role){
     struct cb_interface_id interface=CB_KEYBOARD_INTERFACE_ID;cb_handle_t keyboard;
     cb_status_t acquired=cb_system_get_handle(CB_KEYBOARD_NAME,sizeof(CB_KEYBOARD_NAME)-1,&interface,1,0,&keyboard);
     if(role==3){CHECK(acquired==CB_DENIED);cb_exit(0);}CHECK(acquired==CB_OK);
+    if(role==4){cb_handle_t denied_after_fault;
+        struct {struct cb_call_header h;struct cb_keyboard_read r;} call={.h=cb_call(keyboard,interface,CB_KEYBOARD_READ,sizeof(struct cb_keyboard_read)),.r={.version={sizeof(struct cb_keyboard_read),1,0},.max_events=1}};uint64_t bytes;
+        CHECK(cb_system_invoke(&call,sizeof(call),output,sizeof(output),&bytes)==CB_PROVIDER_FAILED);
+        struct cb_reply_header h;struct cb_error_header e;copy(&h,output,sizeof(h));copy(&e,output+sizeof(h),sizeof(e));CHECK(h.outcome==CB_OUTCOME_UNKNOWN && e.original_payload_bytes==sizeof(call.r) && e.trace_bytes);
+        const unsigned char *original=(const void *)&call.r;for(unsigned i=0;i<sizeof(call.r);++i)CHECK(original[i]==output[sizeof(h)+sizeof(e)+i]);
+        CHECK(cb_system_get_handle(CB_KEYBOARD_NAME,sizeof(CB_KEYBOARD_NAME)-1,&interface,1,0,&denied_after_fault)==CB_UNAVAILABLE);
+        CHECK(cb_system_release(keyboard)==CB_OK);cb_exit(0);
+    }
     struct cb_interface_id io=CB_IO_INTERFACE_ID;cb_handle_t denied;CHECK(cb_system_get_handle(CB_IO_NAME,sizeof(CB_IO_NAME)-1,&io,1,0,&denied)==CB_DENIED);
     struct {struct cb_call_header h;struct cb_describe_request d;} reflection={.h=cb_call(keyboard,(struct cb_interface_id)CB_HANDLE_INTERFACE_ID,CB_HANDLE_DESCRIBE,sizeof(struct cb_describe_request)),.d={.version={sizeof(struct cb_describe_request),1,0},.interface=CB_KEYBOARD_INTERFACE_ID}};uint64_t bytes;
     CHECK(cb_system_invoke(&reflection,sizeof(reflection),output,sizeof(output),&bytes)==CB_OK);struct cb_description description;copy(&description,output+sizeof(struct cb_reply_header),sizeof(description));CHECK(description.operation_count==(role==1?1:2));forget();

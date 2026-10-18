@@ -37,7 +37,7 @@ static struct kernel_surface_result keyboard_load(uintptr_t a,uintptr_t b){
     struct process_request request={.abi=2,.cpu=0,.filesystem=a,.path=program,.stack_bytes=262144,.startup=packet,.startup_bytes=sizeof(header)+layout_bytes};struct kernel_surface_result loaded=CALL(apps.load,&request,0,0);pid=loaded.value;if(loaded.status)goto done;
     struct handle_policy policy={.process=pid,.manifest=manifest,.bytes=manifest_bytes};static const unsigned char identity[16]={'c','l','o','u','d','b','e','r','r','y','.','k','b','d','1',0};copy(policy.identity.installation_id,identity,16);
     if(CALL(apps.admit,&policy,0,0).status || CALL(apps.start,pid,0,0).status)goto done;
-    apps.info.keyboard=pid;ok=1;
+    apps.info.keyboard=pid;apps.info.state=2;apps.info.error=0;ok=1;
 done:
     if(!ok && pid){if(!CALL(apps.reap,pid,0,0).status)pid=0;else apps.info.keyboard=pid;}
     release(program);release(manifest_path);release(layout_suffix);release(layout_path);release(manifest);release(definition);release(packet);return module_result(pid,ok);
@@ -61,5 +61,10 @@ struct kernel_surface_result bootstrap_surface_apps_worker(MODULE_ARGS){
 failed:apps.info.state=4;apps.info.error=1;log_text("bootstrap: keyboard provider unavailable\n");return module_result(0,0);
 }
 struct kernel_surface_result bootstrap_surface_apps_info(MODULE_ARGS){
-    MODULE_UNUSED();if(!a || !apps.hub || CALL(apps.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);uint64_t worker=apps.info.worker;if(worker){struct thread_info t;if(!CALL(apps.thread,THREAD_INFO,worker,&t).status && t.state==THREAD_EXITED && !CALL(apps.thread,THREAD_REAP,worker,0).status)apps.info.worker=0;}*(struct bootstrap_apps_info *)a=apps.info;return module_result(1,1);
+    MODULE_UNUSED();if(!a || !apps.hub || CALL(apps.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);uint64_t worker=apps.info.worker;if(worker){struct thread_info t;if(!CALL(apps.thread,THREAD_INFO,worker,&t).status && t.state==THREAD_EXITED && !CALL(apps.thread,THREAD_REAP,worker,0).status)apps.info.worker=0;}if(apps.info.keyboard){struct process_info p;struct handle_publication_info publication;
+        if(CALL(apps.process_info,apps.info.keyboard,&p,0).status || p.state!=PROCESS_RUNNING || p.stop_requested){apps.info.state=4;apps.info.error=2;}
+        else if(!CALL(apps.inspect,"/@keyboard",&publication,0).status && publication.process==apps.info.keyboard){apps.info.state=3;apps.info.error=0;}
+        else if(apps.info.state==3){apps.info.state=4;apps.info.error=3;}
+    }
+    *(struct bootstrap_apps_info *)a=apps.info;return module_result(1,1);
 }

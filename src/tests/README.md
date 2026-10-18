@@ -738,3 +738,11 @@ Final production startup acceptance: four-CPU AMD-Vi TCG run
 also passes, including xstate, block/wake, remote TLB reuse, deferred IRQ delivery
 and NVMe timeout/reset. Its interrupt fixture uses vector 129 because vector 128
 is now owned by the process gate; boot config acceptance expects all eight items.
+
+Lifecycle hardening acceptance (2026-10-18): four-CPU AMD-Vi TCG run `1d9d53aaf1d54f45a377f4fac70bf815`
+adds two fault/restart cycles. A test-only keyboard image faults after dispatch
+while USB input is active; its independent client receives the original payload,
+trace and UNKNOWN outcome. Explicit reap releases I/O ownership; a fresh real
+provider reacquires the device, stops cooperatively and returns stack ownership
+to baseline. No fault trigger enters the production bundle. Host status checks
+cover publication, faults, stop requests, withdrawal and reaped processes.

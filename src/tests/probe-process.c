@@ -4,6 +4,7 @@
 #include "../kmodules/shared/process.h"
 #include "../kmodules/shared/threads.h"
 #include "../kmodules/shared/bootstrap.h"
+#include "../kmodules/shared/bootstrap-apps.h"
 #include "../kmodules/shared/mem-pages.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 #define CHECK(x) do{if(!(x)){probe->error=__LINE__;return module_result(__LINE__,0);}}while(0)
@@ -61,7 +62,7 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     }
     CHECK(!CALL(pages,&after,0,0).status && before.allocations==after.allocations && before.physical_pages==after.physical_pages && before.stacks==after.stacks && before.stack_pages==after.stack_pages);
     uint64_t stack_baseline=after.stacks;
-    kernel_surface_call launch_keyboard=kernel_surface_find(hub,"bootstrap.keyboard"),inspect=kernel_surface_find(hub,"handles.inspect"),io_info=kernel_surface_find(hub,"io.info"),decommission=kernel_surface_find(hub,"handles.decommission");
+    kernel_surface_call launch_keyboard=kernel_surface_find(hub,"bootstrap.keyboard"),inspect=kernel_surface_find(hub,"handles.inspect"),io_info=kernel_surface_find(hub,"io.info"),decommission=kernel_surface_find(hub,"process.stop");
     struct kernel_surface_result keyboard=CALL(launch_keyboard,volume.filesystem.cookie,0,0);CHECK(!keyboard.status && keyboard.value);struct process_info provider;CHECK(!CALL(info,keyboard.value,&provider,0).status);uint64_t root=provider.address_space;
     struct handle_publication_info publication;
     for(;;){if(!CALL(inspect,"/@keyboard",&publication,1).status)break;CHECK(!CALL(info,keyboard.value,&provider,0).status);probe->app_code=provider.exit_code;CHECK(provider.state!=PROCESS_EXITED && provider.state!=PROCESS_FAULTED && CALL(clock,0,0,0).value<deadline);CHECK(!CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
@@ -76,10 +77,28 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     text("READY keyboard unplug\n");
     for(;;){struct io_provider_info current;CHECK(!CALL(io_info,keyboard.value,&current,0).status && !CALL(inspect,"/@keyboard",&publication,1).status);if(current.device!=original.device && current.active && publication.pending && publication.last_operation==2)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     text("READY keyboard replug input\n");CHECK(finished(hub,hot.value,deadline,probe));
-    CHECK(!CALL(decommission,keyboard.value,0,0).status && finished(hub,keyboard.value,deadline,probe));
+    CHECK(!CALL(decommission,keyboard.value,0,0).status && !CALL(decommission,keyboard.value,0,0).status);
+    struct bootstrap_apps_info app_status;CHECK(!CALL(kernel_surface_find(hub,"bootstrap.apps_info"),&app_status,0,0).status && app_status.state==4);
+    CHECK(finished(hub,keyboard.value,deadline,probe));
     CHECK(CALL(inspect,"/@keyboard",&publication,0).status && CALL(io_info,keyboard.value,&original,0).status);
     CHECK(CALL(kernel_surface_find(hub,"mem.space_info"),root,keyboard.value,&provider).status);
     CHECK(!CALL(pages,&after,0,0).status && after.stacks==stack_baseline);
+    for(unsigned cycle=0;cycle<2;++cycle){
+        deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
+        request=(struct process_request){.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/system/drivers/keyboard-fault.elf",.stack_bytes=262144};
+        struct kernel_surface_result crashed=CALL(load,&request,0,0);CHECK(!crashed.status && admit_file(hub,volume.filesystem.cookie,crashed.value,"/boot/system/drivers/keyboard/manifest.json") && !CALL(start,crashed.value,0,0).status);
+        for(;;){struct io_provider_info worker;if(!CALL(inspect,"/@keyboard",&publication,0).status && !CALL(io_info,crashed.value,&worker,0).status && worker.active)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
+        request.path="/boot/system/drivers/keyboard-client.elf";request.cpu=probe->cpus>1?1:0;request.argument=4;
+        struct kernel_surface_result waiting=CALL(load,&request,0,0);CHECK(!waiting.status && admit_file(hub,volume.filesystem.cookie,waiting.value,policies[0]) && !CALL(start,waiting.value,0,0).status);
+        CHECK(finished(hub,waiting.value,deadline,probe));CHECK(!CALL(info,crashed.value,&provider,0).status && provider.state==PROCESS_FAULTED && provider.fault_vector==6);
+        while(CALL(reap,crashed.value,0,0).status)CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);
+        ++probe->completed;CHECK(CALL(io_info,crashed.value,&original,0).status && CALL(inspect,"/@keyboard",&publication,0).status);
+        keyboard=CALL(launch_keyboard,volume.filesystem.cookie,0,0);CHECK(!keyboard.status && keyboard.value!=crashed.value);
+        for(;;){if(!CALL(inspect,"/@keyboard",&publication,0).status && !CALL(io_info,keyboard.value,&original,0).status && original.active)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
+        CHECK(!CALL(decommission,keyboard.value,0,0).status && finished(hub,keyboard.value,deadline,probe));
+        CHECK(!CALL(pages,&after,0,0).status && after.stacks==stack_baseline);
+    }
+    text("PASS provider lifecycle: active USB/read fault, original UNKNOWN outcome, explicit stop/reap and two fresh restart cycles\n");
     text("PASS keyboard handler: disk-loaded isolated /@keyboard, authorized independent clients, Unicode input, structured arrows, USB hotplug/reset and quiescent decommission\n");
     return module_result(1,1);
 }

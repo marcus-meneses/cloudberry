@@ -569,6 +569,7 @@ src/
 │   │   ├── handles-client.json
 │   │   ├── handles-server.json
 │   │   ├── handles.c
+│   │   ├── keyboard-fault.c
 │   │   ├── keyboard-client.c
 │   │   ├── keyboard-denied.json
 │   │   ├── keyboard-read.json
@@ -581,6 +582,7 @@ src/
 │   ├── apic.c
 │   ├── backend-contracts.py
 │   ├── block-boot.c
+│   ├── bootstrap-apps.c
 │   ├── bootstrap-boot.c
 │   ├── bootstrap-load.c
 │   ├── block-boot.py

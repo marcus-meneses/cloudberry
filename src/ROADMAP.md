@@ -649,3 +649,16 @@ pass, including Intel VT-d and AMD-Vi DMA paths. At this transport-only revision
 USB core/HID, driver-manager and image-unload work remained deferred; native/physical controller acceptance is open.
 That transport-only revision exported 162 methods and five table references
 (49.85% hub). Current ACPI/USB inventories and usage are documented in maps/startup.md.
+
+## Execution/handler follow-up (2026-10-18)
+
+1. Closed: cooperative process.stop, truthful provider health snapshots, retained
+   reply state on allocation failure and isolated active-USB/pending-client fault
+   acceptance with two explicit reap/restart cycles. No forced cancellation or
+   automatic capability rebind.
+2. Next: isolated native user-mode/handle validation and repeatable acquisition,
+   invocation, wake/clock and allocation measurements, with raw host/guest reports.
+3. Next: remove keyboard-specific bootstrap coupling through generic configured
+   provider bundles/startup data; the handler owns its layout interpretation.
+   Bootstrap coordinates startup, process owns execution/reap and handle mediation
+   owns grants; ongoing supervision must not silently become bootstrap work.

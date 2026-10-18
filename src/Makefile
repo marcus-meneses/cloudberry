@@ -943,7 +943,7 @@ $(BUILD)/tests/src-process-kernel.elf: $(BUILD)/tests/src-process-main.o $(BUILD
 .PHONY: test-process-boot _test-process-boot
 test-process-boot:
 	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-process-boot
-_test-process-boot: $(BUILD)/tests/apps/keyboard-client.elf $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
+_test-process-boot: $(BUILD)/tests/apps/keyboard-fault.elf $(BUILD)/tests/apps/keyboard-client.elf $(BUILD)/tests/apps/handles-probe.elf $(ISO) $(BUILD)/tests/src-process-kernel.elf $(BUILD)/tests/apps/process-probe.elf $(BUILD)/kmodules/probe.kmod
 	python3 tests/block-boot.py "$(abspath $(BUILD))" --backend=usb --process-only --cpus=$(QEMU_CPUS) --iommu=$(QEMU_IOMMU) --accel=$(QEMU_ACCEL) --cpu="$(QEMU_CPU)"
 
 .PHONY: test-process-elf
@@ -993,3 +993,7 @@ test-keyboard:
 $(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-client.c sdk/system.c -o $@
+
+$(BUILD)/tests/apps/keyboard-fault.elf: tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-fault.c handlers/keyboard/hid.c sdk/system.c -o $@

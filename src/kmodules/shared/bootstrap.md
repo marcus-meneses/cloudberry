@@ -89,3 +89,9 @@ Ordinary production startup passes on four-CPU AMD-Vi TCG, run
 explicit USB BOT/SCSI hard-disk attachment. This preserves its 512-byte GPT
 geometry. `tests/keyboard-boot.py` runs this acceptance without probe modules
 or fixture clients and never attaches developer persistent disks.
+
+Application status snapshots now recheck process state, stop requests and actual
+publication ownership. A failed/reaped/stopping provider or withdrawn publication
+cannot remain reported READY. This is an on-demand truthful snapshot, not an
+ongoing supervision daemon. Kernel owners use process.stop/reap and choose fresh
+launches explicitly; bootstrap retains startup coordination responsibilities.

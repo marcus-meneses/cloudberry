@@ -94,6 +94,14 @@ struct kernel_surface_result process_surface_start(MODULE_ARGS){
     /* The entry waits for publication if create wakes its AP immediately. */
     struct kernel_surface_result created=CALL(state.create,&r,0,0);flags=lock();if(!created.status)p->info.thread=created.value;__atomic_store_n(&p->info.state,created.status?PROCESS_READY:PROCESS_RUNNING,__ATOMIC_RELEASE);unlock(flags);return created;
 }
+/* Cooperative owner request: no forced unwind and no freeing a running task. */
+struct kernel_surface_result process_surface_stop(MODULE_ARGS){
+    MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);if(!p){unlock(flags);return module_result(0,0);}
+    if(p->info.state==PROCESS_EXITED || p->info.state==PROCESS_FAULTED || p->info.stop_requested){unlock(flags);return module_result(1,1);}
+    if(p->info.state!=PROCESS_RUNNING){unlock(flags);return module_result(0,0);}unlock(flags);
+    kernel_surface_call stop=kernel_surface_find(state.hub,"handles.decommission");if(!stop || CALL(stop,a,0,0).status)return module_result(0,0);
+    flags=lock();p=find(a);if(p)p->info.stop_requested=1;unlock(flags);return module_result(1,1);
+}
 struct kernel_surface_result process_surface_run(MODULE_ARGS){
     MODULE_UNUSED();struct process *p=(void *)a;
     if(!p)return module_result(0,0);

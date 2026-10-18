@@ -52,6 +52,10 @@
     {
       "name": "process.memory_free",
       "symbol": "process_surface_memory_free"
+    },
+    {
+      "name": "process.stop",
+      "symbol": "process_surface_stop"
     }
   ]
 }

@@ -227,7 +227,7 @@ static cb_status_t respond(struct policy *owner,const unsigned char *input,size_
     if(h.version.bytes!=sizeof(h) || h.version.major!=1 || h.version.minor || h.outcome>CB_OUTCOME_UNKNOWN || h.status>CB_NAME_IN_USE || !cb_frame_fits(h.version.bytes,h.result_bytes,h.error_bytes,bytes) || h.version.bytes+h.result_bytes+h.error_bytes!=bytes || (!h.status && h.error_bytes))return CB_BAD_REQUEST;
     uint64_t flags=lock();struct request *r;for(r=state.requests;r;r=r->next)if(r->provider==owner->pid && r->id.namespace_id==h.request.namespace_id && r->id.serial==h.request.serial)break;
     if(!r || !r->dispatched || r->completed || r->publication->epoch!=h.provider_epoch){unlock(flags);return CB_BAD_REQUEST;}
-    if(h.status){cb_status_t made=error_result(r,h.status,h.outcome,input+h.version.bytes,h.result_bytes);if(made==CB_BAD_REQUEST || !r->done){unlock(flags);return made;}}
+    if(h.status){cb_status_t made=error_result(r,h.status,h.outcome,input+h.version.bytes,h.result_bytes);if(made==CB_BAD_REQUEST || r->failure || !r->done){unlock(flags);return made;}}
     else {unsigned char *reply=allocate(bytes);if(!reply){unlock(flags);return CB_RESOURCE_FAILURE;}copy_bytes(reply,input,bytes);release(r->reply);r->reply=reply;r->reply_bytes=bytes;r->done=1;r->failure=0;}
     r->completed=1;++r->publication->completed;struct cb_call_header finished;copy_bytes(&finished,r->input,sizeof(finished));r->publication->last_operation=finished.operation;wake(r->waiter);unlock(flags);return CB_OK;
 }
