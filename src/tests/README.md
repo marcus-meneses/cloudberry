@@ -805,3 +805,23 @@ Each boot gets timing.json and completed correctness boots remain visible in a
 failed session summary. Seven host checks and four-CPU TCG boot
 `dba210e7ea9b461a8b2b3ce0f603fe0c` pass. TCG rejects invariant-TSC availability
 as expected; native qualification records require the user-host rerun.
+
+Targeted native follow-up `20261018T061208.303777Z` passes four-CPU AMD-Vi,
+run `6f139d9f897e43c9a7aadcc10a02abf6`. TSC stays selected at origin, begin
+and end (~2.096172 GHz, calibration 3), with zero current/qualification rejection
+reasons and zero unavailable/HPET profiling samples. Eight adaptive attempts
+produce 640 frequency samples, 480 offset exchanges and 32 CPU/attempt groups.
+All CPUs pass the final 500 ms window after one frequency refinement; the final
+offset bound is 680 ns, drift bound 211 ppm and uncertainty bound 49,702 ns.
+The least-retained final CPU group has seven samples, meeting the existing
+minimum. No limit was relaxed. Earlier HPET selection is not reproduced and
+its cause remains unknown because its original diagnostics were absent.
+
+Raw median timings are 10.239 us clock bracket, 17.207 us acquisition,
+21.324 us reflection, 20.628 us clock-handle case, 132.673/157.601/237.846 us
+for 0/128/4096-byte cross-CPU echo and 54.705 us allocation/free. These include
+measurement/validation/release costs; they are not pure IPC durations. Peak
+managed hold/IRQ-off is 257/258 us in memory.unmap_batch, and BSP lock wait
+reaches 432 us. The scope includes reset-thread teardown/start/owner waits, so
+these peaks do not yet identify a handle-only bottleneck. A complete repeated
+one/four-CPU/both-IOMMU baseline remains pending before performance changes.

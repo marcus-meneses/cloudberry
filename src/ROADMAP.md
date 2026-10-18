@@ -696,3 +696,11 @@ probe/parser now preserve both reasons and raw qualification records, with
 phase snapshots and explicit rejection messages. A targeted native four-CPU run
 is required before clock changes or performance optimization; production clock
 selection/health acceptance remains unchanged.
+
+Targeted native handle follow-up `20261018T061208.303777Z` passes four-CPU
+AMD-Vi with stable TSC and no diagnostic rejection or unavailable samples. All
+CPUs qualify in the final 500 ms window after eight attempts/refinement; final
+offset bound is 680 ns. This validates the diagnostic path and targeted native
+process/keyboard boundary. It does not explain the previous HPET selection or
+replace the full repeated topology/IOMMU baseline. Next native action remains
+bench-handles-kvm.sh --runs 3, followed by evidence-based handle-path tuning.
