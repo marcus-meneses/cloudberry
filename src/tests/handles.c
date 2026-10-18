@@ -39,6 +39,15 @@ int main(void){
     long before=blocks;remaining=1;assert(acquire(policy(2),ask,sizeof(ask),&token)==CB_RESOURCE_FAILURE);remaining=-1;assert(blocks==before);
     assert(acquire(policy(2),ask,sizeof(ask),&token)==CB_OK);assert(!capability(1,token));struct capability *cap=capability(2,token);assert(cap && permitted(cap->operations,"read",4) && !permitted(cap->operations,"secret",6));
     unsigned char *reflection;size_t reflected;assert(reflect(cap,&reflection,&reflected)==CB_OK);copy_bytes(&d,reflection+sizeof(struct cb_reply_header),sizeof(d));assert(d.operation_count==1 && d.facts_bytes==16);assert(!memcmp(reflection+reflected-d.facts_bytes,"{\"scope\":\"self\"}",16));release(reflection);
+    struct {struct cb_call_header h;struct cb_describe_request d;} reflected_call={.h={.version={sizeof(struct cb_call_header),1,0},.handle=cap->id,.interface=CB_HANDLE_INTERFACE_ID,.operation=CB_HANDLE_DESCRIBE,.payload_bytes=sizeof(struct cb_describe_request)},.d={.version={sizeof(struct cb_describe_request),1,0},.interface=interface}};
+    long request_blocks=blocks;unsigned char *response=NULL;size_t response_bytes=0;
+    remaining=0;assert(invoke(policy(2),(void *)&reflected_call,sizeof(reflected_call),&response,&response_bytes,0)==CB_RESOURCE_FAILURE && blocks==request_blocks);remaining=-1;
+    assert(invoke(policy(2),(void *)&reflected_call,sizeof(reflected_call),&response,&response_bytes,0)==CB_OK);
+    struct request *owned=state.requests;assert(owned && owned->input==(unsigned char *)(owned+1));
+    reflected_call.d.interface.bytes[0]^=1;struct cb_describe_request captured;copy_bytes(&captured,owned->input+sizeof(struct cb_call_header),sizeof(captured));assert(captured.interface.bytes[0]==interface.bytes[0]);reflected_call.d.interface.bytes[0]^=1;
+    release(response);drop_request(owned);assert(blocks==request_blocks);
+    remaining=1;assert(invoke(policy(2),(void *)&reflected_call,sizeof(reflected_call),&response,&response_bytes,0)==CB_RESOURCE_FAILURE);remaining=-1;
+    assert(state.requests && state.requests->failure==CB_RESOURCE_FAILURE);drop_request(state.requests);assert(blocks==request_blocks);
     assert(!handles_surface_channel(2,88,32,0,0,0).status);uint64_t data[2]={123,456};const struct cb_interface_id io=CB_IO_INTERFACE_ID;
     long mailbox_blocks=blocks;assert(!handles_surface_post(2,88,(uintptr_t)data,sizeof(data),(uintptr_t)&io,1).status);assert(blocks==mailbox_blocks);assert(handles_surface_post(2,88,(uintptr_t)data,sizeof(data),(uintptr_t)&io,1).status);
     unsigned char *notification=NULL;size_t notification_bytes=0;assert(receive(policy(2),0,&notification,&notification_bytes,1)==CB_BUFFER_TOO_SMALL && !notification);

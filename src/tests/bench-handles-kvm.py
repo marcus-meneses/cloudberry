@@ -56,6 +56,7 @@ def logged(command, path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--profile-handles',action='store_true',help='disposable broker phase probes; perturbs timings')
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--case', action='append', choices=('1cpu-none','4cpu-amd','4cpu-intel'))
@@ -74,10 +75,11 @@ def main():
         build.mkdir(parents=True,exist_ok=True)
         host=dict(kernel=platform.release(),architecture=platform.machine(),cpu=cpu_identity(Path('/proc/cpuinfo').read_text().split('\n\n')[0]),qemu=capture(['qemu-system-x86_64','--version']),compiler=capture([str(ROOT/'.toolchain/cross/bin/x86_64-elf-gcc'),'--version']),affinity=sorted(os.sched_getaffinity(0)))
         source=fingerprint();write(session/'host.json',host)
-        summary=dict(status='running',accelerator=args.accel,runs=args.runs,source_sha256=source,git_revision=capture(['git','rev-parse','HEAD']),cases={})
+        summary=dict(status='running',profile_handles=args.profile_handles,accelerator=args.accel,runs=args.runs,source_sha256=source,git_revision=capture(['git','rev-parse','HEAD']),cases={})
         archive=Path(str(session)+'.tar.gz');failure=None
         try:
-            names=('cloudberry.iso','tests/src-process-kernel.elf','kmodules/probe.kmod','tests/apps/process-probe.elf','tests/apps/handles-probe.elf','tests/apps/keyboard-client.elf','tests/apps/keyboard-fault.elf','tests/apps/handle-bench.elf','tests/apps/startup.elf')
+            names=('tests/apps/handle-stress.elf','cloudberry.iso','tests/src-process-kernel.elf','kmodules/probe.kmod','tests/apps/process-probe.elf','tests/apps/handles-probe.elf','tests/apps/keyboard-client.elf','tests/apps/keyboard-fault.elf','tests/apps/handle-bench.elf','tests/apps/startup.elf')
+            if args.profile_handles:names+=('tests/handles-profile.kmod',)
             command=['make','-C','src',f'-j{args.jobs}',f'BUILD={build}',f'ISO={build}/cloudberry.iso',f'KERNEL={build}/kernel.elf',f'STAGE={build}/src-iso-root']+[str(build/n) for n in names]
             logged(command,session/'build.log')
             identities={n:digest(build/n) for n in names};write(session/'binaries.json',identities)
@@ -88,6 +90,7 @@ def main():
                     live=build/'tests'/f'process-{cpus}cpu-{iommu}'
                     for name in ('report.json','result.json','boot.log'):(live/name).unlink(missing_ok=True)
                     command=[sys.executable,str(ROOT/'src/tests/block-boot.py'),str(build),'--backend=usb','--process-only',f'--cpus={cpus}',f'--iommu={iommu}',f'--accel={args.accel}','--cpu='+('host,migratable=off,+invtsc' if args.accel=='kvm' else 'max')]
+                    if args.profile_handles:command.append('--profile-handles')
                     print(f'{args.accel}: {case}, run {repeat}/{args.runs}',flush=True);write(target/'command.json',command)
                     try:logged(command,target/'runner.log')
                     finally:
@@ -106,7 +109,7 @@ def main():
             if source!=fingerprint() or any(digest(build/n)!=value for n,value in identities.items()):raise RuntimeError('sources/binaries changed during measurements')
             if args.reference_session:
                 ref=args.reference_session.resolve();old=json.loads((ref/'session.json').read_text());old_host=json.loads((ref/'host.json').read_text())
-                if old.get('status')!='passed' or old.get('accelerator')!=args.accel or comparable_host(old_host)!=comparable_host(host):raise RuntimeError('reference host/accelerator differs or reference failed')
+                if old.get('status')!='passed' or old.get('accelerator')!=args.accel or old.get('profile_handles',False)!=args.profile_handles or comparable_host(old_host)!=comparable_host(host):raise RuntimeError('reference host/accelerator/instrumentation differs or reference failed')
                 comparison={}
                 for case,values in summary['cases'].items():
                     if case not in old['cases']:raise RuntimeError('reference lacks case '+case)

@@ -39,6 +39,20 @@ class Reports(unittest.TestCase):
         with self.assertRaises(ValueError):parse_handles(fixture().replace('PROFILE handles clock 2','PROFILE handles clock 3'),1)
         with self.assertRaises(ValueError):parse_handles(fixture().replace('PROFILE handles clock 2','IGNORED handles clock 2'),1)
 
+    def test_phase_probes(self):
+        phases='\n'.join(['PHASE handles overhead '+' '.join(['1']*32),
+            'PHASE handles heap 10 10 6 0 0','PHASE handles handoff 2 10 20 30',
+            'PHASE handles gate 1 2 2 100 10 10 20 20 10 10 60',
+            'PHASE handles lock 0 2 1 20 1 10'])
+        result=parse_handles(fixture()+'\n'+phases,1)
+        self.assertEqual(result['phases']['gates'][0]['broker_ns'],20)
+        self.assertEqual(result['phases']['heap']['live_blocks'],6)
+        self.assertIsNone(native_timing_error(result))
+        for invalid in (phases+'\nPHASE handles heap 10 10 6 0 0',phases.replace('2 100 10','2 1 10'),phases.replace('PHASE handles handoff','IGNORED handles handoff')):
+            with self.assertRaises(ValueError):parse_handles(fixture()+'\n'+invalid,1)
+        result['phases']['heap']['clock_errors']=1
+        self.assertIn('phase clock',native_timing_error(result))
+
     def test_complete(self):
         result = parse_handles(fixture(), 1)
         self.assertEqual(result['measurements']['clock_bracket']['count'], 48)

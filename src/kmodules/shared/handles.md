@@ -89,3 +89,15 @@ cooperative shutdown through the production isolated provider. See
 Provider reply allocation failure does not mark an earlier provisional timeout as
 a final provider completion. The reply can be retried; captured input and retained
 reply state remain owned. Host OOM checks cover preserved prior result storage.
+
+
+Small gate frames use bounded per-call stack scratch; larger frames use a
+separate temporary allocation. Every retained request owns one allocation that
+contains both metadata and the immutable captured input, released together.
+Replies retain separate ownership so provisional timeout replacement and result
+replay keep their existing semantics. Host tests cover failed allocation, cleanup
+and source-buffer mutation after capture.
+
+Disposable tests can replace this module with an instrumented variant exposing
+`handles.profile` to the trusted test owner only. Candidate exports and code have
+no profiler. See [phase measurements and concurrency acceptance](../../tests/handle-profiling.md).

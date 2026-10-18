@@ -88,7 +88,7 @@ AMD-host KVM validates SMP, clocks, extended state and the native process/input/
 boundary across nine repeated one/four-CPU boots. Physical-device and native Intel
 CPU acceptance remain pending.
 
-The [current assessment](src/README.md#current-assessment-2026-10-17) separates
+The [current assessment](src/README.md#current-assessment-2026-10-18) separates
 implemented mechanisms, validation and remaining limits. Foundational kmodules
 remain Limine-loaded; the first isolated keyboard handler comes from the ext4
 bundle. The full sequence is tracked in the [roadmap](src/ROADMAP.md).

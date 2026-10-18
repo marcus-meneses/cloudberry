@@ -306,15 +306,28 @@ are implemented. The three execution/handler priorities are closed:
    USB removal/reconnection, cleared state and cooperative shutdown. IBM/ABNT2,
    Unicode, repeat, cursor replay/eviction and admission boundaries pass host tests.
    Focused one/four-CPU TCG acceptance uses disposable media; fixture clients never
-   enter candidate boot. Native user-entry/input and physical HID remain open.
+   enter candidate boot. Repeated AMD-host KVM user-entry/input acceptance now passes; physical HID
+   and native Intel CPU acceptance remain open.
 
-Next architectural work should build on this boundary: native user-mode/input
-acceptance, then explicit application launch/installed identity and lifecycle policy.
-One boot input domain, pinned processes, negotiated boot-keyboard HID and trusted
-unsigned development bundles are intentional current limits. Interactive approval,
-installer/signature enforcement, safe automatic provider rebind/recovery, general
-HID/multiple keyboards, networking and graphical applications remain separate
-milestones. No new implementation beyond the requested first three is included.
+Current status (2026-10-18): repeated native AMD-host KVM process/input/handle
+acceptance is closed. Isolated phase profiling and simultaneous-client/lifecycle
+checks are implemented; the latest request-storage change still needs a native
+latency comparison. See [the profiling guide](tests/handle-profiling.md).
+
+Current next steps:
+
+1. Collect the isolated native phase report, including probe overhead, and compare
+   the uninstrumented request-storage change against the accepted baseline.
+2. Resolve any reproducible IPC/allocation regression using phase-specific
+   evidence; broad lock or mapping changes remain unjustified by whole-run peaks.
+3. After this performance closure, advance explicit application launch/installed
+   identity and lifecycle policy. Bootstrap remains a startup coordinator.
+
+One boot input domain, pinned single-threaded processes, negotiated boot-keyboard
+HID and trusted unsigned development bundles remain intentional limits.
+Interactive approval, installer/signature enforcement, safe automatic provider
+rebind/recovery, general HID/multiple keyboards, networking and graphical apps
+remain separate milestones. Physical/native Intel acceptance remains open.
 
 Completed performance sequence (native acceptance 2026-10-17):
 
@@ -650,7 +663,11 @@ USB core/HID, driver-manager and image-unload work remained deferred; native/phy
 That transport-only revision exported 162 methods and five table references
 (49.85% hub). Current ACPI/USB inventories and usage are documented in maps/startup.md.
 
-## Execution/handler follow-up (2026-10-18)
+## Execution/handler follow-up history (2026-10-18)
+
+The entries below record successive decisions and their then-current status.
+The current next steps are summarized above; later acceptance supersedes earlier
+"pending" statements.
 
 1. Closed: cooperative process.stop, truthful provider health snapshots, retained
    reply state on allocation failure and isolated active-USB/pending-client fault
@@ -775,3 +792,42 @@ measurement and explicit instrumentation overhead. Compare those phases in
 isolated repeated native runs; do not infer a mapping/lock bottleneck from
 whole-run peaks that also include process launch and teardown. No new production
 optimization or clock acceptance relaxation was made from this mixed result.
+
+
+## Handle attribution, bounded tuning and concurrency closure (2026-10-18)
+
+The requested build check passes before implementation (`make -C src -j4 build`).
+
+1. Implemented isolated phase attribution: a separately compiled test broker,
+   selected only in disposable process-test images, reports checked capture/
+   copyout, broker work, blocking, kernel-resource execution and provider handoff.
+   Broker-local lock statistics exclude process mapping locks; clock-pair samples
+   document a lower bound on probe cost. Raw reports mark profiled/unprofiled
+   sessions and reject cross-mode performance references. Native phase collection
+   remains user-host work because this environment has no /dev/kvm.
+2. Applied the measured allocation reduction: immutable input now trails its
+   request record in one allocation. Before/after instrumented one-CPU runs show
+   5,782 -> 4,494 allocations, exactly one saved for each of 1,288 invocations.
+   This is 22.3% less allocation work in this workload, not a native latency claim.
+   Host failure/ownership tests pass. No checks, lock ordering, retained outcomes
+   or payload isolation were removed. Broader tuning awaits native phase evidence.
+3. Implemented two-cycle simultaneous-client acceptance: three independent clients
+   exchange distinct 4 KiB payloads; a slow provider exercises queued versus
+   dispatched deadlines, preserved input, BUSY release and late committed result
+   retrieval. Unrelated memory work progresses while the provider is outstanding.
+   Provider discovery disappears after teardown, broker blocks return exactly to
+   baseline in the traced variant, and page/stack counts return after warmup.
+   Existing active USB/provider-fault/restart tests still run. Ordinary and traced
+   one/four-CPU TCG process boots pass. Traced run IDs:
+   `fb8ca01f3edb4cfda4fcc5d4ff352c02` (one CPU) and
+   `3cc92842893e466e8f685130207fb2dc` (four CPUs/AMD-Vi).
+
+The [profiling guide](tests/handle-profiling.md) defines measurement boundaries,
+remaining acceptance and native commands. Production changes are confined to
+request storage; tracing/stress fixtures stay out of the candidate image.
+
+Final verification: the candidate rebuild and broker/manifest/report host tests
+pass; candidate module exports contain no `handles.profile`, and its module/bundle
+staging contains no test fixtures. The updated collector passes a complete
+one-CPU profiled TCG session `20261018T152345.941848Z`, preserving raw logs,
+identities and archive. This is harness/correctness acceptance, not native timing.

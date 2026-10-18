@@ -218,7 +218,7 @@ DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmwa
 companions to PCI records. SCI delivery, runtime namespace reconciliation, embedded
 controllers, platform drivers and PCI INTx firmware routing remain deferred.
 
-## Current assessment (2026-10-17)
+## Current assessment (2026-10-18)
 
 The kernel foundation now includes storage selection, future disk-module loading
 and protected native processes. The first application-facing handler now runs
@@ -251,7 +251,10 @@ Small gate inputs now use 256 bytes of per-call stack scratch; larger frames and
 retained request/reply storage remain separately allocated. Native comparison passes nine more correctness runs: acquisition/reflection
 medians improve, while four-CPU VT-d IPC/allocation results regress with substantial
 between-boot variation. Overall speedup remains unproven;
-[phase attribution is next](ROADMAP.md#small-gate-input-native-comparison-2026-10-18).
+[isolated phase attribution and concurrency checks](tests/handle-profiling.md) now
+separate broker work, copy/check work, blocking and provider handoff. Coallocating
+request metadata and its immutable input removes 1,288 of 5,782 allocations in
+the instrumented benchmark (22.3%); native latency improvement remains unmeasured.
 Physical and native Intel acceptance remain open.
 
 The hub grows within reserved virtual windows and allocates physical pages only
@@ -589,6 +592,9 @@ src/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
 │   │   ├── handle-bench.c
+│   │   ├── handle-stress.c
+│   │   ├── stress-client.json
+│   │   ├── stress-server.json
 │   │   ├── handles-client.json
 │   │   ├── handles-server.json
 │   │   ├── handles.c
@@ -644,6 +650,8 @@ src/
 │   ├── bench-handles-kvm.py
 │   ├── handle-clock.h
 │   ├── handle-bench.h
+│   ├── handles-profile.h / handles-profile.inc / handles-profile.S
+│   ├── handle-profiling.md
 │   ├── handle_report.py
 │   ├── test-handle-report.py
 │   ├── bench-spaces-kvm.py
@@ -669,6 +677,7 @@ src/
 │   ├── provider-definition.c
 │   ├── process-elf.c
 │   ├── probe-process.c
+│   ├── probe-handle-stress.inc
 │   ├── probe-block.c
 │   ├── probe-hubs.c
 │   ├── probe-storage.c

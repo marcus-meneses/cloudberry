@@ -27,15 +27,31 @@ def native_timing_error(handles):
     if len({(d['hz'],d['calibrations']) for d in phases.values()})!=1:return 'clock frequency/calibration changed before or during the measurement'
     unavailable=[f"CPU{m['cpu']}={m['unavailable_samples']}" for m in handles['locks'] if m['unavailable_samples']]
     if unavailable:return 'unavailable profiling samples: '+', '.join(unavailable)
+    if handles.get('phases',{}).get('heap',{}).get('clock_errors',0):return 'invalid handle phase clock samples'
     return None
 
 
 def parse_handles(text, cpus):
     samples, locks, attribution = {}, {}, []
+    phase_rows,phase_locks,phase_single={}, {}, {}
     clock = None
     profiles={kind:[] for kind in PROFILE_FIELDS}; seen=set()
     for line in text.splitlines():
-        if line.startswith('PROFILE handles '):
+        if line.startswith('PHASE handles '):
+            fields=line.split()[2:];kind=fields[0];values=[int(v) for v in fields[1:]]
+            sizes={'overhead':32,'heap':5,'gate':11,'lock':6,'handoff':4}
+            if kind not in sizes or len(values)!=sizes[kind] or any(v<0 or v>2**64-1 for v in values):raise ValueError('invalid handle phase framing')
+            if kind=='gate':
+                actor,op,count,total,*rest=values
+                if actor>=8 or not 1<=op<=7 or not count or (actor,op) in phase_rows or sum(rest[:6])>total or rest[6]>total:raise ValueError('invalid/duplicate handle phase gate')
+                phase_rows[actor,op]=dict(actor=actor,operation=op,count=count,total_ns=total,max_ns=rest[6],**dict(zip(('check_ns','capture_ns','broker_ns','wait_ns','kernel_ns','output_ns'),rest[:6])))
+            elif kind=='lock':
+                if values[0]>=cpus or values[0] in phase_locks:raise ValueError('invalid/duplicate handle phase lock')
+                phase_locks[values[0]]=dict(zip(('cpu','count','wait_ns','hold_ns','max_wait_ns','max_hold_ns'),values))
+            else:
+                if kind in phase_single:raise ValueError('duplicate handle phase '+kind)
+                phase_single[kind]=values
+        elif line.startswith('PROFILE handles '):
             fields=line.split()[2:];kind=fields[0]
             if kind not in PROFILE_FIELDS or len(fields)-1!=len(PROFILE_FIELDS[kind]):raise ValueError('invalid clock profile framing')
             values=[int(v) for v in fields[1:]]
@@ -93,7 +109,11 @@ def parse_handles(text, cpus):
     measured=phases['end']
     if any(clock[k]!=measured[v] for k,v in (('source','source'),('tsc_hz','hz'),('calibrations','calibrations'))):raise ValueError('clock identity differs from final diagnostics')
     baseline = samples[0]['median']
-    return dict(clock=clock, clock_diagnostics=phases, clock_profile=profiles, units='ns', samples_per_case=48, warmup_per_case=8,
+    extra={}
+    if phase_single or phase_rows or phase_locks:
+        if set(phase_single)!={'overhead','heap','handoff'} or not phase_rows or set(phase_locks)!=set(range(cpus)):raise ValueError('incomplete handle phase measurements')
+        extra['phases']=dict(overhead=distribution(phase_single['overhead']),heap=dict(zip(('allocations','frees','live_blocks','failures','clock_errors'),phase_single['heap'])),handoff=dict(zip(('count','queue_ns','service_ns','resume_ns'),phase_single['handoff'])),gates=list(phase_rows.values()),locks=list(phase_locks.values()),notes='Instrumented wall time, not CPU time. Broker excludes measured blocking/kernel work. Handoff service includes provider scheduling. Overhead is a clock-pair lower bound; compare whole profiled/unprofiled runs for total perturbation. Broker-only locks exclude process mapping/startup locks.')
+    return dict(**extra,clock=clock, clock_diagnostics=phases, clock_profile=profiles, units='ns', samples_per_case=48, warmup_per_case=8,
                 measurements={name: samples[i] for i, name in enumerate(CASES)},
                 bracket_adjusted_median_estimates={name: max(0, samples[i]['median'] - baseline)
                                                   for i, name in enumerate(CASES) if i},

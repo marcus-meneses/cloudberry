@@ -825,3 +825,8 @@ managed hold/IRQ-off is 257/258 us in memory.unmap_batch, and BSP lock wait
 reaches 432 us. The scope includes reset-thread teardown/start/owner waits, so
 these peaks do not yet identify a handle-only bottleneck. A complete repeated
 one/four-CPU/both-IOMMU baseline remains pending before performance changes.
+
+
+Handle phase profiling and simultaneous-client/resource acceptance are described
+in [handle-profiling.md](handle-profiling.md). `--profile-handles` selects a
+separate disposable broker; ordinary candidate builds contain no probes.

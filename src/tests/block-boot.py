@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
 import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--spaces-only',action='store_true');p.add_argument('--process-only',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--spaces-only',action='store_true');p.add_argument('--process-only',action='store_true');p.add_argument('--profile-handles',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
+if args.profile_handles and not 1<=args.cpus<=4:p.error('test-only handle profiling supports one to four CPUs')
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
 if not build.is_relative_to(root/'bin/tests'):raise SystemExit('isolated build required')
 if args.accel=='kvm':subprocess.run([sys.executable,str(root/'src/tests/native-check.py')],check=True)
@@ -10,15 +11,20 @@ lock=(test/'run.lock').open('a')
 try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
 except BlockingIOError:raise SystemExit('this isolated test is already running; refusing to overwrite its media')
 report=test/'report.json';report.unlink(missing_ok=True)
-result={'run_id':uuid.uuid4().hex,'status':'running','backend':args.backend,'hub_only':args.hub_only,'spaces_only':args.spaces_only,'process_only':args.process_only,'cpus':args.cpus,'iommu':args.iommu,'accelerator':args.accel,'cpu_spec':args.cpu,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+result={'run_id':uuid.uuid4().hex,'status':'running','backend':args.backend,'hub_only':args.hub_only,'spaces_only':args.spaces_only,'process_only':args.process_only,'cpus':args.cpus,'iommu':args.iommu,'accelerator':args.accel,'cpu_spec':args.cpu,'profile_handles':args.profile_handles,'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 def save(): (test/'result.json').write_text(json.dumps(result,indent=2)+'\n')
 save()
 try:
     stage=test/'stage';shutil.rmtree(stage,ignore_errors=True);shutil.copytree(build/'src-iso-root',stage)
     shutil.copy2(build/('tests/src-process-kernel.elf' if args.process_only else 'tests/src-spaces-kernel.elf' if args.spaces_only else 'tests/src-bootstrap-kernel.elf' if args.bootstrap else 'tests/src-hub-kernel.elf' if args.hub_only else 'tests/src-block-kernel.elf'),stage/'boot/kernel.elf');shutil.copy2(build/'kmodules/probe.kmod',stage/'boot/kmodules/probe.kmod')
+    if args.profile_handles:
+        if not args.process_only:raise RuntimeError('handle profiling requires process test')
+        shutil.copy2(build/'tests/handles-profile.kmod',stage/'boot/kmodules/handles.kmod')
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
+        shutil.copy2(build/'tests/apps/handle-stress.elf',fixture/'handle-stress.elf')
+        for name in ('stress-client.json','stress-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/handle-bench.elf',fixture/'handle-bench.elf')
         for name in ('bench-client.json','bench-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
@@ -90,6 +96,7 @@ try:
             process.terminate()
             try:process.wait(timeout=5)
             except subprocess.TimeoutExpired:process.kill();process.wait()
+    if args.process_only and ('PASS handle concurrency:' not in log.read_text() or 'PASS handle resources:' not in log.read_text()):raise RuntimeError('handle concurrency/resource acceptance incomplete')
     if args.process_only and not (typed and removed and added and right and 'PASS keyboard handler' in log.read_text()):raise RuntimeError('keyboard input/hotplug acceptance incomplete')
     if args.disk_modules and 'PASS disk modules' not in log.read_text():raise RuntimeError('disk module acceptance did not run')
     if args.bootstrap and args.duplicate and 'PASS bootstrap duplicate GUID rejected' not in log.read_text():raise RuntimeError('duplicate was not rejected')
@@ -97,6 +104,7 @@ try:
     if args.process_only:
         from handle_report import parse_handles
         result['handles']=parse_handles(log.read_text(),args.cpus)
+        if args.profile_handles and ('phases' not in result['handles'] or result['handles']['phases']['heap']['clock_errors'] or result['handles']['phases']['heap']['failures']):raise RuntimeError('missing or invalid handle phase profiling')
     if args.spaces_only:
         from space_report import parse_spaces
         if 'PASS address-space profiling' not in log.read_text():raise RuntimeError('profiling acceptance did not run')

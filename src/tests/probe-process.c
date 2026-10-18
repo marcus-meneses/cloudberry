@@ -8,6 +8,7 @@
 #include "../kmodules/shared/clock.h"
 #include "../kernel/cpu.h"
 #include "handle-bench.h"
+#include "handles-profile.h"
 #include "../kmodules/shared/mem-pages.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 #define CHECK(x) do{if(!(x)){probe->error=__LINE__;return module_result(__LINE__,0);}}while(0)
@@ -35,9 +36,12 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
     while(!CALL(kernel_surface_find(hub,"handles.available"),"@bench",0,0).value){uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}
     /* Reset each participating CPU's attribution on that CPU, before launch. */
     for(unsigned i=0;i<(probe->cpus>1?2:1);++i){struct thread_request reset={.abi=1,.cpu=i,.stack_bytes=16384,.entry=(uintptr_t)cpu,.major=1,.payload={.arguments={CPU_METRICS_RESET}}};struct kernel_surface_result t=CALL(kernel_surface_find(hub,"threads.create"),&reset,0,0);if(t.status)return 0;for(;;){struct thread_info ti;if(CALL(control,THREAD_INFO,t.value,&ti).status)return 0;if(ti.state==THREAD_EXITED){if(ti.result.status || CALL(control,THREAD_REAP,t.value,0).status)return 0;break;}uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}}
+    kernel_surface_call profiling=kernel_surface_find(hub,"handles.profile");struct hp_report phases={.actors=2,.pids={ids[0],ids[1]}};
+    if(profiling && CALL(profiling,HP_BEGIN,&phases,0).status)return 0;
     struct clock_info before,after;if(CALL(clock_info,&before,0,0).status || CALL(start,ids[1],0,0).status)return 0;
     struct process_info client;for(;;){if(CALL(info,ids[1],&client,0).status)return 0;if(client.state==PROCESS_EXITED || client.state==PROCESS_FAULTED)break;uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}
     probe->app_code=client.exit_code;struct handle_bench_report report;if(client.state!=PROCESS_EXITED || kernel_surface_find(hub,"process.copy")(ids[1],client.exit_code,(uintptr_t)&report,sizeof(report),0,0).status || report.magic!=HB_MAGIC || report.cases!=HB_CASES || report.samples!=HB_SAMPLES || CALL(clock_info,&after,0,0).status)return 0;
+    if(profiling && CALL(profiling,HP_END,&phases,0).status)return 0;
     if(!clock_diagnostic(hub,2))return 0;
     if(before.source!=after.source || before.tsc_hz!=after.tsc_hz || before.calibrations!=after.calibrations)return 0;
     text("MEASURE handles clock ");number(before.source);text(" ");number(before.tsc_hz);text(" ");number(before.calibrations);text("\n");
@@ -46,8 +50,16 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
         const struct cpu_profile_peak *peaks[]={&m.wait_peak,&m.hold_peak,&m.irq_peak};for(unsigned j=0;j<3;++j){const struct cpu_profile_peak *p=peaks[j];const char *method=p->method && p->method<=kernel_surface_count(hub)?kernel_surface_entries(hub)[p->method-1].name:"kernel";text("ATTR handles ");number(i);text(" ");number(j);const uint64_t *fields=(const void *)p;for(unsigned k=0;k<sizeof(*p)/8;++k){text(" ");number(fields[k]);}text(" ");text(method);text("\n");}}
     while(CALL(reap,ids[1],0,0).status){uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}++probe->completed;
     if(!finished(hub,ids[0],deadline,probe))return 0;
+    if(profiling){
+        text("PHASE handles overhead");for(unsigned i=0;i<32;++i){text(" ");number(phases.overhead[i]);}text("\n");
+        text("PHASE handles heap ");number(phases.allocations);text(" ");number(phases.frees);text(" ");number(phases.live_blocks);text(" ");number(phases.failures);text(" ");number(phases.clock_errors);text("\n");
+        for(unsigned i=0;i<phases.actors;++i)for(unsigned op=1;op<HP_OPS;++op){struct hp_row *row=&phases.rows[i][op];if(!row->count)continue;text("PHASE handles gate ");number(i);text(" ");number(op);text(" ");number(row->count);text(" ");number(row->total_ns);for(unsigned k=0;k<HP_PHASES;++k){text(" ");number(row->phase_ns[k]);}text(" ");number(row->max_ns);text("\n");}
+        for(unsigned i=0;i<probe->cpus;++i){struct hp_locks *m=&phases.locks[i];text("PHASE handles lock ");number(i);const uint64_t *words=(const void *)m;for(unsigned k=0;k<sizeof(*m)/8;++k){text(" ");number(words[k]);}text("\n");}
+        text("PHASE handles handoff ");number(phases.handoffs);text(" ");number(phases.queue_ns);text(" ");number(phases.service_ns);text(" ");number(phases.resume_ns);text("\n");
+    }
     text("PASS handle benchmark: acquired/reflected/kernel and cross-process calls, owned allocation and raw clock/lock attribution\n");return 1;
 }
+#include "probe-handle-stress.inc"
 struct kernel_surface_result probe_process_call(MODULE_ARGS){
     MODULE_UNUSED();struct probe_process *probe=(void *)a;const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     kernel_surface_call boot_info=kernel_surface_find(hub,"bootstrap.info"),load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),pages=kernel_surface_find(hub,"mem.pages_info");
@@ -128,6 +140,7 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
         CHECK(!CALL(pages,&after,0,0).status && after.stacks==stack_baseline);
     }
     CHECK(benchmark(hub,volume.filesystem.cookie,probe));
+    CHECK(handle_stress(hub,volume.filesystem.cookie,probe));
     text("PASS provider lifecycle: active USB/read fault, original UNKNOWN outcome, explicit stop/reap and two fresh restart cycles\n");
     text("PASS keyboard handler: disk-loaded isolated /@keyboard, authorized independent clients, Unicode input, structured arrows, USB hotplug/reset and quiescent decommission\n");
     return module_result(1,1);

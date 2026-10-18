@@ -926,7 +926,7 @@ $(BUILD)/kmodules/process-entry.o: kmodules/shared/process-entry.S
 $(BUILD)/kmodules/process.elf: $(BUILD)/kmodules/process-pic.o $(BUILD)/kmodules/process-entry.o $(BUILD)/kmodules/process.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
-$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe.h kmodules/shared/process.h
+$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe-handle-stress.inc tests/handles-profile.h tests/probe.h kmodules/shared/process.h
 	@mkdir -p $(@D)
 	$(CC) $(MODULE_CFLAGS) -c $< -o $@
 $(BUILD)/tests/apps/process-probe.elf: tests/apps/process.c sdk/application.ld
@@ -1019,3 +1019,20 @@ test-provider-definition:
 $(BUILD)/tests/apps/startup.elf: tests/apps/startup.c interfaces/startup.h sdk/system.c sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/startup.c sdk/system.c -o $@
+
+# Disposable latency probes; never prerequisites of the candidate build.
+$(BUILD)/tests/handles-profile-pic.o: kmodules/shared/handles.c tests/handles-profile.inc tests/handles-profile.h $(MODULE_HEADERS) Makefile
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -DCB_HANDLES_PROFILE -c $< -o $@
+$(BUILD)/tests/handles-profile.exports.o: tests/handles-profile.S
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/handles-profile.elf: $(BUILD)/tests/handles-profile-pic.o $(BUILD)/kmodules/handles.exports.o $(BUILD)/tests/handles-profile.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/tests/handles-profile.kmod: $(BUILD)/tests/handles-profile.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BUILD)/tests/apps/handle-stress.elf: tests/apps/handle-stress.c sdk/system.c sdk/system.h interfaces/io.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/handle-stress.c sdk/system.c -o $@
+_test-process-boot: $(BUILD)/tests/apps/handle-stress.elf
