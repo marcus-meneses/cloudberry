@@ -3,11 +3,18 @@
 #include <string.h>
 #include "../interfaces/keyboard.h"
 #include "../interfaces/startup.h"
+#include "../interfaces/installations.h"
+#include "../interfaces/admission.h"
+#include "../sdk/application.h"
 #ifdef __cplusplus
 #define ABI_ASSERT static_assert
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_install_catalog)==24,"installation catalog");
+ABI_ASSERT(sizeof(struct cb_install_record)==64,"installation entry");
+ABI_ASSERT(sizeof(struct cb_application_launch)==40,"application launch");
+ABI_ASSERT(sizeof(struct cb_application_status)==32,"application status");
 ABI_ASSERT(sizeof(struct cb_startup)==24,"startup prefix");
 ABI_ASSERT(sizeof(struct cb_startup_file)==16,"startup file prefix");
 ABI_ASSERT(sizeof(struct cb_version)==8,"version prefix");

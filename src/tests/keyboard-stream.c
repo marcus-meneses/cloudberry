@@ -34,7 +34,7 @@ int main(void){
     request.grant_ns=100;assert(read_request(&request,1) && header().status==CB_INPUT_RESYNC);
     evicted_ns=evicted_sequence=0;request.grant_ns=0;assert(read_request(&request,1) && header().status==CB_OK);memcpy(&event,captured+sizeof(struct cb_reply_header)+sizeof(struct cb_keyboard_batch),sizeof(event));assert(event.kind==CB_KEY_TEXT && event.codepoint==0);
     emitted_ns=UINT64_C(5000000301);prune();assert(!count && evicted_sequence==3);assert(read_request(&request,1) && header().status==CB_INPUT_RESYNC);
-    uint64_t grant=0;const char context[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551615}";assert(admission((const void *)context,sizeof(context)-1,&grant) && grant==UINT64_MAX);
-    const char overflow[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551616}";assert(!admission((const void *)overflow,sizeof(overflow)-1,&grant));
+    uint64_t grant=0;const char context[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551615,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(admission((const void *)context,sizeof(context)-1,&grant) && grant==UINT64_MAX);
+    const char overflow[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551616,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(!admission((const void *)overflow,sizeof(overflow)-1,&grant));
     puts("PASS keyboard stream: grant boundary, independent replay, blocking deadline, stale/evicted cursor anchors, retention, Unicode NUL and authenticated context framing");return 0;
 }

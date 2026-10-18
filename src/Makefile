@@ -964,7 +964,7 @@ test-manifest:
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/manifest.c -o $(BUILD)/tests/manifest
 	$(BUILD)/tests/manifest
 
-$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-process-pic.o $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 .PHONY: test-handles
 test-handles:
@@ -972,7 +972,7 @@ test-handles:
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
 	$(BUILD)/tests/handles
 
-$(BUILD)/apps/keyboard.elf: handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
+$(BUILD)/apps/keyboard.elf: interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
 $(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json)
@@ -994,7 +994,7 @@ $(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-client.c sdk/system.c -o $@
 
-$(BUILD)/tests/apps/keyboard-fault.elf: interfaces/startup.h tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
+$(BUILD)/tests/apps/keyboard-fault.elf: interfaces/admission.h interfaces/startup.h tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-fault.c handlers/keyboard/hid.c sdk/system.c -o $@
 

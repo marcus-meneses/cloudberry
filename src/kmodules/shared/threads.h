@@ -4,7 +4,7 @@
 #include "scheduler.h"
 enum thread_tick_result {THREAD_TICK_HANDLED=1,THREAD_TICK_DEFERRED=2};
 enum thread_state {THREAD_RUNNABLE=1,THREAD_RUNNING,THREAD_BLOCKED,THREAD_EXITED,THREAD_EXITING,THREAD_REAPING,THREAD_BLOCKING};
-enum thread_control_op {THREAD_YIELD,THREAD_BLOCK,THREAD_WAKE,THREAD_REAP,THREAD_INFO,THREAD_READY,THREAD_TIMING,THREAD_CURRENT,THREAD_BLOCK_UNTIL,THREAD_DEADLINE};
+enum thread_control_op {THREAD_YIELD,THREAD_BLOCK,THREAD_WAKE,THREAD_REAP,THREAD_INFO,THREAD_READY,THREAD_TIMING,THREAD_CURRENT,THREAD_BLOCK_UNTIL,THREAD_DEADLINE,THREAD_WAIT};
 struct thread_timing {uint64_t samples,total_wait_ns,max_wait_ns,clock_failures;};
 struct thread_request {uint32_t abi,cpu;uint64_t process_id;size_t stack_bytes;uintptr_t entry;uint16_t major,minor;uint32_t reserved;struct scheduler_payload payload;uint64_t address_space;};
 struct thread_info {uint64_t id,process_id;uint32_t cpu,state;uint64_t switches;struct kernel_surface_result result;};
@@ -22,6 +22,8 @@ struct thread_info {uint64_t id,process_id;uint32_t cpu,state;uint64_t switches;
  * deadline on current CPU (0 none); CURRENT returns current ID (0 dispatcher).
  * tick returns DEFERRED when a running thread cannot switch inside a critical
  * section; timer must rearm a short CPU-local retry without foreground calls.
+ * WAIT(id) blocks until that thread is fully EXITED, outside locks with IF set.
+ * Embedded join registrations prevent target reap until joiners observe exit.
  * reap only EXITED; executing stacks are never freed. Owner 0 is kernel work. */
 /* entry_stack(top): trusted current-thread RSP0 binding, with IF clear.
  * Scheduler restores it with the saved context; zero on kernel dispatchers. */

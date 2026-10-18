@@ -1,3 +1,4 @@
+#include "../../interfaces/admission.h"
 #include "../../sdk/system.h"
 #include "../../interfaces/io.h"
 #include "../../interfaces/startup.h"
@@ -49,10 +50,8 @@ static int read_request(struct pending *request,int may_wait){
     copy(outgoing+sizeof(struct cb_reply_header),&batch,sizeof(batch));reply(&request->delivery,CB_OK,CB_COMMITTED,result-sizeof(struct cb_reply_header));return 1;
 }
 static void serve_pending(void){struct pending **at=&pending;while(*at){struct pending *request=*at;if(read_request(request,1)){*at=request->next;release(request);}else at=&request->next;}}
-static int admission(const unsigned char *data,size_t bytes,uint64_t *grant){
-    static const char prefix[]="{\"input_stream\":\"boot:1\",\"grant_ns\":";if(bytes<sizeof(prefix) || bytes>128)return 0;for(size_t i=0;i<sizeof(prefix)-1;++i)if(data[i]!=(unsigned char)prefix[i])return 0;
-    size_t at=sizeof(prefix)-1;uint64_t n=0;unsigned digits=0;while(at<bytes && data[at]>='0'&&data[at]<='9'){unsigned digit=data[at++]-'0';if(n>(UINT64_MAX-digit)/10)return 0;n=n*10+digit;++digits;}if(!digits || at+1!=bytes || data[at]!='}')return 0;*grant=n;return 1;
-}
+static int admission(const unsigned char *data,size_t bytes,uint64_t *grant){struct cb_admission a;if(!cb_admission_parse(data,bytes,&a))return 0;*grant=a.grant_ns;return 1;}
+
 static void publish(void){
     struct cb_publication p={.version={sizeof(p),1,0},.interface=CB_KEYBOARD_INTERFACE_ID,.interface_major=1,.name_bytes=sizeof(CB_KEYBOARD_NAME)-1};struct cb_description d={.version={sizeof(d),1,0},.interface=CB_KEYBOARD_INTERFACE_ID,.interface_major=1,.operation_count=2,.facts_bytes=2};
     size_t offset=sizeof(p)+p.name_bytes+sizeof(d);const char *names[]={"read","state"};

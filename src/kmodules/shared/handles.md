@@ -101,3 +101,12 @@ and source-buffer mutation after capture.
 Disposable tests can replace this module with an instrumented variant exposing
 `handles.profile` to the trusted test owner only. Candidate exports and code have
 no profiler. See [phase measurements and concurrency acceptance](../../tests/handle-profiling.md).
+
+
+Provider admission context now also carries a kernel-authenticated caller process
+ID and OS-bound installation ID, alongside the existing input domain/grant time.
+`interfaces/admission.h` parses that canonical context; it is not caller payload.
+The keyboard provider uses the shared parser, preserving its grant-time filtering.
+Native kernel-resource calls reserve their copied result buffer before mutation.
+A valid provider BAD_REQUEST is a completed error result; normalization framing
+is validated separately so provisional timeouts can be replaced and released.

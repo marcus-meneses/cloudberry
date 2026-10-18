@@ -4,7 +4,7 @@
 #include "timer.h"
 #include "../../kernel/cpu.h"
 struct context {uintptr_t rsp,xstate;uint64_t space,owner;uintptr_t entry_stack;};
-struct thread {struct thread *next;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;kernel_surface_call entry;uintptr_t args[6];};
+struct thread {struct thread *next;uint64_t joining;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;kernel_surface_call entry;uintptr_t args[6];};
 struct local {struct context dispatcher;struct thread *current;uint64_t dispatching;struct thread_timing timing;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;size_t count;uint64_t serial;struct thread *head,*tail;struct local *cpus;struct xstate_info xstate;kernel_surface_call fp_init,fp_save,fp_restore,aligned,cpu,alloc,free,stack_alloc,stack_free,arm,now,space_pin,space_switch,user_stack;} state;
 extern void threads_switch(struct context *,const struct context *) __attribute__((visibility("hidden")));
@@ -96,11 +96,19 @@ static void wake_due(uint64_t now) {
     }
 }
 /* Called under the list lock, after root/context restoration and current clear. */
-static void finish_suspend(struct thread *t) {
+static void finish_suspend(struct thread *t,uint64_t ready_time,int ready_valid) {
     if(status(t)==THREAD_BLOCKING) {
         if(t->wake_pending){t->wake_pending=0;t->wake_ns=0;set_status(t,THREAD_RUNNABLE);}
         else set_status(t,THREAD_BLOCKED);
-    }else if(status(t)==THREAD_EXITING)set_status(t,THREAD_EXITED);
+    }else if(status(t)==THREAD_EXITING){
+        set_status(t,THREAD_EXITED);
+        /* Joiners own an embedded wait registration. Credit a concurrent block
+           before waking, and retain the target until each joiner observes exit. */
+        for(struct thread *w=state.head;w;w=w->next)if(w->joining==t->info.id){
+            if(status(w)==THREAD_BLOCKED){w->wake_ns=0;w->ready_ns=ready_time;w->ready_valid=ready_valid;set_status(w,THREAD_RUNNABLE);call(state.cpu,CPU_WAKE,w->info.cpu,0);}
+            else w->wake_pending=1;
+        }
+    }
 }
 struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !a || call(state.cpu,CPU_DEPTH,0,0).value) return module_result(0,0);
@@ -127,13 +135,22 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         t->ready_ns=ready_time.value;t->ready_valid=!ready_time.status;
         uint64_t transition=enter();
         __atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);
-        finish_suspend(t);
+        finish_suspend(t,ready_time.value,!ready_time.status);
         leave(transition);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");++done;
     }
     cpu->dispatching=0;return module_result(done,1);
 }
 struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub) return module_result(0,0);
+    if(a==THREAD_WAIT){
+        uint64_t interrupt_flags;__asm__ volatile("pushfq;pop %0":"=r"(interrupt_flags));
+        if(!(interrupt_flags&512) || call(state.cpu,CPU_DEPTH,0,0).value)return module_result(0,0);
+        for(;;){uint64_t saved=enter();struct thread *self=state.cpus[current_cpu()].current,*target=state.head;while(target && target->info.id!=b)target=target->next;
+            if(!self || !target || self==target || status(target)==THREAD_REAPING){if(self)self->joining=0;leave(saved);return module_result(0,0);}
+            if(status(target)==THREAD_EXITED){self->joining=0;leave(saved);return module_result(1,1);}
+            self->joining=b;leave(saved);suspend(THREAD_BLOCKED,0);
+        }
+    }
     if(a==THREAD_YIELD || a==THREAD_BLOCK || a==THREAD_BLOCK_UNTIL) {
         uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags)::"memory");
         if(!(flags&512))return module_result(0,0);
@@ -154,6 +171,7 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
     if(a==THREAD_INFO && c) {*(struct thread_info *)c=(struct thread_info){t->info.id,t->info.process_id,t->info.cpu,status(t),t->info.switches,t->info.result};ok=1;}
     if(a==THREAD_WAKE && (status(t)==THREAD_RUNNING || status(t)==THREAD_RUNNABLE || status(t)==THREAD_BLOCKING)) {t->wake_pending=1;ok=1;}
     if(a==THREAD_WAKE && status(t)==THREAD_BLOCKED) {struct kernel_surface_result time=call(state.now,0,0,0);t->ready_ns=time.value;t->ready_valid=!time.status;t->wake_ns=0;set_status(t,THREAD_RUNNABLE);call(state.cpu,CPU_WAKE,t->info.cpu,0);ok=1;}
+    if(a==THREAD_REAP){for(struct thread *w=state.head;w;w=w->next)if(w->joining==b){leave(flags);return module_result(0,0);}}
     if(a==THREAD_REAP && status(t)==THREAD_EXITED && __atomic_load_n(&state.cpus[t->info.cpu].current,__ATOMIC_ACQUIRE)!=t) {
         /* Keep the record discoverable, but exclusively owned by this reaper.
          * Stack invalidation and sanitization must not hold the thread-list lock. */

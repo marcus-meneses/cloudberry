@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include "../kmodules/shared/handles.c"
 static long remaining=-1,blocks;
+static unsigned native_calls;
+static struct kernel_surface_result io_stub(MODULE_ARGS){MODULE_UNUSED();struct io_invocation *r=(void *)a;assert(r->capacity>=8);++native_calls;uint64_t value=123;memcpy(r->output,&value,8);r->actual=8;r->status=CB_OK;return module_result(1,1);}
 static struct kernel_surface_result heap_alloc(MODULE_ARGS){MODULE_UNUSED();if(remaining==0)return module_result(0,0);if(remaining>0)--remaining;void *p=calloc(b,c);if(p)++blocks;return module_result((uintptr_t)p,p!=NULL);}
 static struct kernel_surface_result heap_free(MODULE_ARGS){MODULE_UNUSED();assert(b && blocks>0);free((void *)b);--blocks;return module_result(1,1);}
 static struct kernel_surface_result cpu_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
@@ -48,6 +50,10 @@ int main(void){
     release(response);drop_request(owned);assert(blocks==request_blocks);
     remaining=1;assert(invoke(policy(2),(void *)&reflected_call,sizeof(reflected_call),&response,&response_bytes,0)==CB_RESOURCE_FAILURE);remaining=-1;
     assert(state.requests && state.requests->failure==CB_RESOURCE_FAILURE);drop_request(state.requests);assert(blocks==request_blocks);
+    struct {struct cb_call_header h;uint64_t payload;} native={.h={.version={sizeof(struct cb_call_header),1,0},.handle=cap->id,.interface=interface,.operation=1,.payload_bytes=8}};
+    cap->publication->kernel=2;state.io=io_stub;
+    remaining=1;assert(invoke(policy(2),(void *)&native,sizeof(native),&response,&response_bytes,0)==CB_RESOURCE_FAILURE && !native_calls);remaining=-1;assert(state.requests && !state.requests->dispatched);drop_request(state.requests);assert(blocks==request_blocks);
+    remaining=3;assert(invoke(policy(2),(void *)&native,sizeof(native),&response,&response_bytes,0)==CB_OK && native_calls==1 && remaining==0);remaining=-1;release(response);drop_request(state.requests);assert(blocks==request_blocks);cap->publication->kernel=0;
     assert(!handles_surface_channel(2,88,32,0,0,0).status);uint64_t data[2]={123,456};const struct cb_interface_id io=CB_IO_INTERFACE_ID;
     long mailbox_blocks=blocks;assert(!handles_surface_post(2,88,(uintptr_t)data,sizeof(data),(uintptr_t)&io,1).status);assert(blocks==mailbox_blocks);assert(handles_surface_post(2,88,(uintptr_t)data,sizeof(data),(uintptr_t)&io,1).status);
     unsigned char *notification=NULL;size_t notification_bytes=0;assert(receive(policy(2),0,&notification,&notification_bytes,1)==CB_BUFFER_TOO_SMALL && !notification);
@@ -59,6 +65,13 @@ int main(void){
     unsigned char *retained=failure.reply;remaining=0;assert(error_result(&failure,CB_PROVIDER_FAILED,CB_OUTCOME_UNKNOWN,NULL,0)==CB_RESOURCE_FAILURE && failure.failure==CB_RESOURCE_FAILURE && failure.reply==retained);remaining=-1;
     struct cb_reply_header normalized;copy_bytes(&normalized,failure.reply,sizeof(normalized));assert(normalized.result_bytes==8 && !memcmp(failure.reply+sizeof(normalized),&anchor,8));
     struct cb_error_header detail;copy_bytes(&detail,failure.reply+sizeof(normalized)+8,sizeof(detail));assert(detail.original_payload_bytes==3 && !memcmp(failure.reply+sizeof(normalized)+8+sizeof(detail),"abc",3) && detail.trace_bytes);release(failure.reply);
+    /* A dispatched provider BAD_REQUEST must complete, including replacement
+       of a provisional timeout. */
+    struct request *bad_request=allocate(sizeof(*bad_request)+sizeof(captured_call));assert(bad_request);bad_request->input=(void *)(bad_request+1);bad_request->bytes=sizeof(captured_call);copy_bytes(bad_request->input,captured_call,sizeof(captured_call));bad_request->publication=cap->publication;++cap->publication->refs;bad_request->pid=2;bad_request->cap=cap->id;bad_request->provider=1;bad_request->id=(struct cb_request_id){2,serial()};bad_request->dispatched=1;state.requests=state.request_tail=bad_request;
+    assert(error_reply(bad_request,CB_TIMEOUT,CB_OUTCOME_UNKNOWN)==CB_TIMEOUT);
+    struct cb_reply_header provider_error={.version={sizeof(provider_error),1,0},.request=bad_request->id,.status=CB_BAD_REQUEST,.outcome=CB_NOT_COMMITTED,.provider_epoch=cap->publication->epoch};
+    assert(respond(policy(1),(const void *)&provider_error,sizeof(provider_error))==CB_OK && bad_request->completed && bad_request->done && !bad_request->failure);
+    drop_request(bad_request);
     assert(!handles_surface_decommission(1,0,0,0,0,0).status && cap->publication->dead);
     assert(receive(policy(1),0,&notification,&notification_bytes,CB_FRAME_LIMIT)==CB_OK);copy_bytes(&delivered,notification,sizeof(delivered));assert(!delivered.call.handle && delivered.call.operation==CB_HANDLE_RELEASE && delivered.call.flags==(CB_CALL_SYSTEM_EVENT|CB_CALL_PROVIDER_DELIVERY));release(notification);
     assert(!CALL(handles_surface_exit,1,0,0).status && cap->publication->dead);assert(!CALL(handles_surface_exit,2,0,0).status);assert(!state.policies && !state.caps && !state.publications && !state.requests && blocks==0);

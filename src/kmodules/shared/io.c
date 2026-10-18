@@ -1,4 +1,5 @@
 #include "io.h"
+#include "io-process.h"
 #include "process.h"
 #include "threads.h"
 #include "usb.h"
@@ -71,7 +72,7 @@ struct kernel_surface_result io_surface_init(MODULE_ARGS){
 #define BIND(field,name) do{state.field=kernel_surface_find(hub,name);if(!state.field)return module_result(0,0);}while(0)
     BIND(alloc,"mem.calloc");BIND(free,"mem.free");BIND(cpu,"cpu.control");BIND(thread,"threads.control");BIND(create,"threads.create");BIND(clock,"clock.now_ns");BIND(device,"usb.device");BIND(interface,"usb.interface");BIND(endpoint,"usb.endpoint");BIND(claim,"usb.claim");BIND(release,"usb.release");BIND(control,"usb.control");BIND(transfer,"usb.transfer");BIND(cancel,"usb.cancel");BIND(watch,"usb.watch");BIND(channel,"handles.channel");BIND(post,"handles.post");BIND(unsubscribe,"handles.unsubscribe");BIND(process_info,"process.info");
 #undef BIND
-    state.hub=hub;state.heap=b;return module_result(1,1);
+    state.hub=hub;state.heap=b;return module_result(1,io_process_init(hub,b));
 }
 static cb_status_t close_subscription(struct subscription *s,int wait){
     uint64_t flags=lock();__atomic_store_n(&s->stop,1,__ATOMIC_RELEASE);uint64_t tid=s->thread;int active=s->active;unlock(flags);
@@ -86,6 +87,7 @@ static cb_status_t close_subscription(struct subscription *s,int wait){
 struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !state.hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
     if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(state.clock,0,0,0).value;copy(r->output,&time,8);r->actual=8;r->status=CB_OK;}return module_result(1,1);}
+    if(io_process_invoke(r))return module_result(1,1);
     struct process_info process;if(CALL(state.process_info,r->process,&process,0).status || process.cpu || CALL(state.cpu,CPU_CURRENT,0,0).value){r->status=CB_DENIED;return module_result(1,1);}
     if(r->operation==CB_IO_KEYBOARD_SUBSCRIBE && !r->bytes && r->capacity>=8){
         uint64_t flags=lock();for(struct subscription *s=state.first;s;s=s->next)if(s->pid==r->process){unlock(flags);r->status=CB_BUSY;return module_result(1,1);}if(state.serial==UINT64_MAX){unlock(flags);r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}uint64_t id=++state.serial;unlock(flags);
@@ -106,7 +108,7 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     unlock(flags);if(r->operation==CB_IO_KEYBOARD_CLOSE)r->status=close_subscription(s,1);return module_result(1,1);
 }
 struct kernel_surface_result io_surface_exit(MODULE_ARGS){
-    MODULE_UNUSED();if(!state.hub)return module_result(1,1);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;unlock(flags);if(!s)return module_result(1,1);
+    MODULE_UNUSED();if(!state.hub)return module_result(1,1);cb_status_t children=io_process_exit(a);if(children)return module_result(children,0);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;unlock(flags);if(!s)return module_result(1,1);
     if(CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
     cb_status_t result=close_subscription(s,0);return module_result(result,result==CB_OK);
 }
