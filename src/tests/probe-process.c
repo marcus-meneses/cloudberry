@@ -25,8 +25,10 @@ static int finished(const struct kernel_surfaces *hub,uint64_t id,uint64_t deadl
     while(CALL(reap,id,0,0).status){uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}++probe->completed;return 1;
 }
 static void number(uint64_t value){char digits[24];unsigned n=0;do{digits[n++]='0'+value%10;value/=10;}while(value);while(n)__asm__ volatile("outb %0,$0xe9"::"a"(digits[--n]));}
+#include "handle-clock.h"
 static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struct probe_process *probe){
     kernel_surface_call load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),cpu=kernel_surface_find(hub,"cpu.control"),clock_info=kernel_surface_find(hub,"clock.info");
+    if(!clock_diagnostic(hub,1) || !clock_records(hub,probe->cpus))return 0;
     uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000),ids[2];struct process_request r={.abi=1,.filesystem=filesystem,.path="/boot/system/drivers/handle-bench.elf",.stack_bytes=131072};
     for(unsigned i=0;i<2;++i){r.cpu=i && probe->cpus>1?1:0;r.argument=i?0:1;struct kernel_surface_result p=CALL(load,&r,0,0);if(p.status || !admit_file(hub,filesystem,p.value,i?"/boot/system/drivers/bench-client.json":"/boot/system/drivers/bench-server.json"))return 0;ids[i]=p.value;}
     if(CALL(start,ids[0],0,0).status)return 0;
@@ -36,6 +38,7 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
     struct clock_info before,after;if(CALL(clock_info,&before,0,0).status || CALL(start,ids[1],0,0).status)return 0;
     struct process_info client;for(;;){if(CALL(info,ids[1],&client,0).status)return 0;if(client.state==PROCESS_EXITED || client.state==PROCESS_FAULTED)break;uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}
     probe->app_code=client.exit_code;struct handle_bench_report report;if(client.state!=PROCESS_EXITED || kernel_surface_find(hub,"process.copy")(ids[1],client.exit_code,(uintptr_t)&report,sizeof(report),0,0).status || report.magic!=HB_MAGIC || report.cases!=HB_CASES || report.samples!=HB_SAMPLES || CALL(clock_info,&after,0,0).status)return 0;
+    if(!clock_diagnostic(hub,2))return 0;
     if(before.source!=after.source || before.tsc_hz!=after.tsc_hz || before.calibrations!=after.calibrations)return 0;
     text("MEASURE handles clock ");number(before.source);text(" ");number(before.tsc_hz);text(" ");number(before.calibrations);text("\n");
     for(unsigned kind=0;kind<HB_CASES;++kind){text("MEASURE handles samples ");number(kind);for(unsigned trial=0;trial<HB_SAMPLES;++trial){text(" ");number(report.ns[kind][trial]);}text("\n");}
@@ -48,6 +51,7 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
 struct kernel_surface_result probe_process_call(MODULE_ARGS){
     MODULE_UNUSED();struct probe_process *probe=(void *)a;const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     kernel_surface_call boot_info=kernel_surface_find(hub,"bootstrap.info"),load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),pages=kernel_surface_find(hub,"mem.pages_info");
+    CHECK(clock_diagnostic(hub,0));
     struct bootstrap_info volume;uint64_t boot_deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
     for(;;){CHECK(!CALL(boot_info,&volume,0,0).status);if(volume.state==BOOTSTRAP_READY)break;CHECK(volume.state!=BOOTSTRAP_FAILED && volume.state!=BOOTSTRAP_DISCONNECTED && CALL(clock,0,0,0).value<boot_deadline);CHECK(!CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     struct mem_pages_info before,after;CHECK(!CALL(pages,&before,0,0).status);

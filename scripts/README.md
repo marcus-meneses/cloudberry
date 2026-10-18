@@ -97,3 +97,16 @@ Host comparisons use stable CPU vendor/model/features/microcode, excluding the
 instantaneous CPU MHz reading. Image hashes stream through bounded host buffers.
 The collector also covers user SSE/available AVX preservation, generic startup
 data and explicit provider fault/restart cleanup as part of each correctness boot.
+
+When native timing is rejected, inspect each run's `timing.json` and the report's
+`handles.clock_diagnostics` (origin/begin/end) and `handles.clock_profile`. They
+separate boot qualification rejection from runtime fallback and retain raw SMP
+samples/offsets. Correctness success is recorded independently. For the current
+four-CPU AMD-Vi clock investigation, collect one diagnostic run first:
+
+```sh
+./scripts/bench-handles-kvm.sh --runs 1 --case 4cpu-amd
+```
+
+A complete accepted baseline still requires the full requested topology/repetition
+set with qualified TSC; HPET fallback is never silently accepted as TSC timing.

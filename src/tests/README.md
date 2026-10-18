@@ -784,3 +784,24 @@ keyboard, startup/OOM and status checks pass; parser/host-identity/hash checks
 pass after excluding volatile MHz from reference identity. Candidate bundle
 contents include only the real keyboard executable, descriptor, manifest, config
 and two layouts. Fault/startup-check/benchmark fixtures remain isolated.
+
+KVM session `20261018T060145.736826Z` passes all three one-CPU correctness/timing
+boots with TSC. Its first four-CPU AMD-Vi correctness boot also passes, but uses
+HPET (source 2, calibration 3), with zero unavailable profiling samples. The
+collector correctly rejects this mixed-clock baseline. The original log omitted
+SMP rejection/runtime fallback reasons, so it cannot establish why TSC was not
+active. This session remains failed and is not promoted to a complete baseline.
+
+The process probe now records clock source/reason at origin, measurement begin
+and end, plus SMP qualification reason/CPU/status/sample counts and bounds. Raw
+frequency samples/call costs, signed groups, offset groups and TSC exchanges are
+retained under handles.clock_profile. These are observations of existing records;
+no calibration, acceptance limit, health guard or production clock behavior changes.
+The raw qualification dump precedes the metrics reset; phase snapshots remain
+outside the timed operation loop.
+The host parser checks framing/indexes/duplicates and decodes signed quantities;
+reported rejection distinguishes fallback from unavailable profiling samples.
+Each boot gets timing.json and completed correctness boots remain visible in a
+failed session summary. Seven host checks and four-CPU TCG boot
+`dba210e7ea9b461a8b2b3ce0f603fe0c` pass. TCG rejects invariant-TSC availability
+as expected; native qualification records require the user-host rerun.

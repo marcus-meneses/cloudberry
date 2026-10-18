@@ -13,6 +13,7 @@ import tarfile
 import os
 import platform
 import statistics
+from handle_report import native_timing_error
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,7 +97,10 @@ def main():
                     if r.get('status')!='passed' or r.get('accelerator')!=args.accel or r.get('cpus')!=cpus or r.get('iommu')!=iommu:raise RuntimeError('guest acceptance identity mismatch')
                     if 'handles' not in r:raise RuntimeError('missing handle measurements')
                     h=r['handles']
-                    if args.accel=='kvm' and (h['clock']['source']!=1 or any(m['unavailable_samples'] for m in h['locks'])):raise RuntimeError('native timing requires stable qualified TSC and available profiling samples; inspect the saved guest log')
+                    summary.setdefault('completed_boots',[]).append(dict(case=case,repetition=repeat,run_id=r['run_id'],correctness='passed',clock=h['clock']))
+                    error=native_timing_error(h) if args.accel=='kvm' else None
+                    write(target/'timing.json',dict(accepted=error is None,reason=error,clock=h['clock'],diagnostics=h.get('clock_diagnostics')))
+                    if error:raise RuntimeError(error)
                     reports.append(r)
                 summary['cases'][case]={name:dict(median_of_boot_medians=statistics.median(r['handles']['measurements'][name]['median'] for r in reports),boot_medians=[r['handles']['measurements'][name]['median'] for r in reports]) for name in reports[0]['handles']['measurements']}
             if source!=fingerprint() or any(digest(build/n)!=value for n,value in identities.items()):raise RuntimeError('sources/binaries changed during measurements')

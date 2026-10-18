@@ -687,3 +687,12 @@ no keyboard implementation include or configuration interpretation. Public statu
 contains only stable aggregate/copy values, with explicit private-record release.
 The remaining validation for priority 2 is user-host KVM collection through
 scripts/bench-handles-kvm.sh; no performance optimization is claimed from TCG.
+
+Native handle session `20261018T060145.736826Z`: three single-CPU TSC runs pass;
+the first four-CPU AMD-Vi correctness run passes on HPET and the timing gate
+rejects it. No profiling samples are unavailable. Root cause is unclassified
+because that revision omitted qualification/runtime diagnostics. The isolated
+probe/parser now preserve both reasons and raw qualification records, with
+phase snapshots and explicit rejection messages. A targeted native four-CPU run
+is required before clock changes or performance optimization; production clock
+selection/health acceptance remains unchanged.
