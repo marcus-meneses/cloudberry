@@ -975,12 +975,18 @@ test-handles:
 $(BUILD)/apps/keyboard.elf: interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json)
+$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-installations.py
 	rm -rf $(BUILD)/src-handler-bundles
-	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts
+	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
 	cp handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(BUILD)/src-handler-bundles/keyboard/
 	cp handlers/keyboard/layouts/*.json $(BUILD)/src-handler-bundles/keyboard/layouts/
+	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
+	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
+	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
+	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
+	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
+	@touch $(BUILD)/src-handler-bundles/applications/initial.bin
 	@touch $@
 .PHONY: test-keyboard
 test-keyboard:
@@ -1036,3 +1042,13 @@ $(BUILD)/tests/apps/handle-stress.elf: tests/apps/handle-stress.c sdk/system.c s
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/handle-stress.c sdk/system.c -o $@
 _test-process-boot: $(BUILD)/tests/apps/handle-stress.elf
+
+$(BUILD)/apps/applications.elf: handlers/applications/applications.c sdk/system.c sdk/system.h sdk/application.ld interfaces/applications.h interfaces/admission.h interfaces/installations.h interfaces/startup.h interfaces/io.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/applications/applications.c sdk/system.c -o $@
+$(BUILD)/apps/launch.elf: interfaces/startup.h interfaces/handle.h interfaces/system.h interfaces/memory.h apps/launch/launch.c sdk/system.c sdk/system.h sdk/application.h sdk/application.ld interfaces/applications.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld apps/launch/launch.c sdk/system.c -o $@
+$(BUILD)/apps/true.elf: interfaces/startup.h interfaces/handle.h interfaces/system.h interfaces/memory.h apps/true/true.c sdk/system.c sdk/system.h sdk/application.h sdk/application.ld interfaces/applications.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld apps/true/true.c sdk/system.c -o $@

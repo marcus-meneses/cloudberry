@@ -6,9 +6,11 @@
 #include "threads.h"
 #include "provider-definition.h"
 #include "../../interfaces/startup.h"
+#include "../../interfaces/installations.h"
 #include "../../kernel/cpu.h"
 struct application {struct application *next;uint64_t process;uint32_t state,error;char *bundle,*ready;};
 static struct {struct application *first;const struct kernel_surfaces *hub;uintptr_t heap;unsigned operation;struct bootstrap_apps_info info;
+    void *catalog;
     kernel_surface_call alloc,free,stat,read,load,admit,start,reap,process_info,thread,create,clock,cpu,inspect;} apps;
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 static void *allocate(size_t n){struct kernel_surface_result r=CALL(apps.alloc,apps.heap,1,n);return r.status?NULL:(void *)r.value;}
@@ -52,8 +54,16 @@ static void refresh(struct application *record){
     else if(!*record->ready || (!CALL(apps.inspect,record->ready,&publication,0).status && publication.process==record->process)){record->state=3;record->error=0;}
     else if(record->state==3){record->state=4;record->error=3;}
 }
+static int installations(uint64_t filesystem){
+    if(apps.catalog)return 1;
+    const struct config_value *base=config("config.drivers.directory",CONFIG_STRING);if(!base)return 0;
+    size_t bytes=0;void *catalog=bundle_file(filesystem,base->data,"installed.bin",&bytes);
+    if(!catalog)return 1; /* Trusted low-level fixture/provider loading remains available. */
+    kernel_surface_call install=kernel_surface_find(apps.hub,"io.installations");
+    if(!install || !cb_install_valid(catalog,bytes) || CALL(install,filesystem,catalog,bytes).status){release(catalog);return 0;}apps.catalog=catalog;return 1;
+}
 static struct kernel_surface_result launch(uint64_t filesystem,const char *bundle){
-    if(!bundle || !pd_path(bundle,1))return module_result(0,0);
+    if(!installations(filesystem) || !bundle || !pd_path(bundle,1))return module_result(0,0);
     for(const struct application *p=apps.first;p;p=p->next)if(pd_same(p->bundle,bundle))return module_result(0,0);
     const struct config_value *base=config("config.drivers.directory",CONFIG_STRING);if(!base)return module_result(0,0);
     char *directory=path(base->data,bundle),*definition=NULL,*program=NULL;void *manifest=NULL,*packet=NULL;struct application *record=NULL;
@@ -65,9 +75,15 @@ static struct kernel_surface_result launch(uint64_t filesystem,const char *bundl
     if(!record)goto done;
     record->bundle=string(bundle);record->ready=string(d.ready?d.ready:"");record->state=2;
     if(!program || !manifest || !manifest_bytes || !packet || !record->bundle || !record->ready)goto done;
-    error=4;struct process_request request={.abi=2,.cpu=d.cpu,.filesystem=filesystem,.path=program,.stack_bytes=d.stack_bytes,.startup=packet,.startup_bytes=packet_bytes};struct kernel_surface_result loaded=CALL(apps.load,&request,0,0);pid=loaded.value;if(loaded.status)goto done;
-    error=5;struct handle_policy policy={.process=pid,.manifest=manifest,.bytes=manifest_bytes};copy(policy.identity.installation_id,d.identity,16);
-    if(CALL(apps.admit,&policy,0,0).status)goto done;
+    error=4;struct cb_install_record installed;const unsigned char *installed_name=apps.catalog?cb_install_find(apps.catalog,bundle,length(bundle),NULL,&installed):NULL;
+    if(installed_name){
+        if((installed.flags!=CB_INSTALL_PROVIDER && installed.flags!=CB_INSTALL_MANAGER) || installed.cpu!=d.cpu || installed.stack_bytes!=d.stack_bytes || !cb_install_equal(installed.installation,d.identity,16) || installed.path_bytes!=length(program) || !cb_install_equal(installed_name+installed.name_bytes,program,installed.path_bytes) || installed.manifest_bytes!=manifest_bytes || !cb_install_equal(installed_name+installed.name_bytes+installed.path_bytes,manifest,manifest_bytes))goto done;
+        kernel_surface_call installed_load=kernel_surface_find(apps.hub,"io.installed_load");if(!installed_load)goto done;struct kernel_surface_result loaded=CALL(installed_load,bundle,packet,packet_bytes);pid=loaded.value;if(loaded.status)goto done;
+    }else{
+        struct process_request request={.abi=2,.cpu=d.cpu,.filesystem=filesystem,.path=program,.stack_bytes=d.stack_bytes,.startup=packet,.startup_bytes=packet_bytes};struct kernel_surface_result loaded=CALL(apps.load,&request,0,0);pid=loaded.value;if(loaded.status)goto done;
+        error=5;struct handle_policy policy={.process=pid,.manifest=manifest,.bytes=manifest_bytes};copy(policy.identity.installation_id,d.identity,16);
+        if(CALL(apps.admit,&policy,0,0).status)goto done;
+    }
     error=6;if(CALL(apps.start,pid,0,0).status)goto done;
     ok=1;
 done:

@@ -11,4 +11,4 @@ drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
 drivers.modules=
 
 # Provider bundle basenames in startup order; empty starts none.
-boot.providers=keyboard
+boot.providers=keyboard,applications

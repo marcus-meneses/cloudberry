@@ -3,8 +3,9 @@
 The headers define the public C ABI. Initial protected processes, copied handle
 mediation, boot-policy JSON authorization and the C system library are implemented;
 see [handles](../kmodules/shared/handles.md). These interfaces never expose the
-kmodule hub. Sections below describe the complete target contract; vows, installed
-application identity, interactive approval, automatic safe rebind and C++ wrappers
+kmodule hub. Installed application identity and lifecycle now use a build-owned
+catalog and privileged userland provider. Sections below describe the complete
+target contract; vows, interactive approval, automatic safe rebind and C++ wrappers
 are not implemented by the initial boot-provider milestone.
 
 ## Identity, discovery and reflection
@@ -165,3 +166,16 @@ authority. The keyboard provider selects/interprets its own config/layout within
 that envelope. This is separate from handle invocation and from format3 kmodule
 initialization. Conventional argv/environment and runtime bundle filesystem access
 remain future work.
+
+
+## Installed application lifecycle
+
+`applications.h` defines launch/info/wait/stop/release frames for `/@applications`.
+`installations.h` defines the immutable OS catalog; `sdk/application.h` validates
+readonly argv/cwd startup data. `admission.h` decodes the broker-generated caller
+PID, installation ID and grant time. No payload field can replace those identities.
+Launch authority additionally requires the installation's launcher role; child
+operations require the caller owner. This initial installed policy is bound to the
+trusted read-only image, without a general installer, sessions or signature checks.
+The [applications provider](../handlers/applications/README.md) owns runtime policy;
+`/@io` only bridges the catalog-bound process execution and completion mechanisms.

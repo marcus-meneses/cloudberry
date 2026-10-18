@@ -1,0 +1,38 @@
+[
+  {
+    "name": "keyboard",
+    "executable": "/boot/system/drivers/keyboard/keyboard.elf",
+    "manifest": "keyboard/manifest.json",
+    "installation_id": "636c6f756462657272792e6b62643100",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "applications",
+    "executable": "/boot/system/drivers/applications/applications.elf",
+    "manifest": "applications/manifest.json",
+    "installation_id": "636c6f756462657272792e6170707300",
+    "flags": 4,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "launch",
+    "executable": "/boot/system/drivers/launch/launch.elf",
+    "manifest": "launch/manifest.json",
+    "installation_id": "636c6f756462657272792e6c61756e00",
+    "flags": 3,
+    "cpu": 0,
+    "stack_bytes": 131072
+  },
+  {
+    "name": "true",
+    "executable": "/boot/system/drivers/true/true.elf",
+    "manifest": "true/manifest.json",
+    "installation_id": "636c6f756462657272792e7472756500",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 65536
+  }
+]

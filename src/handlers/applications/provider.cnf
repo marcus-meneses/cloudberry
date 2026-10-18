@@ -1,0 +1,8 @@
+version=1
+executable=applications.elf
+manifest=manifest.json
+ready=/@applications
+installation_id=636c6f756462657272792e6170707300
+cpu=0
+stack_bytes=262144
+files=catalog.bin,initial.bin

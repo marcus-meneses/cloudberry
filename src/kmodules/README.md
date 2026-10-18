@@ -90,3 +90,10 @@ programming/tracked DMA; iommu provides translated requester domains; NVMe owns 
 Sources live in shared/, intel/ and amd/. Only selected CPU/IOMMU alternatives
 are mapped at boot; [portability contracts](shared/portability.md) document selection,
 shared interfaces and hardware acceptance limits.
+
+
+The I/O module now also contains `shared/io-process.c`, the catalog-bound process
+execution/notification bridge. Lifecycle policy lives in the privileged userland
+[applications handler](../handlers/applications/README.md), not in bootstrap or a
+new kernel application-manager module. `THREAD_WAIT` adds allocation-free join
+registration and wake-driven full-thread completion before owned reap.
