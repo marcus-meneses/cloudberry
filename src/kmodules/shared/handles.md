@@ -215,3 +215,14 @@ operations. `handles.owner_watch` preallocates owner-exit mailboxes used for
 abandoned graphics-surface reclamation; notifications never contain kernel pointers.
 File mutation resource failures are reported with unknown outcome conservatively.
 The normal broker variant contains no test profiling exports.
+
+
+The appended system-gate operations SUBMIT, COLLECT and WAIT implement copied
+provider-call submission, nonblocking retained-result retrieval and wait-any.
+Existing operation numbers and synchronous INVOKE behavior are unchanged.
+Wait registrations are stack-owned under CPU_ENTER. Reply/failure, endpoint
+removal and pipe transitions wake matching registrations; wake credits close the
+unlock/block race. Every wake re-resolves process-local IDs, so no reclaimable
+request/capability/stream pointer is retained across sleep. Waits validate all
+items and return the first ready index without consuming or reserving anything.
+A wait deadline does not cancel submitted work. See [stream SDK](../../sdk/streams.md).

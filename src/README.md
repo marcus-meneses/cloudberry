@@ -278,7 +278,7 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
 | Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures, sessions, forced termination or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
-| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and 10 ms UI multiplexing; no native GPU/window/session model |
+| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU/window/session model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, boot-keyboard HID provider implemented; general HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations and an application-facing filesystem provider with file streams | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
@@ -530,6 +530,7 @@ src/
 │   │   ├── ext4-fs.json
 │   │   ├── ext4-fs.md
 │   │   ├── hwenum-module.c
+│   │   ├── handles-wait.inc
 │   │   ├── handles-stream.inc
 │   │   ├── handles.c
 │   │   ├── handles.h
@@ -690,6 +691,7 @@ src/
 │   ├── graphics-present.c
 │   ├── display-copy.c
 │   ├── streams.c
+│   ├── waitset.c
 │   ├── apps/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json

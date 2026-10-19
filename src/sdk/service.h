@@ -16,6 +16,23 @@ static inline cb_status_t cb_invoke(struct cb_client *c,cb_handle_t handle,struc
     if(reply.request.serial){cb_status_t forgotten=cb_system_request_release(reply.request);if(forgotten==CB_BUSY){c->pending=reply.request;c->pending_handle=handle;c->attempt=h.attempt;}else {c->pending=(struct cb_request_id){0};if(forgotten!=CB_OK)return forgotten;}}
     return status;
 }
+/* Submission keeps one owned request per client. Collect is nonblocking and
+ * never resubmits; wait-any can observe this request alongside pipe readiness. */
+static inline cb_status_t cb_submit(struct cb_client *c,cb_handle_t handle,struct cb_interface_id interface,unsigned op,const void *p,size_t n){
+    if(c->pending.serial)return CB_BUSY;
+    if(n>CB_FRAME_LIMIT-sizeof(struct cb_call_header)-512)return CB_BAD_REQUEST;
+    struct cb_call_header h=cb_call(handle,interface,op,n);cb_copy(c->frame,&h,sizeof(h));cb_copy(c->frame+sizeof(h),p,n);
+    struct cb_request_id id={0};cb_status_t status=cb_system_submit(c->frame,sizeof(h)+n,&id);
+    if(!status){c->pending=id;c->pending_handle=handle;c->attempt=0;}return status;
+}
+static inline cb_status_t cb_collect(struct cb_client *c){
+    if(!c->pending.serial)return CB_BAD_REQUEST;
+    cb_status_t status=cb_system_collect(c->pending,c->result,sizeof(c->result),&c->bytes);
+    if(status==CB_WOULD_BLOCK || status==CB_BUFFER_TOO_SMALL || c->bytes<sizeof(struct cb_reply_header))return status;
+    cb_status_t forgotten=cb_system_request_release(c->pending);
+    if(forgotten==CB_OK)c->pending=(struct cb_request_id){0};
+    return forgotten!=CB_OK?forgotten:status;
+}
 static inline void *cb_result(struct cb_client *c){return c->result+sizeof(struct cb_reply_header);}
 static inline cb_handle_t cb_acquire(const char *name,struct cb_interface_id id){cb_handle_t h=0;CB_REQUIRE(cb_system_get_handle(name,cb_length(name),&id,1,0,&h)==CB_OK);return h;}
 static inline cb_status_t cb_respond(struct cb_client *c,const struct cb_delivery_header *d,cb_status_t status,const void *p,size_t n){

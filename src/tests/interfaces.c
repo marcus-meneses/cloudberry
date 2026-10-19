@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../interfaces/keyboard.h"
+#include "../interfaces/system.h"
 #include "../interfaces/startup.h"
 #include "../interfaces/installations.h"
 #include "../interfaces/admission.h"
@@ -16,6 +17,8 @@
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_wait_item)==32,"wait item");
+ABI_ASSERT(CB_SYSTEM_STANDARD==8 && CB_SYSTEM_WAIT==11,"appended gate operations");
 ABI_ASSERT(sizeof(struct cb_application_launch_streams)==64,"stdio launch");
 ABI_ASSERT(sizeof(struct cb_stream_read)==16,"stream read");
 ABI_ASSERT(sizeof(struct cb_graphics_draw)==48,"graphics draw");

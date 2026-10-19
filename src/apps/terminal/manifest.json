@@ -1,1 +1,57 @@
-{"version": 1, "resources": [{"name": "/@memory", "scope": "self", "operations": ["allocate", "free"]}, {"name": "/@keyboard", "scope": "boot-input", "operations": ["read", "state"]}, {"name": "/@text", "operations": ["info", "clear", "write", "cell"]}, {"name": "/@applications", "operations": ["launch", "info", "wait", "stop", "release", "list"]}, {"name": "/@streams", "operations": ["pipe", "read", "write"]}, {"name": "/@filesystem", "operations": ["open", "stat", "list"]}, {"name": "/@io", "scope": "self", "operations": ["now_ns"]}]}
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@keyboard",
+      "scope": "boot-input",
+      "operations": [
+        "read",
+        "state"
+      ]
+    },
+    {
+      "name": "/@text",
+      "operations": [
+        "info",
+        "clear",
+        "write",
+        "cell"
+      ]
+    },
+    {
+      "name": "/@applications",
+      "operations": [
+        "launch",
+        "info",
+        "wait",
+        "stop",
+        "release",
+        "list"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "pipe",
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "/@filesystem",
+      "operations": [
+        "open",
+        "stat",
+        "list"
+      ]
+    }
+  ]
+}

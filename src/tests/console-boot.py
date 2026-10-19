@@ -3,10 +3,10 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-if sum((a.startup_only,a.profile_only,a.scroll_only,a.render_only))>1:p.error('choose only one focused run mode')
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+if sum((a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only))>1:p.error('choose only one focused run mode')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
-if (a.kernel or a.profile_only or a.scroll_only or a.render_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
+if (a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
 if a.startup_trace and (not a.startup_only or a.kernel):p.error('--startup-trace requires --startup-only and cannot use --kernel')
 root=pathlib.Path(__file__).resolve().parents[2];build=a.build.resolve();work=root/'bin/tests/console'/uuid.uuid4().hex;work.mkdir(parents=True)
 image=work/'boot.img'
@@ -114,6 +114,21 @@ try:
         pressed=time.monotonic();send_keys([{'type':'qcode','data':'x'}]);wait_for(lambda text:'/ > x' in text,15)
         boot_timing.update(interactive_seconds=time.monotonic()-launched,key_to_echo_seconds=time.monotonic()-pressed,cpus=a.cpus,accelerator=a.accel,storage_devices=a.storage_devices,phase_tracing=a.startup_trace,includes='QEMU launch, firmware, Limine, kernel, providers and first prompt; image preparation excluded',observation='host monotonic clock; prompt/echo detected by framebuffer polling; detection includes polling/decoding delay')
         raise ProfileComplete()
+    if a.wait_only:
+        type_line('graphics-check wake')
+        wait_for(lambda text:'wake stdout' in text and 'wake stderr' in text and text.count('/ >')>=2)
+        type_line('cat')
+        type_line('stdin-wake')
+        wait_for(lambda text:text.count('stdin-wake')>=2)
+        send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':'d'}],.06)
+        wait_for(lambda text:text.count('/ >')>=3)
+        type_line('echo pipeline-wake |> cat')
+        wait_for(lambda text:'\npipeline-wake\n' in text and text.count('/ >')>=4)
+        # Resume after idle with no foreground process and no polling deadline.
+        time.sleep(.2)
+        type_line('pwd')
+        wait_for(lambda text:'\n/\n/ >' in text and text.count('/ >')>=5)
+        raise ProfileComplete()
     if a.scroll_only:
         started=time.monotonic();type_line('graphics-check scroll');wait_for(lambda text:'SCROLL 59\n/ >' in text and all(f'SCROLL {i:02}' in text for i in range(12,60)) and 'SCROLL 00' not in text,90)
         (work/'scroll.json').write_text(json.dumps(dict(wall_seconds=time.monotonic()-started,cpus=a.cpus,accelerator=a.accel),indent=2)+'\n');raise ProfileComplete()
@@ -188,7 +203,7 @@ finally:
     boot_timing['milestones']=milestones
     boot_timing['qemu_command']=command
     (work/'startup.json').write_text(json.dumps(boot_timing,indent=2)+'\n')
-    if status=='passed' and a.fixtures and not a.profile_only and not a.scroll_only and not a.render_only and not a.startup_only:
+    if status=='passed' and a.fixtures and not a.profile_only and not a.scroll_only and not a.render_only and not a.wait_only and not a.startup_only:
         try:
             spec=importlib.util.spec_from_file_location('boot_image',root/'src/tools/build-boot-image.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);partition=next(p for p in module.partitions(image) if p['index']==4);raw=work/'ext4.img'
             with image.open('rb') as source,raw.open('wb') as target:

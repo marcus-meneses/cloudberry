@@ -1012,3 +1012,26 @@ the native pre-shadow run, scrolling is 37.5× faster; clearing did not improve.
 Both runs used HPET after shared-TSC uncertainty rejection. This closes the
 focused native rendering check; physical hardware and stable-TSC acceptance
 remain separate. Raw comparisons are in `bin/tests/render-comparison.json`.
+
+
+Terminal wait-any checks (`make -C src test-waitset`) exercise the production
+broker with deterministic scheduler handoffs: pending/repeated reply collection,
+spurious wakes, ownership and full-list validation, pipe data/capacity/EOF/broken
+peer readiness, deadlines, allocator failure and registration cleanup. C/C++ ABI
+checks cover the appended gate IDs and 32-byte wait item. Existing handle,
+stream and presentation checks remain unchanged.
+
+A focused disposable guest check covers delayed stdout/stderr without keyboard
+input, a later silent process exit, interactive stdin/Ctrl-D, pipeline completion
+and idle keyboard resume:
+
+```sh
+make -C src ../bin/tests/apps/graphics-check.elf
+python3 src/tests/console-boot.py bin --fixtures --wait-only --cpus=4 --accel=tcg --diagnostics
+```
+
+Four-CPU TCG run `fe5b611412514103aad9a50207be9447` passed against the candidate
+kernel with fixture-only apps on a disposable boot image. Build, wait-any,
+handle, console host and C/C++ interface checks pass. This is functional coverage
+for wait-any, not the deferred complete native/long-duration acceptance or a
+performance benchmark. No persistent developer disk was attached.

@@ -13,6 +13,16 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
     if(start.header.argc>1 && cb_application_argument(&start,1)[0]=='!'){
         cb_handle_t apps=cb_acquire(CB_APPLICATIONS_NAME,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID),text=cb_acquire(CB_TEXT_NAME,(struct cb_interface_id)CB_TEXT_INTERFACE_ID);unsigned char buffer[80];struct cb_application_launch l={.version={sizeof(l),1,0},.name_bytes=8,.argc=1,.arguments_bytes=9,.cwd_bytes=1};cb_copy(buffer,&l,sizeof(l));cb_copy(buffer+sizeof(l),"terminalterminal\0/",18);CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_LAUNCH,buffer,sizeof(l)+18,0)==CB_OK);struct cb_application_ref child;cb_copy(&child,cb_result(&client),sizeof(child));CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_WAIT,&child,sizeof(child),0)==CB_OK);struct cb_application_status ended;cb_copy(&ended,cb_result(&client),sizeof(ended));char message[96]="terminal exited: ";size_t n=17;uint64_t code=ended.state==CB_APPLICATION_FAULTED?128+ended.fault_vector:ended.exit_code;char digits[24];unsigned count=0;do{digits[count++]='0'+code%10;code/=10;}while(code);while(count)message[n++]=digits[--count];message[n++]='\n';cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_WRITE,message,n,0);cb_exit(1);
     }
+    if(start.header.argc>1 && cb_application_argument(&start,1)[0]=='w'){
+        cb_handle_t clock=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
+        struct cb_wait_item item={.kind=CB_WAIT_READ,.handle=cb_standard(0)};uint64_t ready;
+        CB_REQUIRE(cb_system_wait(&item,1,profile_now(clock)+100000000,&ready)==CB_TIMEOUT);
+        CB_REQUIRE(cb_write_all(&client,cb_standard(1),"wake stdout\n",12)==CB_OK);
+        CB_REQUIRE(cb_write_all(&client,cb_standard(2),"wake stderr\n",12)==CB_OK);
+        /* A silent exit after another blocked interval must wake the terminal. */
+        CB_REQUIRE(cb_system_wait(&item,1,profile_now(clock)+100000000,&ready)==CB_TIMEOUT);
+        cb_exit(0);
+    }
     if(start.header.argc>1 && cb_application_argument(&start,1)[0]=='r'){
         cb_handle_t text=cb_acquire(CB_TEXT_NAME,(struct cb_interface_id)CB_TEXT_INTERFACE_ID),clock=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
         uint64_t clears[5],scrolls[5];unsigned width=baseline.width/8*8,height=baseline.height/16*16;CB_REQUIRE(width && height>=32);

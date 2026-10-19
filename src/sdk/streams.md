@@ -35,3 +35,27 @@ Files use the same stream interface. Their backing descriptor retains a copied
 path and offset; ext4 work executes on CPU0 and callers block through owned worker
 joins. There is no generic remote streaming, seek, descriptor remapping after
 launch or durability relaxation in this milestone.
+
+
+Wait-any uses `cb_system_wait(items, count, absolute_deadline_ns, &ready_index)`.
+A zero deadline waits indefinitely. Items name caller-owned submitted requests
+(`CB_WAIT_REQUEST`) or directional local stream handles (`CB_WAIT_READ/WRITE`).
+Readiness is level-triggered and non-consuming: buffered data or EOF makes a read
+ready; capacity or a broken reader makes a write ready. Actual operations still
+report their own results/errors. The entire list is validated, even when an
+earlier item is ready. Readiness does not reserve data or capacity for the caller.
+
+`cb_submit` queues a copied provider call in one `cb_client`, preserving ordinary
+manifest admission and the provider's existing method/payload. `cb_collect` gets
+its result without blocking or resubmitting, returning WOULD_BLOCK until ready.
+Collection does not consume the broker result; the SDK releases completed request
+storage after successful retrieval. Buffer/allocation failures retain it for retry.
+This split-phase transport does not add provider async methods or vow handles.
+Kernel operations and reflection remain synchronous; submitted calls currently
+require no call deadline. Wait deadlines bound waiting, never cancel a request
+or discard its original outcome. Process exit reclaims owned requests/endpoints.
+
+The broker registers one stack-owned waiter under its existing lock, resolves
+IDs on every wake and uses scheduler wake credits across unlock/block. It needs
+no polling timer, ISR allocation, or direct keyboard dependency. One list is
+bounded by the transport frame size; registrations exist only during the wait.

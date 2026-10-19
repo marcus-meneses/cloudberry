@@ -1159,3 +1159,10 @@ $(BUILD)/tests/startup-bootstrap.elf: $(BUILD)/tests/startup-bootstrap-apps.o $(
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 $(BUILD)/tests/startup-bootstrap.kmod: $(BUILD)/tests/startup-bootstrap.elf
 	$(OBJCOPY) -O binary $< $@
+
+$(BUILD)/kmodules/handles-pic.o $(BUILD)/tests/handles-profile-pic.o: kmodules/shared/handles-stream.inc kmodules/shared/handles-wait.inc
+.PHONY: test-waitset
+test-waitset:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/waitset.c -o $(BUILD)/tests/waitset
+	$(BUILD)/tests/waitset

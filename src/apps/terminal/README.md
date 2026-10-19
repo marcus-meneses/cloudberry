@@ -42,16 +42,24 @@ initial CPUs, by current live process-thread occupancy. Threads remain pinned
 thereafter. The terminal makes no placement decision. It forwards keyboard text
 to child stdin and renders stdout/stderr; output is never fed into input.
 
-For this first single-threaded UI, foreground multiplexing uses nonblocking pipe
-reads and keyboard waits of up to 10 ms, checking child status between waits. A backpressured input line is retained for retry
-rather than silently discarded.
-At an idle prompt with no orphaned child to reap, keyboard reads block until
-notification instead of issuing clock/read/timeout calls every 10 ms. Orphan
-cleanup retains bounded waits so completion is still collected without input.
-Kernel pipe blocking and application completion notifications themselves are
-wake-driven. A general wait-set/async UI multiplexing facility, command history,
-full cursor editing, background jobs and a window/session model remain future
-work. Launches and command lines fit one bounded transport frame.
+The single-threaded UI submits one keyboard read and one completion wait per
+child, then waits for any pending reply or pipe readiness through the system
+library. Foreground output, stderr, stdin backpressure and orphan completion all
+wake it; idle prompts use the same mechanism without a polling deadline. The
+terminal no longer requests a clock handle or uses 10 ms keyboard timeouts.
+Nonblocking pipe reads/writes drain available progress before waiting again.
+A backpressured input line is retained for retry rather than silently discarded.
+
+Keyboard capture remains in the keyboard provider. After collecting a batch the
+terminal submits the next read before echoing the batch, preserving both local
+type-ahead and a pending provider read across foreground/idle transitions. Slow
+synchronous rendering or another terminal call still delays UI processing; this
+is not a separate input/rendering thread and history retention remains bounded.
+
+Command history, full cursor editing, background jobs and a window/session model
+remain future work. Launches, command lines and each wait-any subscription list
+fit one bounded transport frame. Oversized pipeline/wait combinations are rejected
+before launching children.
 
 Use `make -C src run QEMU_BOOT_WRITABLE=1` to exercise file writes in a disposable
 snapshot of the boot medium. This does not persist files across VM exits.

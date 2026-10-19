@@ -3,7 +3,7 @@
  * Wake credits close the unlock/block race; no polling and no ISR allocation. */
 struct stream_waiter {struct stream_waiter *next;uint64_t thread;};
 struct stream {uint64_t filesystem,offset;char *path;unsigned file_mode,busy;size_t head,used,readers,writers;struct stream_waiter *waiters;unsigned char data[];};
-static void stream_wake(struct stream *s){for(struct stream_waiter *w=s->waiters;w;w=w->next)wake(w->thread);}
+static void stream_wake(struct stream *s){wait_stream_changed(s);for(struct stream_waiter *w=s->waiters;w;w=w->next)wake(w->thread);}
 static void stream_drop(struct capability *cap){if(!cap->stream)return;struct stream *s=cap->stream;if(cap->direction==CB_STREAM_READ)--s->readers;else --s->writers;stream_wake(s);if(!s->readers && !s->writers){release(s->path);release(s);}}
 static struct capability *stream_endpoint(struct policy *owner,struct publication *p,struct stream *stream,unsigned direction){
     struct operation op={.name=direction==CB_STREAM_READ?"read":"write"};struct grant g={.name=CB_STREAM_NAME,.scope="self",.operations=&op};

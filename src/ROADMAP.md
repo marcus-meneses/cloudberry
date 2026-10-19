@@ -1343,3 +1343,27 @@ boots used HPET after shared-TSC uncertainty rejection (reason 14, CPU 1 in the
 new run). These are focused single-boot rendering results, not stable-TSC or
 physical-hardware acceptance. Raw samples, clock context and ratios are saved
 in `bin/tests/render-comparison.json`. This closes native shadow-path validation.
+
+
+## Terminal wait-any — 2026-10-19
+
+Native full-console/long-duration acceptance and filesystem mutation latency
+attribution are deferred at user request. This item addresses only replacing the
+terminal's 10 ms foreground/orphan polling with wake-driven multiplexing.
+
+The existing keyboard read remains provider-owned. Appended system-gate
+submission/collection and wait-any operations let the terminal retain that read
+alongside child completion waits and directional pipe readiness. Existing copied
+contracts, manifest checks, ownership and synchronous INVOKE remain intact.
+Registrations use stack storage under the broker lock, scheduler wake credits,
+and fresh ID lookup after waking. Replies/failures and stream transitions notify
+matching waiters; EOF/broken peers remain ready so ordinary calls report them.
+Timeouts bound the wait, never cancel dispatched provider work. No vows, threads,
+background jobs, disk durability changes or clock optimizations are introduced.
+The terminal prefetches its next keyboard batch before echo, but slow synchronous
+UI work can still delay collection/rendering. Complete native acceptance remains
+deferred. Build, UBSan wait-any/handle/console host checks and C/C++ contracts
+pass. Focused four-CPU TCG guest `fe5b611412514103aad9a50207be9447` passes
+delayed stdout/stderr without keypress, silent child completion, stdin/Ctrl-D,
+pipeline completion and idle keyboard resume using a disposable fixture image.
+No native acceptance or filesystem performance work was performed.
