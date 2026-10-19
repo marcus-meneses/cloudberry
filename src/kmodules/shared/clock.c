@@ -289,8 +289,9 @@ struct kernel_surface_result clock_surface_sample(MODULE_ARGS) {
     if((cpu.flags&CLOCK_TSC_RDTSCP)!=(state.cpu.flags&CLOCK_TSC_RDTSCP))return module_result(TSC_REASON_CAPABILITY_MISMATCH,0);
     uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");
     uint64_t empty_first=b?clock_cpu_ticks():0,empty_last=b?clock_cpu_ticks():0;
-    uint64_t first=clock_cpu_ticks(),hpet=*(volatile uint64_t *)(state.hpet_address+0xf0),last=clock_cpu_ticks();
+    uint64_t first=clock_cpu_ticks(),hpet=0;int read_ok=clock_hpet_read(state.hpet_address,&hpet);uint64_t last=clock_cpu_ticks();
     __asm__ volatile("push %0;popfq"::"r"(flags):"memory","cc");
+    if(!read_ok)return module_result(TSC_REASON_MISSING_HPET,0);
     struct clock_sample sample={.flags=cpu.flags};
     if(last<first || (b && (empty_last<empty_first || first<empty_last)))return module_result(TSC_REASON_REGRESSION,0);
     if(!scale(first+(last-first)/2,1000000000,state.info.tsc_hz,&sample.tsc_ns) ||

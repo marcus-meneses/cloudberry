@@ -1,1 +1,1 @@
-{"version":1,"resources":[{"name":"/@applications","operations":["launch","info","wait","stop","release"]}]}
+{"version": 1, "resources": [{"name": "/@applications", "operations": ["launch", "info", "wait", "stop", "release"]}, {"name": "/@streams", "operations": ["read", "write"]}]}

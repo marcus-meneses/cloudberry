@@ -15,5 +15,19 @@ int main(void){
     assert(cpu_profile_scale(UINT64_MAX,1000000000,1)==UINT64_MAX);
     assert(cpu_profile_scale(3999999999,1000000000,2000000000)==1999999999);
     assert(!cpu_profile_scale(1,0,2) && !cpu_profile_scale(1,1,0));
+    uint64_t sequences[3]={0};
+    for(unsigned domain=0;domain<3;++domain){unsigned sampled=0;
+        for(unsigned i=0;i<129;++i){int due=cpu_profile_reference_due(&sequences[domain],NULL);sampled+=due;
+            a=(struct cpu_profile_stamp){.ticks=10,.reference=due?50:CPU_PROFILE_NO_REFERENCE};
+            assert(cpu_profile_reference_due(&sequences[domain],&a)==due && sequences[domain]==i+1);
+            b=a;b.ticks=30;if(due)b.reference=60;
+            s=cpu_profile_difference(a,b,10000000);assert(s.ticks==20 && (due?(s.source==CPU_PROFILE_HPET && s.ns==100):!s.source));
+        }assert(sampled==3);
+    }
+    a=(struct cpu_profile_stamp){.reference=CPU_PROFILE_NO_REFERENCE};b=a;
+    assert(!cpu_profile_difference(a,b,10000000).source);
+    b.reference=50;assert(!cpu_profile_difference(a,b,10000000).source);
+    a.reference=0;b.reference=1;assert(cpu_profile_difference(a,b,10000000).ns==10);
+    a.hz=2000000000;assert(!cpu_profile_reference_due(&sequences[0],&a));
     puts("PASS profiling durations: qualified TSC, epoch/rate transitions, regression, independent HPET fallback and saturation");
 }

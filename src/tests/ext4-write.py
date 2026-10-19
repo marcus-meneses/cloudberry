@@ -11,7 +11,7 @@ def save_report():report_path.write_text(json.dumps(state_report,indent=2)+'\n')
 def on_exit():
     if state_report['status']=='running':state_report['status']='failed';save_report()
 save_report();atexit.register(on_exit)
-source=work/'root';(source/'boot/system/drivers').mkdir(parents=True,exist_ok=True)
+source=work/'root';(source/'boot/kmodules/drivers').mkdir(parents=True,exist_ok=True)
 features=('none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,64bit,'
           'flex_bg,sparse_super,large_file,huge_file,dir_nlink,extra_isize,metadata_csum')
 guid='9beaeafd-7835-446a-8258-00331878d4f3'
@@ -22,6 +22,8 @@ with base.open('wb') as f:f.truncate(40*1024**2)
 subprocess.run(['sgdisk','--clear','--new=1:2048:67583','--typecode=1:8300',f'--partition-guid=1:{guid}',str(base)],check=True,stdout=subprocess.DEVNULL)
 with base.open('r+b') as out,fs.open('rb') as data:
     out.seek(1024**2);shutil.copyfileobj(data,out)
+cached=work/'read-cache.img';shutil.copyfile(base,cached)
+subprocess.run([str(exe),str(cached),'read-cache'],check=True)
 disconnected=work/'disconnected.img';shutil.copyfile(base,disconnected)
 subprocess.run([str(exe),str(disconnected),'disconnect'],check=True)
 normal=work/'normal.img';shutil.copyfile(base,normal)

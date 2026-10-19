@@ -98,8 +98,11 @@ memory in xHCI. OUT is copied before submission; IN is copied only after success
 completion/reap. Timeout cancels/reaps before reuse. Cancellation/quiescence failure
 retains transport/core storage and marks the device failed; no caller pointer
 escapes return. Recoverable cancellation/stall does not automatically disable the
-whole device. Default I/O deadline is one second; callers may supply an absolute
-clock deadline. Overlap on the same device is refused rather than queued.
+whole device. Control/bulk I/O defaults to a one-second deadline. Interrupt-IN
+with no explicit deadline remains armed until completion, disconnect or explicit
+cancellation: a quiet input device is not a failed transaction. Callers may
+still supply a finite absolute deadline. Overlap on the same device is refused
+rather than queued.
 
 Additional trusted class-driver surfaces:
 

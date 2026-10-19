@@ -36,5 +36,9 @@ int main(void){
     emitted_ns=UINT64_C(5000000301);prune();assert(!count && evicted_sequence==3);assert(read_request(&request,1) && header().status==CB_INPUT_RESYNC);
     uint64_t grant=0;const char context[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551615,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(admission((const void *)context,sizeof(context)-1,&grant) && grant==UINT64_MAX);
     const char overflow[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551616,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(!admission((const void *)overflow,sizeof(overflow)-1,&grant));
+    /* A timed-read node remains reusable without another memory-handle call.
+     * The invoke stub above deliberately rejects any unexpected allocation. */
+    struct pending recycled=request;spare=NULL;
+    for(unsigned i=0;i<100;++i){pending=&recycled;recycled.next=NULL;serve_pending();assert(!pending && spare==&recycled);assert(pending_allocate()==&recycled && !spare);}
     puts("PASS keyboard stream: grant boundary, independent replay, blocking deadline, stale/evicted cursor anchors, retention, Unicode NUL and authenticated context framing");return 0;
 }

@@ -40,6 +40,22 @@
     {
       "name": "handles.decommission",
       "symbol": "handles_surface_decommission"
+    },
+    {
+      "name": "handles.stream_bind",
+      "symbol": "handles_surface_stream_bind"
+    },
+    {
+      "name": "handles.file_open",
+      "symbol": "handles_surface_file_open"
+    },
+    {
+      "name": "handles.file_worker",
+      "symbol": "handles_surface_file_worker"
+    },
+    {
+      "name": "handles.owner_watch",
+      "symbol": "handles_surface_owner_watch"
     }
   ]
 }

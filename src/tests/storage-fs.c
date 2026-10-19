@@ -15,7 +15,8 @@ static struct kernel_surface_result allocate(MODULE_ARGS){MODULE_UNUSED();if(!bu
 static struct kernel_surface_result resize_memory(MODULE_ARGS){MODULE_UNUSED();void *p=realloc((void *)b,c);if(p && !b)++live;return module_result((uintptr_t)p,p!=NULL);}
 static struct kernel_surface_result release(MODULE_ARGS){MODULE_UNUSED();assert(live);free((void *)b);--live;return module_result(1,1);}
 static struct kernel_surface_result control(MODULE_ARGS){MODULE_UNUSED();if(b==BLOCK_RETAIN)++refs;else {assert(refs);--refs;}return module_result(1,1);}
-static struct kernel_surface_result read_block(MODULE_ARGS){MODULE_UNUSED();assert(a==1 && b<=size/512 && c<=8 && c<=size/512-b && e>=c*512);assert(!fseeko(image,b*512,SEEK_SET));assert(fread((void *)d,512,c,image)==c);if(corrupt>=b*512 && corrupt<b*512+c*512)((uint8_t *)d)[corrupt-b*512]^=1;return module_result(c*512,1);}
+static uint64_t block_reads;
+static struct kernel_surface_result read_block(MODULE_ARGS){MODULE_UNUSED();++block_reads;assert(a==1 && b<=size/512 && c<=8 && c<=size/512-b && e>=c*512);assert(!fseeko(image,b*512,SEEK_SET));assert(fread((void *)d,512,c,image)==c);if(corrupt>=b*512 && corrupt<b*512+c*512)((uint8_t *)d)[corrupt-b*512]^=1;return module_result(c*512,1);}
 static void method(const char *name,kernel_surface_call call){struct kernel_surface *m=&fixture.methods[fixture.hub.count++];strcpy(m->name,name);m->call=call;m->major=1;}
 int main(int argc,char **argv){
     assert(argc==4);image=fopen(argv[1],"rb");assert(image);assert(!fseeko(image,0,SEEK_END));size=ftello(image);

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 static unsigned allocations,fail_allocate,phase,endpoint_calls;static int fail_after=-1;
-static uint64_t ticks,current_thread=1,sequence;
+static uint64_t ticks,current_thread=1,sequence,last_wait_deadline;
 static unsigned connected=1,generation=1,restarting;
 static struct host_transfer_request inflight;
 static struct host_transfer_result completion;
@@ -38,7 +38,7 @@ static struct kernel_surface_result result_call(MODULE_ARGS){MODULE_UNUSED();ass
     }
     *(struct host_transfer_result *)c=completion;return module_result(1,1);
 }
-static struct kernel_surface_result wait_call(MODULE_ARGS){MODULE_UNUSED();*(struct host_transfer_result *)c=completion;return module_result(1,1);}
+static struct kernel_surface_result wait_call(MODULE_ARGS){MODULE_UNUSED();last_wait_deadline=d;*(struct host_transfer_result *)c=completion;return module_result(1,1);}
 static void inspect(void) {
     struct usb_info info;assert(!usb_surface_info((uintptr_t)&info,0,0,0,0,0).status && info.records==2 && !info.failed);
     struct device *keyboard=NULL,*storage=NULL;
@@ -62,6 +62,9 @@ static void inspect(void) {
         io.setup[0]=0;io.setup[1]=9;io.bytes=0;io.setup[6]=0;assert(usb_surface_control((uintptr_t)&io,(uintptr_t)&result,0,0,0,0).status);
         assert(!usb_surface_release((uintptr_t)&ref,0,42,0,0,0).status);
         assert(!usb_surface_claim((uintptr_t)&ref,0,99,0,0,0).status && endpoint_calls==1);
+        io=(struct usb_io){.device=ref,.owner=99,.interface=0,.endpoint=129,.bytes=4,.buffer=output};
+        assert(!usb_surface_transfer((uintptr_t)&io,(uintptr_t)&result,0,0,0,0).status && last_wait_deadline==UINT64_MAX);
+        io.deadline_ns=ticks+1000000000;assert(!usb_surface_transfer((uintptr_t)&io,(uintptr_t)&result,0,0,0,0).status && last_wait_deadline==io.deadline_ns);
         connected=0;++generation;
     } else if(phase==1) {assert(keyboard->record.state==USB_DETACHED && !keyboard->token);connected=1;++generation;}
     else {assert(keyboard->record.state==USB_CONFIGURED && ref.id!=original.id);struct usb_device out;assert(usb_surface_device((uintptr_t)&original,(uintptr_t)&out,0,0,0,0).status);state.hosts->stop=1;}

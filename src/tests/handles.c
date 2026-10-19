@@ -72,6 +72,12 @@ int main(void){
     struct cb_reply_header provider_error={.version={sizeof(provider_error),1,0},.request=bad_request->id,.status=CB_BAD_REQUEST,.outcome=CB_NOT_COMMITTED,.provider_epoch=cap->publication->epoch};
     assert(respond(policy(1),(const void *)&provider_error,sizeof(provider_error))==CB_OK && bad_request->completed && bad_request->done && !bad_request->failure);
     drop_request(bad_request);
+    /* New stream/filesystem statuses are provider results, not malformed replies. */
+    for(unsigned status=CB_WOULD_BLOCK;status<CB_STATUS_COUNT;++status){
+        struct request *r=allocate(sizeof(*r)+sizeof(captured_call));assert(r);r->input=(void *)(r+1);r->bytes=sizeof(captured_call);copy_bytes(r->input,captured_call,sizeof(captured_call));r->publication=cap->publication;++cap->publication->refs;r->pid=2;r->cap=cap->id;r->provider=1;r->id=(struct cb_request_id){2,serial()};r->dispatched=1;state.requests=state.request_tail=r;
+        provider_error.request=r->id;provider_error.status=status;assert(respond(policy(1),(const void *)&provider_error,sizeof(provider_error))==CB_OK && r->completed && r->done && !r->failure);struct cb_reply_header delivered;copy_bytes(&delivered,r->reply,sizeof(delivered));assert(delivered.status==status);drop_request(r);
+    }
+
     assert(!handles_surface_decommission(1,0,0,0,0,0).status && cap->publication->dead);
     assert(receive(policy(1),0,&notification,&notification_bytes,CB_FRAME_LIMIT)==CB_OK);copy_bytes(&delivered,notification,sizeof(delivered));assert(!delivered.call.handle && delivered.call.operation==CB_HANDLE_RELEASE && delivered.call.flags==(CB_CALL_SYSTEM_EVENT|CB_CALL_PROVIDER_DELIVERY));release(notification);
     assert(!CALL(handles_surface_exit,1,0,0).status && cap->publication->dead);assert(!CALL(handles_surface_exit,2,0,0).status);assert(!state.policies && !state.caps && !state.publications && !state.requests && blocks==0);

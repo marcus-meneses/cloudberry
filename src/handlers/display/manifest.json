@@ -1,0 +1,1 @@
+{"version": 1, "resources": [{"name": "/@io", "scope": "display", "operations": ["display_info", "display_fill", "display_blit", "display_copy"]}, {"name": "/@display", "publish": true, "operations": ["info", "fill", "blit", "copy"]}]}

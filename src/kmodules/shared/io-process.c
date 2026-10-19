@@ -1,4 +1,5 @@
 #include "io-process.h"
+#include "io-console.h"
 #include "process.h"
 #include "threads.h"
 #include "handles.h"
@@ -26,17 +27,33 @@ struct kernel_surface_result io_surface_installations(MODULE_ARGS){
     if(runtime.catalog)return module_result(1,runtime.filesystem==a && runtime.bytes==c && cb_install_equal(runtime.catalog,(const void *)b,c));
     unsigned char *catalog=allocate(c);if(!catalog)return module_result(0,0);cb_install_copy(catalog,(const void *)b,c);runtime.catalog=catalog;runtime.bytes=c;runtime.filesystem=a;return module_result(1,1);
 }
+/* The filesystem provider supplies authenticated admission identity. Only that
+ * installed app's root-session data subtree is writable inside /system. */
+int io_installation_data(const unsigned char *identity,const char *path){
+    static const char prefix[]="/system/root/_apps/";
+    if(!runtime.catalog || length(path)<sizeof(prefix)-1 || !cb_install_equal(path,prefix,sizeof(prefix)-1))return 0;
+    const struct cb_install_catalog *header=(const void *)runtime.catalog;
+    const unsigned char *at=runtime.catalog+sizeof(*header);
+    for(uint64_t i=0;i<header->count;++i){struct cb_install_record record;cb_install_copy(&record,at,sizeof(record));const unsigned char *name=at+sizeof(record);at+=record.bytes;
+        if(!(record.flags&CB_INSTALL_APPLICATION) || !cb_install_equal(identity,record.installation,16))continue;
+        const char *tail=path+sizeof(prefix)-1;size_t n=length(tail);
+        return n>record.name_bytes+6 && cb_install_equal(tail,name,record.name_bytes) && cb_install_equal(tail+record.name_bytes,".data/",6);
+    }
+    return 0;
+}
 /* Trusted kernel entry. Ordinary callers can only reach the manager's narrower
  * process_launch operation, which cannot load provider/manager records. */
 struct kernel_surface_result io_surface_installed_load(MODULE_ARGS){
     MODULE_UNUSED();if(!runtime.catalog || !a || !b || !c || CALL(runtime.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
     struct cb_install_record record;const unsigned char *name=cb_install_find(runtime.catalog,(const void *)a,length((const void *)a),NULL,&record);if(!name || (record.flags==CB_INSTALL_MANAGER && runtime.manager))return module_result(0,0);
     char *path=allocate(record.path_bytes+1);if(!path)return module_result(0,0);cb_install_copy(path,name+record.name_bytes,record.path_bytes);
-    struct process_request request={.abi=2,.filesystem=runtime.filesystem,.path=path,.cpu=record.cpu,.stack_bytes=record.stack_bytes,.startup=(const void *)b,.startup_bytes=c};
+    uint32_t cpu=record.cpu;if(record.flags&CB_INSTALL_APPLICATION){struct kernel_surface_result selected=CALL(runtime.control,THREAD_SELECT_CPU,0,0);if(selected.status){release(path);return module_result(0,0);}cpu=selected.value;}
+    struct process_request request={.abi=2,.filesystem=runtime.filesystem,.path=path,.cpu=cpu,.stack_bytes=record.stack_bytes,.startup=(const void *)b,.startup_bytes=c};
     struct kernel_surface_result loaded=CALL(runtime.load,&request,0,0);release(path);if(loaded.status){if(loaded.value)(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}
     struct handle_policy policy={.process=loaded.value,.manifest=name+record.name_bytes+record.path_bytes,.bytes=record.manifest_bytes};cb_install_copy(policy.identity.installation_id,record.installation,16);
     if(CALL(runtime.admit,&policy,0,0).status){(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}
     if(record.flags==CB_INSTALL_MANAGER)runtime.manager=loaded.value;
+    if(record.flags==CB_INSTALL_PROVIDER)io_console_bind((const void *)a,loaded.value,runtime.filesystem);
     return module_result(loaded.value,1);
 }
 struct kernel_surface_result io_surface_process_worker(MODULE_ARGS){
@@ -70,11 +87,12 @@ static cb_status_t launch(struct io_invocation *invocation){
     if(invocation->bytes<8 || !cb_application_launch_valid((const unsigned char *)invocation->input+8,invocation->bytes-8) || invocation->capacity<8)return CB_BAD_REQUEST;
     uint64_t owner;cb_install_copy(&owner,invocation->input,8);struct process_info owner_info;if(owner && CALL(runtime.info,owner,&owner_info,0).status)return CB_BAD_REQUEST;
     struct cb_application_launch h;const unsigned char *payload=(const unsigned char *)invocation->input+8;size_t payload_bytes=invocation->bytes-8;cb_install_copy(&h,payload,sizeof(h));
-    struct cb_install_record record;if(!cb_install_find(runtime.catalog,payload+sizeof(h),h.name_bytes,NULL,&record) || !(record.flags&CB_INSTALL_APPLICATION))return CB_DENIED;
+    struct cb_install_record record;if(!cb_install_find(runtime.catalog,payload+h.version.bytes,h.name_bytes,NULL,&record) || !(record.flags&CB_INSTALL_APPLICATION))return CB_DENIED;
     char *name=allocate(h.name_bytes+1);struct child *child=allocate(sizeof(*child));size_t total=sizeof(struct cb_startup)+sizeof(struct cb_startup_file)+11+payload_bytes;unsigned char *packet=allocate(total);
     if(!name || !child || !packet){release(name);release(child);release(packet);return CB_RESOURCE_FAILURE;}
-    cb_install_copy(name,payload+sizeof(h),h.name_bytes);struct cb_startup startup={.version={sizeof(startup),1,0},.bytes=total,.files=1};struct cb_startup_file file={11,payload_bytes};cb_install_copy(packet,&startup,sizeof(startup));cb_install_copy(packet+sizeof(startup),&file,sizeof(file));cb_install_copy(packet+sizeof(startup)+sizeof(file),"application",11);cb_install_copy(packet+sizeof(startup)+sizeof(file)+11,payload,payload_bytes);
+    cb_install_copy(name,payload+h.version.bytes,h.name_bytes);struct cb_startup startup={.version={sizeof(startup),1,0},.bytes=total,.files=1};struct cb_startup_file file={11,payload_bytes};cb_install_copy(packet,&startup,sizeof(startup));cb_install_copy(packet+sizeof(startup),&file,sizeof(file));cb_install_copy(packet+sizeof(startup)+sizeof(file),"application",11);cb_install_copy(packet+sizeof(startup)+sizeof(file)+11,payload,payload_bytes);cb_handle_t streams[3]={0};if(h.version.minor==1){cb_install_copy(streams,payload+sizeof(h),sizeof(streams));unsigned char *copied=packet+sizeof(startup)+sizeof(file)+11+sizeof(h);for(unsigned i=0;i<sizeof(streams);++i)copied[i]=0;}
     struct kernel_surface_result loaded=io_surface_installed_load((uintptr_t)name,(uintptr_t)packet,total,0,0,0);release(name);release(packet);if(loaded.status){release(child);return CB_RESOURCE_FAILURE;}child->process=loaded.value;child->owner=owner;
+    if(streams[0] || streams[1] || streams[2]){kernel_surface_call bind=kernel_surface_find(runtime.hub,"handles.stream_bind");if(!owner || !bind || CALL(bind,owner,child->process,streams).status){CALL(runtime.reap,child->process,0,0);release(child);return CB_DENIED;}}
     uint64_t flags=lock();if(runtime.serial>UINT64_MAX/2-2){unlock(flags);CALL(runtime.reap,child->process,0,0);release(child);return CB_RESOURCE_FAILURE;}runtime.serial+=2;child->channel=(UINT64_C(1)<<63)|(runtime.serial-1);unlock(flags);
     if(CALL(runtime.channel,runtime.manager,child->channel,sizeof(struct cb_io_process_event)).status || CALL(runtime.channel,runtime.manager,child->channel+1,sizeof(struct cb_io_process_event)).status){CALL(runtime.unsubscribe,runtime.manager,child->channel,0);CALL(runtime.reap,child->process,0,0);release(child);return CB_RESOURCE_FAILURE;}
     struct thread_request worker={.abi=1,.cpu=0,.stack_bytes=32768,.entry=(uintptr_t)kernel_surface_find(runtime.hub,"io.process_worker"),.major=1,.payload={.arguments={(uintptr_t)child}}};struct kernel_surface_result created=CALL(runtime.create,&worker,0,0);

@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "../kmodules/shared/hpet-counter.h"
 static struct cpu_record bootstrap;
 static struct cpu_config config;
 static uint32_t lock_owner[2];
@@ -61,7 +62,7 @@ __attribute__((noreturn)) static void panic(const char *s) {
 }
 #define WAIT_BUDGET_NS UINT64_C(5000000000)
 #define CRITICAL_NOTICE_NS UINT64_C(2000000)
-static uint64_t watchdog_now(void) {return config.watchdog_hpet?*(volatile uint64_t *)config.watchdog_hpet:0;}
+static uint64_t watchdog_now(void) {uint64_t value=0;if(config.watchdog_hpet && !hpet_counter_read(config.watchdog_hpet,&value))panic("Cloudberry: fatal unstable HPET counter\n");return value;}
 static uint64_t watchdog_ns(uint64_t start,uint64_t end) {
     if(!config.hpet_period_fs || end<start)return 0;
     uint64_t delta=end-start,q=delta/1000000,r=delta%1000000;
@@ -69,9 +70,17 @@ static uint64_t watchdog_ns(uint64_t start,uint64_t end) {
     uint64_t whole=q*config.hpet_period_fs,fraction=r*config.hpet_period_fs/1000000;
     return fraction>UINT64_MAX-whole?UINT64_MAX:whole+fraction;
 }
+/* Preserve the first timeout's evidence before panic halts a CPU. */
+static struct {uint64_t start,end,elapsed_ns,depth;uintptr_t reason;uint32_t cpu,spins,owners[2],ready;} watchdog_failure;
 static void watchdog_check(uint64_t start,unsigned spins,const char *reason) {
     uint64_t now=watchdog_now();
-    if((config.watchdog_hpet && (now<start || watchdog_ns(start,now)>WAIT_BUDGET_NS)) || spins==100000000)panic(reason);
+    if((config.watchdog_hpet && (now<start || watchdog_ns(start,now)>WAIT_BUDGET_NS)) || spins==100000000){
+        uint32_t empty=0;if(__atomic_compare_exchange_n(&watchdog_failure.ready,&empty,1,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED)){
+            watchdog_failure.start=start;watchdog_failure.end=now;watchdog_failure.elapsed_ns=watchdog_ns(start,now);watchdog_failure.spins=spins;watchdog_failure.cpu=current()->index;watchdog_failure.depth=current()->depth;watchdog_failure.reason=(uintptr_t)reason;
+            for(unsigned i=0;i<2;++i)watchdog_failure.owners[i]=__atomic_load_n(&lock_owner[i],__ATOMIC_RELAXED);
+            __atomic_store_n(&watchdog_failure.ready,2,__ATOMIC_RELEASE);
+        }panic(reason);
+    }
 }
 static void ipi(uint32_t id,uint32_t vector) {
     uint64_t flags;__asm__ volatile("pushfq;pop %0;cli":"=r"(flags)::"memory");
@@ -100,14 +109,15 @@ static void metric_max(uint64_t *at,uint64_t value) {uint64_t old=__atomic_load_
 /* Clock writers hold domain 1. Readers never wait for a writer: an incomplete
  * snapshot uses HPET, avoiding lock inversion or allocation in instrumentation. */
 static uint64_t profile_epoch,profile_hz,profile_fault_epoch;
-static struct cpu_profile_stamp stamp(struct cpu_record *cpu,const struct cpu_profile_stamp *begin){
+static struct cpu_profile_stamp stamp(struct cpu_record *cpu,const struct cpu_profile_stamp *begin,unsigned domain){
     uint64_t epoch=__atomic_load_n(&profile_epoch,__ATOMIC_ACQUIRE);
     uint64_t hz=__atomic_load_n(&profile_hz,__ATOMIC_RELAXED);
     struct cpu_profile_stamp out={.ticks=ticks(),.epoch=epoch,.hz=hz};
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
     if((epoch&1) || !hz || cpu->profile_fault_epoch==epoch || __atomic_load_n(&profile_fault_epoch,__ATOMIC_ACQUIRE)==epoch || (begin && !begin->hz) ||
        epoch!=__atomic_load_n(&profile_epoch,__ATOMIC_ACQUIRE)){
-        out.hz=0;out.epoch=0;out.reference=watchdog_now();
+        out.hz=0;out.epoch=0;out.reference=CPU_PROFILE_NO_REFERENCE;
+        if(cpu_profile_reference_due(&cpu->profile_sequence[domain],begin))out.reference=watchdog_now();
     }
     return out;
 }
@@ -116,6 +126,7 @@ static struct cpu_profile_span duration(struct cpu_record *cpu,struct cpu_profil
     if(out.regression){metric_add(&cpu->metrics.clock_regressions,1);if(begin.hz){cpu->profile_fault_epoch=begin.epoch;__atomic_store_n(&profile_fault_epoch,begin.epoch,__ATOMIC_RELEASE);}}
     if(out.source==CPU_PROFILE_TSC)metric_add(&cpu->metrics.tsc_ns_samples,1);
     else if(out.source==CPU_PROFILE_HPET)metric_add(&cpu->metrics.hpet_ns_samples,1);
+    else if(!begin.hz && !end.hz && begin.reference==CPU_PROFILE_NO_REFERENCE && end.reference==CPU_PROFILE_NO_REFERENCE)metric_add(&cpu->metrics.sampled_out_ns,1);
     else metric_add(&cpu->metrics.unavailable_ns_samples,1);
     return out;
 }
@@ -128,11 +139,11 @@ static void peak(struct cpu_record *cpu,struct cpu_profile_peak *out,struct cpu_
     for(size_t i=0;i<sizeof(value)/8;++i)__atomic_store_n(at+i,in[i],__ATOMIC_RELAXED);
 }
 static void irq_begin(struct cpu_record *cpu,uint64_t flags){
-    if(flags&512){cpu->irq_stamp=stamp(cpu,NULL);cpu->irq_method=0;cpu->irq_domain=2;cpu->irq_caller=(uintptr_t)__builtin_return_address(0);}
+    if(flags&512){cpu->irq_stamp=stamp(cpu,NULL,2);cpu->irq_method=0;cpu->irq_domain=2;cpu->irq_caller=(uintptr_t)__builtin_return_address(0);}
 }
 static void irq_end(struct cpu_record *cpu,uint64_t flags){
     if(flags&512){
-        struct cpu_profile_stamp end=stamp(cpu,&cpu->irq_stamp);metrics_begin(cpu);
+        struct cpu_profile_stamp end=stamp(cpu,&cpu->irq_stamp,2);metrics_begin(cpu);
         struct cpu_profile_span span=duration(cpu,cpu->irq_stamp,end);
         metric_add(&cpu->metrics.irq_off_ticks,span.ticks);metric_max(&cpu->metrics.max_irq_off_ticks,span.ticks);
         if(span.source){metric_max(&cpu->metrics.max_irq_off_ns,span.ns);if(span.ns>CRITICAL_NOTICE_NS)metric_add(&cpu->metrics.critical_overruns,1);}
@@ -146,7 +157,7 @@ static uint64_t enter(unsigned domain,uint64_t method,uintptr_t caller){
     if(cpu->lock_depth[domain] && !(flags&512)){
         ++cpu->lock_depth[domain];__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);return flags;
     }
-    struct cpu_profile_stamp begin=stamp(cpu,NULL);
+    struct cpu_profile_stamp begin=stamp(cpu,NULL,domain);
     uint64_t started_hpet=0;unsigned spins=0;int contended=0;
     int waiting_guard=(flags&512)!=0;if(waiting_guard)__atomic_add_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
     if(flags&512){cpu->irq_stamp=begin;cpu->irq_method=method;cpu->irq_domain=domain;cpu->irq_caller=caller;}
@@ -166,7 +177,7 @@ static uint64_t enter(unsigned domain,uint64_t method,uintptr_t caller){
         }
     }
     if(!cpu->lock_depth[domain]){
-        struct cpu_profile_stamp acquired=stamp(cpu,&begin);metrics_begin(cpu);
+        struct cpu_profile_stamp acquired=stamp(cpu,&begin,domain);metrics_begin(cpu);
         struct cpu_profile_span wait=duration(cpu,begin,acquired);
         cpu->lock_stamp[domain]=acquired;cpu->lock_method[domain]=method;cpu->lock_caller[domain]=caller;
         if(wait.source)metric_max(&cpu->metrics.max_wait_ns,wait.ns);
@@ -188,7 +199,7 @@ void kernel_cpu_leave_domain(unsigned domain,uint64_t flags){
     int outer=cpu->lock_depth[domain]==1;if(outer)metrics_begin(cpu);
     __atomic_sub_fetch(&cpu->depth,1,__ATOMIC_RELAXED);
     if(!--cpu->lock_depth[domain]){
-        struct cpu_profile_stamp end=stamp(cpu,&cpu->lock_stamp[domain]);
+        struct cpu_profile_stamp end=stamp(cpu,&cpu->lock_stamp[domain],domain);
         struct cpu_profile_span held=duration(cpu,cpu->lock_stamp[domain],end);
         if(held.source)metric_max(&cpu->metrics.max_hold_ns,held.ns);
         peak(cpu,&cpu->metrics.hold_peak,held,cpu->lock_stamp[domain],cpu->lock_method[domain],domain,cpu->lock_caller[domain]);
@@ -226,7 +237,7 @@ struct kernel_surface_result kernel_cpu_control(MODULE_ARGS) {
         __atomic_store_n(&profile_hz,b,__ATOMIC_RELAXED);
         __atomic_add_fetch(&profile_epoch,1,__ATOMIC_RELEASE);return module_result(1,1);
     }
-    if(a==CPU_LATENCY && b) {*(struct cpu_latency_policy *)b=(struct cpu_latency_policy){WAIT_BUDGET_NS,CRITICAL_NOTICE_NS,config.watchdog_hpet!=0,0};return module_result(1,1);}
+    if(a==CPU_LATENCY && b) {*(struct cpu_latency_policy *)b=(struct cpu_latency_policy){WAIT_BUDGET_NS,CRITICAL_NOTICE_NS,config.watchdog_hpet!=0,CPU_PROFILE_HPET_STRIDE};return module_result(1,1);}
     if(a==CPU_METRICS && b && c<config.count) {
         struct cpu_record *target=&config.records[c];const uint64_t *source=(const void *)&target->metrics;
         struct cpu_metrics snapshot;uint64_t *out=(void *)&snapshot;

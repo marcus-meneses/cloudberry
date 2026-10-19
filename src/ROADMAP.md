@@ -944,3 +944,402 @@ samples); participating lock samples use TSC without HPET/unavailable samples.
 Reports are in `bin/tests/isolated/tests/process-4cpu-amd/`. This uninstrumented
 correctness run does not establish exact broker live-block restoration (covered
 by the traced TCG run above) or replace the accepted performance baseline.
+
+
+## Interactive console milestones closed — 2026-10-19
+
+1. Privileged display, graphics and text providers implement the exchangeable
+   text → graphics → display chain. Display initially uses the boot framebuffer;
+   native GPU drivers remain future replacements behind the same contract.
+2. Graphics supplies owned surfaces, clipping/transforms, composition, lines,
+   rectangles, ellipses/arcs, cubic curves, paths, bitmap rendering and blits.
+   Generation counters and dirty bounds track actual changes; presentation clears
+   screen damage only after every display transfer succeeds. Owner exit reclaims
+   offscreen resources. Text retains cells, derives dimensions and scrolls by blit.
+3. An ordinary terminal launches catalog-bound apps with explicit stdin/stdout/
+   stderr capabilities. `=>` recreates, `->` appends and `|>` runs concurrent
+   bounded-pipe stages. Destinations are authorized before launch. CPU placement
+   belongs to the kernel; processes remain pinned. Echo/cat/ls/pwd are apps.
+
+Host UBSan contracts/raster/stream checks and ext4 journal recovery pass. Isolated
+TCG console runs 61c61c01976043a7ae127b3cf1713a4f (four CPUs) and
+dc72042008844c0da19fbcc98b8e4fc7 (one CPU) passed graphics ownership/damage,
+binary pipelines larger than ring capacity, redirects, stderr, stdin/EOF and
+keyboard typeahead. Fixtures never enter the candidate catalog. A manual KVM
+candidate smoke run was reported healthy; automated native console acceptance
+remains separate. The user deferred sluggish text rendering for later work.
+
+Remaining console limits: one shared boot canvas, a bitmap ASCII fallback font,
+no history/full cursor editing, background jobs, sessions, installer or per-user
+application policy. Foreground multiplexing uses bounded nonblocking drains and
+keyboard deadlines rather than a general wait-set. Delayed journal flush stays
+on the roadmap. No automated native Intel/physical hardware claim follows from
+these console tests.
+
+## Filesystem namespace applied — 2026-10-19
+
+Image construction now prepares the reviewed filesystem tree, flat system apps
+and providers, shared keyboard configuration, generated `_index` caches and
+root-only app-state directories. Limine modules are split into boot drivers and
+helpers without changing module identities. Catalog-bound private root app-state
+writes and underscore-aware `ls -a` accompany the layout. No boot migration,
+formatting, placeholder account, installer or user-session system was added.
+See [filesystem namespace](maps/filesystem.md) for current and reserved paths.
+
+
+Filesystem validation: production build, installation/config/interface host tests,
+namespace/ownership/Limine-path checks and independent GPT/ext4/e2fsck checks pass.
+Isolated one-CPU TCG console run `706333e2464449d680f110b4b1e26cad` passed the
+new layout, terminal private-data write/read, underscore filtering and `ls -a`,
+as well as existing graphics/pipeline/stdin tests. Four-CPU TCG runs
+`45bf8459cad14982a400e38f1edbdeb2` and `eef932b3229848da8992bd5075eddccc` reached
+the terminal and executed commands but timed out on subsequent synthetic keyboard
+input; the latter showed missing/repeated characters during concurrent host build
+work. This is not passing four-CPU interactive acceptance or an established root
+cause. No text-performance changes were made; native KVM validation is pending.
+
+
+## Keyboard stall investigation — 2026-10-19
+
+The four-CPU TCG timeouts were real runtime failures, not accepted as mere input
+injection timing. Debugger captures found two concrete failure paths:
+
+- Kernel lock watchdog panic after an invalid HPET reference read. First-failure
+  evidence (`b156fc8532424cd8a8e101c6aba927a1`) recorded start=120105905,
+  end=0 and elapsed_ns=0: regression handling, not five seconds of lock ownership.
+  Clock/watchdog/sample readers now use bounded high/low/high 32-bit validation,
+  rejecting rollover and transient all-zero samples. Exhausted retries still
+  fail explicitly; elapsed-time and iteration watchdogs remain enabled. The raw
+  sample validation is containment. Follow-up host MMIO tracing establishes
+  wrong-device dispatch in QEMU 6.2 MTTCG: HPET loads reached IOAPIC while AHCI
+  memory decoding changed. Guest page-table walks remain correct. See
+  [clock evidence and upstream fix](kmodules/shared/clock.md#zero-read-cause-established-2026-10-19).
+- Keyboard capture worker exited after xHCI cancellation (`48e337393e5e4f13bccf82f20896696b`:
+  Stopped transfer completion 26 and Context State Error 19). Cancellation now
+  distinguishes Running/Halted/Stopped endpoint states and retains intermediate
+  Stopped events until dequeue commitment. Unexpected worker exit notifies the
+  provider, which withdraws its publication; terminal reports input failure.
+
+Keyboard report acknowledgement precedes decoding/read replies, and one owned
+pending-read node is reused to avoid page-map/unmap churn. Normal stop remains
+separate from failure; unproven DMA quiescence still retains ownership. Test
+injection uses explicit input edges, and optional GDB snapshots remain isolated
+from candidate startup.
+
+Host rollover/zero-read tests, clock modes, xHCI state/Stopped-event tests,
+keyboard replay/node reuse and failed-worker notification pass. Production
+four-CPU TCG integration passes in `880fe579554e4dfa99176ddc94c0798c` and
+`63febf4d2e7f40cb880bcaa7a1423781`; the latter explicitly idles then resumes
+input after multiple interrupt-IN cancellation cycles. Both include graphics,
+binary pipelines, stdin/EOF, stderr and root app-data/hidden-entry checks.
+Earlier manual KVM acceptance predates these fixes; native requalification is
+not inferred from TCG. Text-rendering performance remains deferred as requested.
+
+Follow-up qualification is not fully closed: four-CPU run
+`2f9c66eb4cfd44049aed0a321b8286ad` starts all providers, then reports keyboard
+input failure; the capture worker exits with xHCI command completion 19 and a
+retained pending transfer with Stopped completion 26. The earlier state-aware
+cancellation fix therefore does not cover every runtime case. Provider startup
+failures now log bundle, launch/readiness phase, error and available process
+exit/fault details, instead of only a generic failure. Native KVM acceptance and
+a QEMU build containing the MMIO-dispatch race fix remain outstanding.
+
+KVM startup report `c10274f35d5f43138f6f1826bd1d17dc` identifies a separate
+startup-deadline defect: keyboard is alive and `/@keyboard` is present in the
+capture, but bootstrap has already abandoned readiness. Its single 30-second
+budget covered volume discovery and all ELF loads/providers. Each provider now
+gets its own 30-second publication budget after load/start; storage keeps its
+separate budget. Focused host tests exercise readiness after 40 seconds of prior
+work, successive provider windows, genuine timeout and clock overflow.
+
+Quiet USB interrupt-IN transfers no longer inherit the control/bulk one-second
+timeout. They stay armed and use notification-only `xhci.wait(UINT64_MAX)` until
+completion, disconnect or explicit cancellation. Finite caller deadlines still
+apply. This removes the unnecessary recurring idle cancellation path; explicit
+shutdown/cancellation and fail-closed DMA ownership remain. Host USB tests verify
+default versus explicit deadlines; xHCI tests verify blocking without a timer.
+An isolated four-CPU TCG run with disposable NVMe/SATA disks,
+`f9012e4a594c4a93800ffe9dc3ba5790`, passes the startup-budget fix before the idle
+receive change. Native KVM requalification remains pending.
+
+After both changes, `a6ff2e9b55ec437bbb865e343a6d1f10` passes the complete
+four-CPU TCG console fixture with disposable NVMe/SATA: provider startup,
+foreground input, graphics, binary pipeline/file verification, stdin/EOF,
+redirection, private data, hidden entries and idle/resume. Bootstrap, USB, xHCI
+and keyboard host checks and the candidate build pass. This does not substitute
+for rerunning the reported native KVM case.
+
+## Console performance investigation — 2026-10-19
+
+Three avoidable costs are addressed without bypassing resource handles:
+
+- Text previously made a synchronous graphics request and presentation for every
+  glyph. The text provider now sends bounded batches of positioned glyphs, with
+  graphics validating the complete batch and presenting once. Font ownership,
+  clipping, colors, UTF-8 state, wrapping and scroll ordering remain in their
+  existing providers. Legacy single-glyph calls retain their contract.
+- A scroll previously allocated/freed a 4,014,080-byte snapshot at 1280×800,
+  creating page-mapping/unmapping and global TLB-shootdown work. Identity SOURCE
+  self-blits now copy in overlap-safe order without allocation; transformed or
+  alpha-composited blits retain the snapshot path.
+- Idle terminal prompts no longer issue clock/keyboard timeout calls every
+  10 ms. They block on input; foreground multiplexing and orphan reaping retain
+  bounded waits until a general wait-set exists.
+
+Same four-CPU TCG text probe, before `6790ee2085ba4702bda787a27895a9a0` and
+after glyph batching `a1cd7f8e3e964575bad8f27b9daab491`: 32 characters
+157,966,050 → 26,221,180 ns (6.0×); 128 characters 730,145,340 → 45,728,950 ns
+(16.0×). The cold one-character sample did not improve (32.0 → 46.3 ms).
+These are individual diagnostic samples, not a native KVM latency guarantee.
+Comparison data is saved in `bin/tests/console-performance-comparison.json`.
+
+The broader probe `ce3f244f44be4f54ae1e72f177a39ca4` measured stat at 17.9 ms
+and create/write-32-bytes/remove at approximately 2.4 s each. It overlapped a TCG
+integration run, so these are diagnostic observations, not a clean baseline.
+Filesystem mutations still synchronously commit the ext4 journal. Deferred
+journal flush remains deferred; display optimization does not remove disk latency.
+
+Host raster/stream checks and candidate build pass. Full four-CPU console
+integration `95a96bf224634041bbde9f13a22a6616` passes batching and idle waiting,
+including graphics, pipelines/files, keyboard and 60-line scrolling. After the
+allocation-free self-blit change, focused run `a033e0dcbe4b4e109fd1d3767055e79a`
+passes 60-line scrolling and prompt return in 4.05 host seconds including command
+injection. Native KVM performance requalification is still pending.
+
+## Startup-to-interactivity timing — 2026-10-19
+
+Sequential production-image TCG measurements, including firmware/Limine and
+fresh disposable NVMe/SATA devices, excluding image preparation:
+
+| CPUs | First observed prompt | Verified key echo | Report |
+| --- | --- | --- | --- |
+| 4 | 17.379 s | 17.604 s | `c51e3ec97e2548d697071972624e1117` |
+| 1 | 17.402 s | 17.622 s | `994b8a8bb83844a98975e6a4ae05c2c4` |
+
+The four-CPU candidate's host-observed milestones are kernel entry 3.805 s,
+event loop 4.524 s, volume ready 7.073 s, provider startup completed about
+16.84 s, then prompt 17.379 s. The provider-ready log is printed as a group and
+cannot individually time providers without the diagnostic build.
+
+Separate four-CPU phase trace `f48de7e16884403a8d98f223400bc00f` reaches its prompt
+in 17.752 s (logging overhead included):
+
+| Provider | Load/admit/start wall time | Remaining readiness | Total |
+| --- | --- | --- | --- |
+| keyboard | 1.904 s | 0.031 s | 1.935 s |
+| display | 0.972 s | 0.003 s | 0.975 s |
+| graphics | 1.077 s | 0.348 s | 1.425 s |
+| text | 0.968 s | 2.122 s | 3.089 s |
+| filesystem | 0.943 s | 0.003 s | 0.946 s |
+| applications | 1.469 s | 0.007 s | 1.477 s |
+
+Text readiness includes its initial full-screen clear/presentation. Clock init
+is 18 ms and ACPI init 443 ms in this TCG trace. These timings concentrate this
+observed delay in provider loading and initial presentation; one versus four
+CPUs does not materially change the measured TCG total. They do not establish
+native KVM timings or isolate exclusive CPU time inside each phase.
+
+At the time of the baseline measurement, `make run` depended on a forced kernel relink, forcing boot-image
+recreation on every invocation. An isolated image-builder-only measurement is
+5.921 s (`bin/tests/startup-packaging/48e2782028954c8e9eb90dad2f29e57e/timing.json`),
+so there is additional host-side wait before QEMU starts, even with unchanged
+sources. Compilation and staging are additional to that builder-only sample.
+Next targets are removing unconditional repackaging and profiling provider
+load/allocation/I/O and text's initial presentation before changing runtime policy.
+
+Reports are combined in `bin/tests/startup-timing-comparison.json`. Candidate
+kernel/ISO hashes are unchanged by the measurements; traced replacements stay
+in disposable test images. The agent cannot access KVM here; the focused native
+command is documented in `tests/README.md`. That measurement-only baseline preceded the repairs recorded below.
+
+## Startup repairs — 2026-10-19
+
+Removed unconditional candidate relinking/repackaging. Content-preserving input
+stamps detect selected object variants and image settings, with source/tool and
+firmware prerequisites still driving rebuilds. An unchanged `make build` takes
+0.081 s and preserves the image timestamp (`bin/recovery-incremental.json`).
+
+A diagnostic trace split bootstrap file reads from process load/admission and
+provider readiness. Small provider definitions/manifests took roughly 0.25 s each.
+A host reproduction identified cache thrashing: the upstream eight-block ext4
+cache issued 200 physical reads for twenty repeated deep-path metadata lookups.
+The engine now retains up to 128 lazily allocated cache blocks (512 KiB of block
+data for a 4 KiB filesystem); the identical warmed lookup loop issues zero reads.
+Synchronous journal commits and barriers are unchanged. The existing journal
+suite passes 29 crash cuts, six injected I/O failures and independent fsck.
+
+Graphics presents a uniformly colored damaged region using display.fill rather
+than sending every pixel through chunked display.blit calls. It inspects final
+RGB pixels, preserving backing data, state and pending damage; mixed regions
+still blit and failed presentation retains damage. Host bounds/alpha/uniformity
+checks and raster/stream/bootstrap checks pass.
+
+Production image, four CPUs, TCG, disposable USB boot + NVMe/SATA media:
+
+| Measurement | Earlier baseline | Repaired |
+| --- | --- | --- |
+| First observed prompt | 17.379 s | 11.304 s |
+| Verified first key echo | 17.604 s | 11.526 s |
+
+Repaired report: `7ec6b4d1bbd94f8084f0a265046ab9da`. Comparison:
+`bin/tests/startup-repair.json`. These are individual host-observed samples,
+including firmware and framebuffer polling, excluding image preparation. They
+do not establish native KVM timings. Metadata cache retention and solid fills
+address measured costs; synchronous mutations remain a separate latency limit.
+
+Full four-CPU TCG console acceptance passes on the repaired image:
+`79416c61ce7a447caac48e56c30c9f17`, including graphics ownership, byte-verified
+large file pipelines, stderr, stdin EOF, installation-private state, hidden
+listings, idle/resume keyboard input and sixty-line scrolling. All disk paths
+were disposable; developer persistent disks were not attached. Native KVM
+requalification remains pending because this environment has no `/dev/kvm`.
+
+## Native graphics startup timeout / profiling cost — 2026-10-19
+
+Native KVM report `03f0f0e282c34c6facf5be16153b1922` fails graphics publication
+readiness after 30 s. PID 3 is still running inside its initial memory request,
+with about 7,975 thread switches; it has not faulted. The BSP snapshot is inside
+a profiling HPET read. Shared time and statistics use HPET because cross-CPU TSC
+qualification was not accepted. This is a real failed startup, not a completed
+performance measurement. The provider deadline is unchanged.
+
+The diagnostic fallback previously performed repeated three-load HPET reads
+around every outer lock. It now samples one entry in 64 independently for each
+CPU/global-lock/clock-lock/standalone-IRQ domain, retaining matching references
+through each selected entry. Raw ordered tick counters and regression detection
+still cover all entries. Qualified TSC statistics remain unsampled. A dedicated
+`sampled_out_ns` counter distinguishes deliberate omissions from invalid samples;
+CPU_LATENCY exposes `hpet_profile_stride`. HPET-mode nanosecond peaks and notices
+are sample maxima, not exhaustive worst-case observations. System timestamps,
+TSC qualification and independent lock/IPI/TLB watchdog polling are unchanged.
+
+Build, profiling/clock host checks and corrected thread-state fixture pass. The
+isolated failed-owner watchdog (`bin/tests/kvm-latency-repair/tests/lock-watchdog`)
+still triggers its independent HPET timeout, register dump and halt while the
+fixture forces a TSC statistics rate. Four-CPU TCG profile run
+`701f6ea236b741d88ea99781419331ef` passes with prompt observed at 6.778 s. Its
+CPU0 snapshot records 19,508 HPET duration samples, 1,227,978 deliberately omitted
+durations and zero unavailable duration samples. The seven text/disk probes
+complete; `performance-state.json` preserves clock and profiler state. These
+observations support reduced instrumentation cost but do not qualify KVM; native
+replay against the rebuilt candidate is still required. Successful diagnostic
+profiling runs now capture state after measurement, without debugger calls into
+the guest.
+
+Production-catalog TCG startup replay `a47c969faf4f4bdca5f9f1dcf5832488` reaches
+the prompt at 6.610 s and verifies keyboard echo at 6.844 s (four CPUs, disposable
+NVMe/SATA), versus the previous 11.304/11.526 s. These are individual observations,
+not a native speedup claim. Collected evidence: `bin/tests/kvm-startup-repair.json`.
+
+## Focused native KVM acceptance — 2026-10-19
+
+User-run four-CPU KVM profile `7166875b0eec446c93158021ffe2a5c0` passes with
+disposable USB boot, NVMe and SATA media. First observed prompt: 6.994 s, including
+3.960 s before kernel entry. Event loop is ready at 5.917 s, volume at 6.420 s,
+and providers at 6.569 s. The graphics publication timeout does not recur in this
+run. These are host-observed, single-run timings with framebuffer polling.
+
+Shared TSC qualification succeeds (`source=1`, `smp_tsc=1`, rejection reason 0)
+at 2,096,180,151 Hz. Statistics also use that rate. All CPUs report zero
+unavailable duration samples; startup HPET samples and deliberate omissions are
+retained separately. Runtime qualified-TSC measurements remain unsampled.
+
+| Probe | Guest elapsed time |
+| --- | --- |
+| Text, 1 character | 0.920 ms |
+| Text, 32 characters | 1.032 ms |
+| Text, 128 characters | 4.115 ms |
+| Filesystem stat | 0.351 ms |
+| Create | 65.797 ms |
+| Write 32 bytes | 57.205 ms |
+| Remove | 79.450 ms |
+
+This closes focused native startup/performance replay, not long-duration or full
+console acceptance. Synchronous journaled mutations remain the clearest measured
+interactive cost. Lifetime-wide counters also contain a 105.438 ms maximum lock
+hold and up to 8.637 ms managed IRQ-off interval; these include bootstrap and host
+descheduling, so attribution and a post-startup reset are needed before treating
+them as steady-state latency. No additional runtime change follows this sample.
+
+## Clear and scroll rendering — 2026-10-19
+
+Identity rectangle fills now use clipped rows instead of polygon edge testing.
+Overlap-safe SOURCE self-copies also use clipped rows; damage is merged per row
+and generation saturates by the exact changed-pixel count. Known covered opaque
+fills use display.fill directly without a uniform-color scan. Transformed and
+alpha-composited operations retain the general renderer.
+
+Display.copy and IO display_copy are appended compatible operations. The initial
+backend validates exact sizes, both rectangle bounds, installation owner, native
+pixel layout and pitch before copying in overlap-safe order. Fill channel packing
+is calculated once per request. No pointers or framebuffer layout escape.
+
+Graphics queues a screen self-copy only when the displayed source is synchronized
+with backing pixels. It preserves deferred BLIT behavior; presentation performs
+the copy and then only subsequent dirty pixels (normally the exposed text row).
+A covering clear supersedes it. Unsupported copy uses ordinary pixel transfers;
+a failed/partial copy retains destination pixel damage and is never retried as
+a non-idempotent overlapping copy. Surface reflection includes queued damage.
+
+Host UBSan checks pass for raster/reference equivalence, exact generation and
+damage, pitch/format/owner/bounds, deferred presentation, clipped/multiple copies,
+unsupported backends, failed fills and repair after a simulated partial copy.
+Build and C/C++ interface checks pass. The candidate catalog contains no probes.
+
+The dedicated guest probe measures five nonempty clears and five full-width text
+scrolls over alternating colored rows, excluding preparation/output. Four-CPU
+TCG, 1280×800, disposable boot/NVMe/SATA; single boot per implementation:
+
+| Operation | Before median | After median | Ratio |
+| --- | --- | --- | --- |
+| Clear | 659.427 ms | 21.380 ms | 30.8× |
+| Dense scroll | 1188.392 ms | 26.415 ms | 45.0× |
+
+Before: `544c87cf30de40549f9bd60841824a6e`; after:
+`180d6a0c944e45d3bf0de79c23f9c4de`. Raw samples/medians are saved in each
+render.json and `bin/tests/render-comparison.json`. These are TCG observations.
+Native KVM/physical framebuffer-read costs still require their own measurement.
+The display contract can later use a native driver's copy engine or a pixel
+fallback; text stays independent of the backend.
+
+## Native region-copy follow-up — 2026-10-19
+
+Four-CPU KVM render replay `c6a5770963b64e3688873034b5168393` passes, but its
+five-sample medians are clear 5.337 ms and dense scroll 311.815 ms. Shared clock
+is HPET in this boot (SMP qualification reason 14); it is not a stable-TSC timing
+baseline. The original display-copy loop also read each source pixel directly
+from framebuffer memory. This is an expensive virtual/physical device-memory
+path that the earlier TCG speedup did not qualify.
+
+The resident framebuffer I/O backend now keeps a lazily allocated native-pixel
+RAM shadow through the existing mem.pages_alloc hub surface, owner 0. It costs
+3.90625 MiB at 1280×800, retained for this foundational backend's lifetime. Fills
+and RGB blits update the shadow. Overlapping region copies read ordinary RAM
+and send changed row spans to the framebuffer. A complete initial paint seeds
+it without framebuffer reads; a copy before that paint performs one readback.
+Allocation failure leaves fills/blits functional and returns copy UNAVAILABLE
+so graphics uses its pixel fallback. Neither handle ABI nor graphics policy
+changes; shadow pixels and physical addresses stay private.
+
+Host checks cover zero framebuffer reads after full painting, partial blit
+coherence, overlap, pitch/format guards, authority and allocation-unavailable
+fallback. Candidate rebuilt. The prior run is recorded as the native pre-shadow
+result in `bin/tests/render-comparison.json`; native shadow acceptance follows.
+
+Shadow-path TCG checks pass: render probe
+`b2823460f5b043dda7e3ff299f3ed678` (five-sample medians: clear 15.969 ms, scroll
+29.423 ms) and visible sixty-line scroll
+`16c9ac101cdc41dcbf82d258a43cde95` (remaining lines 12–59 visible and oldest
+line absent). The timing run overlapped final host/build work and is not a clean
+comparative baseline. Native verification is recorded below.
+
+
+Native shadow acceptance: four-CPU KVM replay
+`9ffd0a0a32aa496ca2ef66031d09d082` passed using the candidate kernel and
+disposable test disks. Five-sample median dense scroll fell from 311.815 ms to
+8.322 ms (37.5× faster, 97.3% reduction). Clear measured 6.521 ms versus the
+previous 5.337 ms; this change does not establish a clear speedup. Both native
+boots used HPET after shared-TSC uncertainty rejection (reason 14, CPU 1 in the
+new run). These are focused single-boot rendering results, not stable-TSC or
+physical-hardware acceptance. Raw samples, clock context and ratios are saved
+in `bin/tests/render-comparison.json`. This closes native shadow-path validation.

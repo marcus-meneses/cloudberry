@@ -1,0 +1,8 @@
+version=1
+executable=filesystem.elf
+manifest=manifest.json
+ready=/@filesystem
+installation_id=30375233cae8b33d753b7d27b37ca47f
+cpu=0
+stack_bytes=262144
+files=

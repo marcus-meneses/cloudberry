@@ -1,7 +1,7 @@
 # Cloudberry boot configuration, format version 1. Keys are case-sensitive.
 version=1
 boot.show_inventory=true
-drivers.directory=/boot/system/drivers
+drivers.directory=/boot/kmodules/drivers
 storage.timeout_ms=1000
 # GPT identity shared by the image builder and the boot configuration.
 drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
@@ -11,4 +11,7 @@ drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
 drivers.modules=
 
 # Provider bundle basenames in startup order; empty starts none.
-boot.providers=keyboard,applications
+boot.providers=keyboard,display,graphics,text,filesystem,applications
+
+# Writable only on a writable medium; QEMU can provide a disposable snapshot.
+filesystem.writable=true

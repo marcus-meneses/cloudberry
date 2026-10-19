@@ -22,15 +22,22 @@ static int enter(void){unsigned expected=0;return apps.hub && !CALL(apps.cpu,CPU
 static void leave(void){__atomic_store_n(&apps.operation,0,__ATOMIC_RELEASE);}
 static const struct config_value *config(const char *name,unsigned type){const struct kernel_hub_table *t=kernel_hub_find_table(apps.hub,name);const struct config_value *v=t?(const void *)t->address:NULL;return v && v->major==1 && v->type==type && v->data?v:NULL;}
 static char *path(const char *directory,const char *suffix){size_t n=length(directory),m=length(suffix);while(n && directory[n-1]=='/')--n;if(n>SIZE_MAX-m-2)return NULL;char *p=allocate(n+m+2);if(p){copy(p,directory,n);p[n]='/';copy(p+n+1,suffix,m+1);}return p;}
-static void *file(uint64_t volume,const char *name,size_t *bytes){struct ext4_stat st;if(!name || CALL(apps.stat,volume,name,&st).status || (st.mode&0170000)!=0100000 || st.bytes>=SIZE_MAX)return NULL;void *data=allocate(st.bytes+1);if(!data)return NULL;struct kernel_surface_result got=apps.read(volume,(uintptr_t)name,0,(uintptr_t)data,st.bytes,0);if(got.status || got.value!=st.bytes){release(data);return NULL;}*bytes=st.bytes;return data;}
+static void log_text(const char *s);
+#ifdef CB_BOOT_TIMING
+static void boot_trace(const char *phase,const char *name){log_text("BOOT-TIME provider ");log_text(phase);log_text(" ");log_text(name);log_text("\n");}
+#else
+#define boot_trace(phase,name) ((void)0)
+#endif
+static void *file(uint64_t volume,const char *name,size_t *bytes){boot_trace("file",name?name:"<null>");struct ext4_stat st;if(!name || CALL(apps.stat,volume,name,&st).status || (st.mode&0170000)!=0100000 || st.bytes>=SIZE_MAX)return NULL;void *data=allocate(st.bytes+1);if(!data)return NULL;struct kernel_surface_result got=apps.read(volume,(uintptr_t)name,0,(uintptr_t)data,st.bytes,0);if(got.status || got.value!=st.bytes){release(data);return NULL;}*bytes=st.bytes;boot_trace("file_done",name);return data;}
 static void *bundle_file(uint64_t volume,const char *directory,const char *name,size_t *bytes){char *p=path(directory,name);void *data=p?file(volume,p,bytes):NULL;release(p);return data;}
 struct startup_part {struct startup_part *next;char *name;void *data;size_t bytes;};
 static void *startup(uint64_t volume,const char *directory,char *list,size_t *bytes){
     struct startup_part *first=NULL,**tail=&first;size_t total=sizeof(struct cb_startup),count=0;void *packet=NULL;
     for(char *cursor=list;cursor && *cursor;){char *name=cursor;while(*cursor && *cursor!=',')++cursor;if(*cursor){*cursor++=0;if(!*cursor)goto done;}
-        if(!pd_path(name,0))goto done;
+        char *source=name;for(char *p=name;*p;++p)if(*p=='='){*p=0;source=p+1;break;}
+        if(!pd_path(name,0) || (source!=name && (*source!='/' || !pd_path(source+1,0))))goto done;
         for(struct startup_part *p=first;p;p=p->next)if(pd_same(p->name,name))goto done;
-        struct startup_part *part=allocate(sizeof(*part));if(!part)goto done;part->name=name;*tail=part;tail=&part->next;part->data=bundle_file(volume,directory,name,&part->bytes);if(!part->data)goto done;
+        struct startup_part *part=allocate(sizeof(*part));if(!part)goto done;part->name=name;*tail=part;tail=&part->next;part->data=source!=name?file(volume,source,&part->bytes):bundle_file(volume,directory,name,&part->bytes);if(!part->data)goto done;
         size_t n=length(name);if(n>SIZE_MAX-sizeof(struct cb_startup_file) || part->bytes>SIZE_MAX-sizeof(struct cb_startup_file)-n || total>SIZE_MAX-sizeof(struct cb_startup_file)-n-part->bytes)goto done;
         total+=sizeof(struct cb_startup_file)+n+part->bytes;++count;
     }
@@ -57,7 +64,7 @@ static void refresh(struct application *record){
 static int installations(uint64_t filesystem){
     if(apps.catalog)return 1;
     const struct config_value *base=config("config.drivers.directory",CONFIG_STRING);if(!base)return 0;
-    size_t bytes=0;void *catalog=bundle_file(filesystem,base->data,"installed.bin",&bytes);
+    size_t bytes=0;void *catalog=file(filesystem,"/system/state/installed.bin",&bytes);
     if(!catalog)return 1; /* Trusted low-level fixture/provider loading remains available. */
     kernel_surface_call install=kernel_surface_find(apps.hub,"io.installations");
     if(!install || !cb_install_valid(catalog,bytes) || CALL(install,filesystem,catalog,bytes).status){release(catalog);return 0;}apps.catalog=catalog;return 1;
@@ -66,10 +73,14 @@ static struct kernel_surface_result launch(uint64_t filesystem,const char *bundl
     if(!installations(filesystem) || !bundle || !pd_path(bundle,1))return module_result(0,0);
     for(const struct application *p=apps.first;p;p=p->next)if(pd_same(p->bundle,bundle))return module_result(0,0);
     const struct config_value *base=config("config.drivers.directory",CONFIG_STRING);if(!base)return module_result(0,0);
-    char *directory=path(base->data,bundle),*definition=NULL,*program=NULL;void *manifest=NULL,*packet=NULL;struct application *record=NULL;
+    struct cb_install_record catalog_record;const unsigned char *catalog_name=apps.catalog?cb_install_find(apps.catalog,bundle,length(bundle),NULL,&catalog_record):NULL;
+    int flat=catalog_name && catalog_record.path_bytes>17 && cb_install_equal(catalog_name+catalog_record.name_bytes,"/system/handlers/",17);
+    char *directory=flat?string("/system/handlers"):path(base->data,bundle),*definition=NULL,*program=NULL;void *manifest=NULL,*packet=NULL;struct application *record=NULL;
     size_t definition_bytes=0,manifest_bytes=0,packet_bytes=0;uint64_t pid=0;int ok=0;unsigned error=1;
     if(!directory)goto done;
-    error=2;definition=bundle_file(filesystem,directory,"provider.cnf",&definition_bytes);struct provider_definition d;
+    error=2;char *definition_name=NULL;
+    if(flat){size_t n=length(bundle);definition_name=allocate(n+14);if(!definition_name)goto done;copy(definition_name,bundle,n);copy(definition_name+n,".provider.cnf",14);}
+    definition=bundle_file(filesystem,directory,flat?definition_name:"provider.cnf",&definition_bytes);release(definition_name);struct provider_definition d;
     if(!definition || !provider_definition_parse(definition,definition_bytes,&d))goto done;
     error=3;program=path(directory,d.executable);manifest=bundle_file(filesystem,directory,d.manifest,&manifest_bytes);packet=startup(filesystem,directory,d.files,&packet_bytes);record=allocate(sizeof(*record));
     if(!record)goto done;
@@ -78,7 +89,7 @@ static struct kernel_surface_result launch(uint64_t filesystem,const char *bundl
     error=4;struct cb_install_record installed;const unsigned char *installed_name=apps.catalog?cb_install_find(apps.catalog,bundle,length(bundle),NULL,&installed):NULL;
     if(installed_name){
         if((installed.flags!=CB_INSTALL_PROVIDER && installed.flags!=CB_INSTALL_MANAGER) || installed.cpu!=d.cpu || installed.stack_bytes!=d.stack_bytes || !cb_install_equal(installed.installation,d.identity,16) || installed.path_bytes!=length(program) || !cb_install_equal(installed_name+installed.name_bytes,program,installed.path_bytes) || installed.manifest_bytes!=manifest_bytes || !cb_install_equal(installed_name+installed.name_bytes+installed.path_bytes,manifest,manifest_bytes))goto done;
-        kernel_surface_call installed_load=kernel_surface_find(apps.hub,"io.installed_load");if(!installed_load)goto done;struct kernel_surface_result loaded=CALL(installed_load,bundle,packet,packet_bytes);pid=loaded.value;if(loaded.status)goto done;
+        kernel_surface_call installed_load=kernel_surface_find(apps.hub,"io.installed_load");if(!installed_load)goto done;boot_trace("process",bundle);struct kernel_surface_result loaded=CALL(installed_load,bundle,packet,packet_bytes);boot_trace("process_done",bundle);pid=loaded.value;if(loaded.status)goto done;
     }else{
         struct process_request request={.abi=2,.cpu=d.cpu,.filesystem=filesystem,.path=program,.stack_bytes=d.stack_bytes,.startup=packet,.startup_bytes=packet_bytes};struct kernel_surface_result loaded=CALL(apps.load,&request,0,0);pid=loaded.value;if(loaded.status)goto done;
         error=5;struct handle_policy policy={.process=pid,.manifest=manifest,.bytes=manifest_bytes};copy(policy.identity.installation_id,d.identity,16);
@@ -104,18 +115,46 @@ struct kernel_surface_result bootstrap_surface_apps(MODULE_ARGS){
     struct thread_request r={.abi=1,.cpu=0,.stack_bytes=65536,.entry=(uintptr_t)kernel_surface_find(apps.hub,"bootstrap.apps_worker"),.major=1};apps.info.state=1;struct kernel_surface_result result=CALL(apps.create,&r,0,0);if(result.status){apps.info.state=4;apps.info.error=1;}else apps.info.worker=result.value;leave();return result;
 }
 static void log_text(const char *s){kernel_surface_call log=kernel_surface_find(apps.hub,"hardware.log");if(log)CALL(log,s,length(s),0);}
+static void log_number(uint64_t n){char text[21];unsigned at=20;text[at]=0;do{text[--at]='0'+n%10;n/=10;}while(n);log_text(text+at);}
+/* Storage selection and synchronous image loading have their own bounded I/O.
+ * A provider's publication deadline starts only once that provider is running;
+ * earlier boot work must not consume its readiness allowance. */
+static int wait_provider(const char **phase){
+    struct kernel_surface_result stamp=CALL(apps.clock,0,0,0);
+    if(stamp.status || stamp.value>UINT64_MAX-UINT64_C(30000000000)){*phase="readiness clock";return 0;}
+    uint64_t limit=stamp.value+UINT64_C(30000000000);
+    for(;;){struct bootstrap_apps_info status;
+        if(bootstrap_surface_apps_info((uintptr_t)&status,0,0,0,0,0).status){*phase="readiness inspection";return 0;}
+        if(status.state==4){*phase="provider failure";return 0;}
+        if(status.state==3)return 1;
+        stamp=CALL(apps.clock,0,0,0);if(stamp.status){*phase="readiness clock";return 0;}
+        if(stamp.value>=limit){*phase="publication timeout";return 0;}
+        uint64_t wake=limit-stamp.value<1000000?limit:stamp.value+1000000;
+        if(CALL(apps.thread,THREAD_BLOCK_UNTIL,wake,0).status){*phase="readiness wait";return 0;}
+    }
+}
 struct kernel_surface_result bootstrap_surface_apps_worker(MODULE_ARGS){
     MODULE_UNUSED();while(__atomic_load_n(&apps.operation,__ATOMIC_ACQUIRE))if(CALL(apps.thread,THREAD_YIELD,0,0).status)return module_result(0,0);
+    const char *active="volume",*phase="volume readiness";
     kernel_surface_call info=kernel_surface_find(apps.hub,"bootstrap.info");uint64_t time=CALL(apps.clock,0,0,0).value;if(time>UINT64_MAX-UINT64_C(30000000000))goto failed;uint64_t limit=time+UINT64_C(30000000000);struct bootstrap_info volume;char *list=NULL;
     for(;;){if(CALL(info,&volume,0,0).status || volume.state==BOOTSTRAP_FAILED || volume.state==BOOTSTRAP_DISCONNECTED)goto failed;if(volume.state==BOOTSTRAP_READY)break;time=CALL(apps.clock,0,0,0).value;if(time>=limit || CALL(apps.thread,THREAD_BLOCK_UNTIL,time+10000000,0).status)goto failed;}
     const struct config_value *providers=config("config.boot.providers",CONFIG_STRING);if(!providers || !(list=string(providers->data)))goto failed;
-    for(char *p=list;*p;){char *name=p;while(*p && *p!=',')++p;if(*p){*p++=0;if(!*p)goto failed_list;}if(bootstrap_surface_launch(volume.filesystem.cookie,(uintptr_t)name,0,0,0,0).status)goto failed_list;
+    for(char *p=list;*p;){char *name=p;active=name;phase="launch";while(*p && *p!=',')++p;if(*p){*p++=0;if(!*p)goto failed_list;}boot_trace("begin",name);if(bootstrap_surface_launch(volume.filesystem.cookie,(uintptr_t)name,0,0,0,0).status)goto failed_list;
+        boot_trace("loaded",name);
         /* Creation order is also readiness order for startup dependencies. */
-        for(;;){struct bootstrap_apps_info status;if(bootstrap_surface_apps_info((uintptr_t)&status,0,0,0,0,0).status)goto failed_list;if(status.state==4)goto failed_list;if(status.state==3)break;time=CALL(apps.clock,0,0,0).value;if(time>=limit || CALL(apps.thread,THREAD_BLOCK_UNTIL,time+1000000,0).status)goto failed_list;}
+        phase="publication readiness";
+        if(!wait_provider(&phase))goto failed_list;
+        boot_trace("ready",name);
     }
     release(list);list=NULL;
     for(const struct application *p=apps.first;p;p=p->next){log_text("bootstrap: provider ready: ");log_text(p->bundle);log_text("\n");}return module_result(apps.info.count,1);
-failed_list:release(list);
+failed_list:
+    log_text("bootstrap: failed provider=");log_text(active);log_text(" phase=");log_text(phase);log_text(" error=");log_number(apps.info.error);
+    for(const struct application *p=apps.first;p;p=p->next)if(p->state==4 || pd_same(p->bundle,active)){
+        log_text(" record=");log_text(p->bundle);log_text(" record_error=");log_number(p->error);log_text(" pid=");log_number(p->process);struct process_info status;
+        if(!CALL(apps.process_info,p->process,&status,0).status){log_text(" state=");log_number(status.state);log_text(" exit=");log_number(status.exit_code);log_text(" fault_vector=");log_number(status.fault_vector);log_text(" fault_rip=");log_number(status.fault_rip);}
+    }
+    log_text("\n");release(list);
 failed:apps.info.state=4;apps.info.error=1;log_text("bootstrap: provider startup failed\n");return module_result(0,0);
 }
 struct kernel_surface_result bootstrap_surface_apps_info(MODULE_ARGS){

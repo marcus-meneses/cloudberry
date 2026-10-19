@@ -10,7 +10,7 @@ def install(root,build):
         if name in ('runtime-probe','runtime-attacker','runtime-abandon'):grants.append(dict(name='/@applications',operations=['launch','info','wait','stop','release']))
         if name=='runtime-probe':grants.append(dict(name='/@io',scope='keyboard',operations=['now_ns']))
         (folder/(name+'.json')).write_text(json.dumps(dict(version=1,resources=grants)))
-        registry.append(dict(name=name,executable='/boot/system/drivers/runtime-test/'+name+'.elf',manifest='runtime-test/'+name+'.json',installation_id=hashlib.sha256(name.encode()).hexdigest()[:32],flags=flags,cpu=0,stack_bytes=131072))
+        registry.append(dict(name=name,executable='/boot/kmodules/drivers/runtime-test/'+name+'.elf',manifest='runtime-test/'+name+'.json',installation_id=hashlib.sha256(name.encode()).hexdigest()[:32],flags=flags,cpu=0,stack_bytes=131072))
     spec=root/'test-installed.json';spec.write_text(json.dumps(registry))
     loader=importlib.util.spec_from_file_location('installation_builder',source/'tools/build-installations.py');module=importlib.util.module_from_spec(loader);loader.loader.exec_module(module);module.build(spec,root,root/'installed.bin')
     shutil.copy2(root/'installed.bin',root/'applications/catalog.bin')

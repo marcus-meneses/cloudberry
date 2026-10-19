@@ -99,7 +99,7 @@ bool kernel_mem_test(const struct kernel_surfaces *page, struct boot_pages *page
     const struct kernel_hub_table *partition=kernel_hub_find_table(page,"config.drivers.partition_guid");
     if(!config_version || !directory || !partition)return test_failure(__LINE__);
     const struct config_value *v=(const void *)config_version->address,*dir=(const void *)directory->address;
-    if(v->major!=1 || v->type!=CONFIG_UINT || v->bytes!=8 || *(const uint64_t *)v->data!=1 || dir->type!=CONFIG_STRING || !equal(dir->data,"/boot/system/drivers"))return test_failure(__LINE__);
+    if(v->major!=1 || v->type!=CONFIG_UINT || v->bytes!=8 || *(const uint64_t *)v->data!=1 || dir->type!=CONFIG_STRING || !equal(dir->data,"/boot/kmodules/drivers"))return test_failure(__LINE__);
     const struct config_value *identity=(const void *)partition->address;
     if(identity->major!=1 || identity->type!=CONFIG_GUID || identity->bytes!=sizeof(struct config_guid) || !identity->data)return test_failure(__LINE__);
     const unsigned char *guid=identity->data;unsigned nonzero=0;for(unsigned i=0;i<sizeof(struct config_guid);++i)nonzero|=guid[i];

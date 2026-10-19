@@ -1,24 +1,31 @@
-# Built-in ordinary applications
+# Built-in applications
 
-`installed.json` is the build-owned source of installation bindings. The builder
-packages paths, manifest bytes, identities and execution settings into the binary
-catalog; launch callers cannot override these values. It also records the
-privileged keyboard and application providers so bootstrap can validate their
-bindings. The generated catalog lives at the root of the current read-only
-ext4 bundle directory, outside each application's own directory.
+`installed.json` binds image paths, immutable manifest bytes, OS installation
+identities, roles and stack settings in a build-generated catalog outside app
+bundles. Keyboard, display, graphics, text, filesystem and application providers
+are registered alongside ordinary apps. Callers cannot override those bindings.
 
-- `launch`: accepts an application startup packet whose argv is
-  `launch INSTALLATION [ARGS...]`. It acquires `/@applications`, launches the
-  named ordinary installation, waits, releases its result and returns the child's
-  exit status (or 128 + fault vector). The launcher role is explicit in the catalog.
-- `true`: a minimal ordinary native executable returning zero. Its manifest has
-  no resource grants. It receives the same read-only startup format as other apps.
+| Application | Role |
+| --- | --- |
+| terminal | Ordinary initial app; keyboard/text frontend, cwd, application discovery, stdio routing and pipelines |
+| launch | Ordinary launcher forwarding its own stdio bindings, waiting and returning the child result |
+| true | Returns zero; accepts standard stream bindings without using them |
+| echo | Writes arguments and newline to stdout |
+| cat | Copies stdin or named files to stdout |
+| ls | Lists the supplied directory or startup cwd, in four output columns |
+| pwd | Writes startup cwd to stdout |
 
-`../sdk/application.h` validates the startup envelope and exposes argument and cwd
-spans without raw kernel pointers. A cwd span is length-delimited, not NUL-terminated;
-argument strings are NUL-terminated and preserve case and whitespace.
+Only cd/clear/help/exit are terminal built-ins. Providers interpret their own
+configuration; neither bootstrap nor the terminal implements external utilities.
+The trusted build-generated `/system/handlers/applications.resources/initial.bin` launches terminal in normal
+builds. Disposable tests replace it; no test app enters the candidate catalog.
+The C startup helper preserves argv/cwd; standard handles are obtained from the
+system library, not copied from parent numeric tokens. Ordinary apps receive
+kernel-selected initial placement and remain single-threaded/pinned thereafter.
 
-There is no terminal in this active implementation yet. The applications are
-installed and callable through the lifecycle handle; they are not new kernel or
-terminal built-ins. Ordinary candidate boot starts the two resource providers,
-with no demo or test application automatically launched.
+See [terminal behavior and limits](terminal/README.md) and [stream contracts](../sdk/streams.md).
+
+Guest filenames follow the [filesystem namespace](../maps/filesystem.md): flat
+`/system/apps/<appname>` plus manifest/resources sidecars, with root-session
+private data under `/system/root/_apps/<appname>.data`. `ls -a` includes hidden
+underscore-prefixed entries; default listings omit them.

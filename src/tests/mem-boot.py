@@ -77,7 +77,7 @@ with (stage / 'boot/limine/limine.conf').open('a') as config:
     config.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
 if missing_clock:
     config=stage/'boot/limine/limine.conf'
-    config.write_text(config.read_text().replace('    module_path: boot():/boot/kmodules/clock.kmod\n    module_cmdline: clock\n',''))
+    config.write_text(config.read_text().replace('    module_path: boot():/boot/kmodules/helpers/clock.kmod\n    module_cmdline: clock\n',''))
 if config_error:
     config=stage/'boot/limine/limine.conf'
     entry='    module_path: boot():/boot/cloudberry.cnf\n    module_cmdline: cloudberry-config\n'

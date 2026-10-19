@@ -38,6 +38,8 @@ from Git and from this build.
 make -C src build
 make -C src run
 make -C src run QEMU_ACCEL=kvm QEMU_CPUS=4
+# Temporary writable boot snapshot for terminal file redirection:
+make -C src run QEMU_ACCEL=kvm QEMU_CPUS=4 QEMU_BOOT_WRITABLE=1
 make -C src debug
 ```
 
@@ -60,9 +62,9 @@ sink, not a serial driver.
 bin/cloudberry-nvme.img and bin/cloudberry-sata.img are blank sparse disks created
 once during build and retained by clean. Boot never formats or migrates them.
 Storage backends expose explicit kernel surfaces; normal bootstrap now scans
-supported disks read-only for the configured driver-volume GUID. xHCI initialization publishes an empty
+supported disks for the configured driver-volume GUID. xHCI initialization publishes an empty
 owned registry; normal boot starts USB-core workers and the hub-class manager to claim
-controllers and enumerate root/downstream devices. HID class drivers remain future work; USB storage and ext4 are boot-loaded modules, with explicit writable mounts.
+controllers and enumerate root/downstream devices. Boot-keyboard HID runs in the keyboard provider. USB storage and ext4 remain boot-loaded modules; writable mounts require a writable medium and explicit configuration.
 
 ## NVMe and SATA block access
 
@@ -78,7 +80,7 @@ exposed by `config.drivers.partition_guid`, then mount the bounded slice through
 
 Normal startup starts the [bootstrap coordinator](kmodules/shared/bootstrap.md),
 which scans supported devices for a unique configured GPT partition GUID and
-mounts it read-only. Blank disks are skipped; corrupt GPT, failed transports and
+mounts it read-only unless `filesystem.writable=true` and the medium supports writes. Blank disks are skipped; corrupt GPT, failed transports and
 duplicate matches fail selection. Copied Limine boot identity is correlated when
 available; identifying a configured partition does not itself prove boot provenance.
 Current modules stay in the Limine boot partition. The ext4 directory is reserved
@@ -97,14 +99,44 @@ media, exercise GPT/ext4 journaled writes and remount, verify IRQ completion,
 bounds/lifetime pins and timeout/reset/stale cookies, then run independent host
 filesystem checks. See [NVMe](kmodules/shared/nvme.md) and [SATA](kmodules/shared/sata.md).
 
+Keyboard capture keeps idle interrupt-IN receives armed, propagates unexpected
+capture-worker failure to callers, and avoids pending-read page churn. Clock and
+watchdog HPET reads validate live 32-bit halves and zero samples. Host MMIO
+traces identify QEMU 6.2 MTTCG dispatching HPET loads to IOAPIC during AHCI setup;
+the upstream emulator fix is required for reliable MTTCG qualification. Two
+earlier four-CPU TCG console runs passed, including idle/resume; subsequent runs
+exposed an xHCI cancellation/input failure. Recurring idle cancellation is now
+removed, and each provider gets its own readiness budget after loading.
+Provider startup failures include provider/phase and process details. The latest
+four-CPU TCG console fixture passes both fixes. Focused four-CPU KVM startup
+and rendering checks now pass; full native console and long-duration acceptance
+remain separate. See the
+[roadmap investigation](ROADMAP.md) and [keyboard details](handlers/keyboard/README.md).
+
+Text rendering now batches glyphs through graphics, identity self-blits avoid a
+full-screen temporary allocation per scroll, and idle terminal input blocks on
+notifications. Uniform damaged regions use display fills instead of pixel RPCs.
+The ext4 metadata cache retains normal directory working sets, and unchanged
+builds no longer relink/repackage the boot image. The diagnostic TCG comparison and remaining synchronous disk
+mutation latency are recorded in the roadmap; native performance is not inferred.
+When shared TSC is unqualified, diagnostic HPET duration sampling is now 1/64
+per CPU/domain rather than several MMIO reads around every lock. Counts and
+regressions still cover all operations; system clock and watchdogs are unchanged.
+Sampled nanosecond maxima describe observed samples. The focused four-CPU KVM
+startup/timing replay now passes: prompt in 6.994 s, shared TSC qualified and no
+unavailable duration samples. See the roadmap for measured text/disk latency
+and the distinction from broader native acceptance.
+
 ## Boot image layout
 
 `bin/cloudberry.iso` is a hybrid ISO/GPT disk image: ISO9660 supplies the kernel,
 configuration and foundational kmodules, an embedded FAT EFI System Partition
 starts Limine, and GPT partition 4 is a separate 512 MiB ext4 filesystem named
-`Cloudberry drivers`. Xorriso also describes gap partitions around these regions.
-The ext4 root contains the configured `/boot/system/drivers` directory, currently
-empty. Limine 10 reads FAT/ISO9660, not ext4. The boot-loaded `usb-storage`,
+`Cloudberry system`. Xorriso also describes gap partitions around these regions.
+The ext4 root follows the [filesystem namespace](maps/filesystem.md): flat apps
+in `/system/apps`, providers in `/system/handlers`, root state in `/system/root`,
+and boot-completion kmodule directories. `/boot/kmodules/drivers` is reserved for
+explicit future drivers; it contains no application bundles in candidate images. Limine 10 reads FAT/ISO9660, not ext4. The boot-loaded `usb-storage`,
 `partition` and `ext4-fs` modules provide guest access and explicitly requested
 journaled writes. Bootstrap selects the unique driver volume and can load
 explicit future modules; the default image selects none.
@@ -218,22 +250,38 @@ DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmwa
 companions to PCI records. SCI delivery, runtime namespace reconciliation, embedded
 controllers, platform drivers and PCI INTx firmware routing remain deferred.
 
-## Current assessment (2026-10-18)
+## Current assessment (2026-10-19)
+
+Latest focused native checks pass with four KVM CPUs: prompt observed at 6.994 s
+(including 3.960 s before kernel entry), and five-sample dense-scroll median reduced
+from 311.815 ms to 8.322 ms after eliminating steady-state framebuffer reads.
+Clear measured 6.521 ms. The startup profile qualified shared TSC; the later
+rendering boots selected HPET after uncertainty rejection. Clock qualification
+therefore remains variable across boots. These focused results do not replace
+full-console, long-duration or physical-device acceptance. Small synchronous ext4
+mutations still measured 57–79 ms in the accepted native profile. See the latest
+[rendering evidence](ROADMAP.md#native-region-copy-follow-up--2026-10-19).
 
 The kernel foundation now includes storage selection, future disk-module loading
 and protected native processes. The disk-loaded `/@keyboard` and `/@applications` providers run through copied,
-manifest-authorized capability calls. The application lifecycle provider launches
+manifest-authorized capability calls. The text → graphics → display chain supplies a shared boot console. Display currently
+uses Limine’s framebuffer behind its replaceable contract. The ordinary terminal
+launches installed utilities, routes stdin/stdout/stderr and supports `=>`, `->`,
+and `|>`. See [terminal](apps/terminal/README.md), [graphics](handlers/graphics/README.md),
+and [streams](sdk/streams.md).
+The application lifecycle provider launches
 ordinary installed native applications and reports exit/fault completion without
 blocking its receive loop. Both providers run in isolated privileged userland.
 
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
-| Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; no demand growth, dynamic linking, migration or forced cancellation |
+| Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
 | Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures, sessions, forced termination or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
+| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and 10 ms UI multiplexing; no native GPU/window/session model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, boot-keyboard HID provider implemented; general HID/UAS and physical qualification remain open |
-| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
+| Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations and an application-facing filesystem provider with file streams | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
 | Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies and hidden init/start; table withdrawal and executable reclamation remain future work |
 
 Hub lifecycle and descriptor closure now pass focused validation. Class-only
@@ -276,12 +324,17 @@ pinned; selected future providers can drain calls and leases and retire without
 image unmapping. Published-table owners remain pinned until table-reader lifetime
 tracking exists. These mechanisms do not establish a throughput/latency bound.
 
-Current QEMU boot media is a read-only USB BOT disk backed by the hybrid ISO.
+Current QEMU boot media is a USB BOT disk backed by the hybrid ISO, read-only by default.
+`QEMU_BOOT_WRITABLE=1` uses a temporary writable snapshot; writes are discarded on
+VM exit and the ISO is unchanged. `filesystem.writable` permits writable ext4
+mounting when the medium supports it. The filesystem provider blocks app mutations
+under `/boot` and `/system`, except catalog-bound writes beneath the caller’s own
+root-session app-data directory; this is not general user-folder policy.
 An explicit `usb-bot`/`scsi-hd` attachment preserves its 512-byte GPT layout;
 the readonly medium must not be inferred as a 2048-byte optical device. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
 driver partition by its configured GUID. Normal startup runs the bootstrap
 coordinator, which claims supported transports as needed and mounts the unique
-configured driver volume read-only. Other mounts remain explicit caller-owned
+configured driver volume according to that policy. Other mounts remain explicit caller-owned
 operations. Copied Limine metadata reports boot-origin match/different/unknown
 separately from driver-volume selection; missing identity is never inferred from
 enumeration order. Native/physical USB and real
@@ -364,6 +417,10 @@ src/
 │   └── spaces.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
+│   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
+│   ├── filesystem/ (README.md, filesystem.c, manifest.json, provider.cnf)
+│   ├── graphics/ (README.md, graphics.c, glyphs.h, raster.c, raster.h, font.h, manifest.json, provider.cnf)
+│   ├── text/ (README.md, text.c, manifest.json, provider.cnf)
 │   └── keyboard/
 │       ├── README.md
 │       ├── config.cnf
@@ -380,6 +437,11 @@ src/
 │   ├── admission.h
 │   ├── applications.h
 │   ├── installations.h
+│   ├── display.h
+│   ├── graphics.h
+│   ├── text.h
+│   ├── stream.h
+│   ├── filesystem.h
 │   ├── handle.h
 │   ├── io.h
 │   ├── memory.h
@@ -468,10 +530,13 @@ src/
 │   │   ├── ext4-fs.json
 │   │   ├── ext4-fs.md
 │   │   ├── hwenum-module.c
+│   │   ├── handles-stream.inc
 │   │   ├── handles.c
 │   │   ├── handles.h
 │   │   ├── handles.json
 │   │   ├── handles.md
+│   │   ├── io-console.c
+│   │   ├── io-console.h
 │   │   ├── io-process.c
 │   │   ├── io-process.h
 │   │   ├── io.c
@@ -480,6 +545,7 @@ src/
 │   │   ├── io.md
 │   │   ├── manifest.h
 │   │   ├── hwenum.c
+│   │   ├── hpet-counter.h
 │   │   ├── hwenum.h
 │   │   ├── hwenum.json
 │   │   ├── hwenum.md
@@ -598,22 +664,37 @@ src/
 │   │   └── xstate.md
 │   └── README.md
 ├── maps/
+│   ├── filesystem.md
 │   └── startup.md
 ├── apps/
 │   ├── README.md
 │   ├── installed.json
 │   ├── launch/ (launch.c, manifest.json)
+│   ├── terminal/ (README.md, terminal.c, parser.h, manifest.json)
+│   ├── echo/ (echo.c, manifest.json)
+│   ├── cat/ (cat.c, manifest.json)
+│   ├── ls/ (ls.c, manifest.json)
+│   ├── pwd/ (pwd.c, manifest.json)
 │   └── true/ (true.c, manifest.json)
 ├── sdk/
+│   ├── service.h
+│   ├── stream.h
+│   ├── streams.md
 │   ├── application.h
 │   ├── application.ld
 │   ├── system.c
 │   └── system.h
 ├── tests/
+│   ├── console-boot.py
+│   ├── raster.c
+│   ├── graphics-present.c
+│   ├── display-copy.c
+│   ├── streams.c
 │   ├── apps/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
 │   │   ├── application-runtime.c
+│   │   ├── graphics-check.c
 │   │   ├── handle-bench.c
 │   │   ├── handle-stress.c
 │   │   ├── stress-client.json
@@ -639,9 +720,14 @@ src/
 │   ├── bootstrap-boot.c
 │   ├── bootstrap-load.c
 │   ├── block-boot.py
+│   ├── filesystem-tree.py
 │   ├── boot-image.py
 │   ├── clock-boot.c
 │   ├── clock.c
+│   ├── console-diagnostics.py
+│   ├── hpet-counter.c
+│   ├── hpet-zero-probe.c
+│   ├── io-keyboard-failure.c
 │   ├── config.c
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
@@ -736,6 +822,9 @@ src/
 │   └── xstate-host.c
 ├── tools/
 │   ├── build-installations.py
+│   ├── build-initial.py
+│   ├── filesystem-tree.py
+│   ├── stage-kmodules.py
 │   ├── build-boot-image.py
 │   ├── check-acpi-image.py
 │   ├── check-module-pic.py

@@ -24,7 +24,7 @@ static const struct config_value *config(const char *name,unsigned type){const s
 static void log_text(const char *text){kernel_surface_call log=kernel_surface_find(state.hub,"hardware.log");size_t bytes=0;while(text[bytes])++bytes;if(log)CALL(log,text,bytes,0);}
 static void report(void){
     if(state.info.error){log_text("bootstrap: driver volume unavailable: ");switch(state.info.error){case BOOTSTRAP_CONFIG:log_text("configuration");break;case BOOTSTRAP_MEMORY:log_text("memory");break;case BOOTSTRAP_TRANSPORT:log_text("transport/cleanup");break;case BOOTSTRAP_GPT:log_text("invalid GPT");break;case BOOTSTRAP_NOT_FOUND:log_text("GUID not found");break;case BOOTSTRAP_DUPLICATE:log_text("duplicate GUID");break;case BOOTSTRAP_FILESYSTEM:log_text("filesystem");break;case BOOTSTRAP_TOPOLOGY:log_text("topology changed");break;default:log_text("discovery timeout");break;}log_text("\n");}
-    else {log_text("bootstrap: read-only driver volume ready; boot origin ");log_text(state.info.origin==BOOTSTRAP_ORIGIN_MATCH?"matched\n":state.info.origin==BOOTSTRAP_ORIGIN_DIFFERENT?"different\n":"unknown\n");}
+    else {log_text(state.info.filesystem.readonly?"bootstrap: read-only driver volume ready; boot origin ":"bootstrap: writable driver volume ready; boot origin ");log_text(state.info.origin==BOOTSTRAP_ORIGIN_MATCH?"matched\n":state.info.origin==BOOTSTRAP_ORIGIN_DIFFERENT?"different\n":"unknown\n");}
 }
 static void fail(unsigned error){uint64_t flags=lock();state.info.error=error;unlock(flags);}
 static struct candidate *record(unsigned transport,uint64_t index,unsigned sub){struct candidate *p=allocate(sizeof(*p));if(!p){fail(BOOTSTRAP_MEMORY);return NULL;}p->transport=transport;p->index=index;p->nsid=transport==BOOTSTRAP_NVME?sub:0;p->port=transport==BOOTSTRAP_SATA?sub:0;p->next=state.first;state.first=p;return p;}
@@ -92,7 +92,9 @@ struct kernel_surface_result bootstrap_surface_select(MODULE_ARGS){
     const struct kernel_hub_table *usb=kernel_hub_find_table(state.hub,USB_TABLE_NAME);if(((const struct usb_table *)usb->address)->changes!=changes){fail(BOOTSTRAP_TOPOLOGY);goto done;}
     if(state.info.matches!=1){fail(state.info.matches?BOOTSTRAP_DUPLICATE:BOOTSTRAP_NOT_FOUND);goto done;}
     for(chosen=state.first;chosen && !chosen->part.cookie;chosen=chosen->next){}
-    if(!chosen || CALL(state.mount,&chosen->part,&state.info.filesystem,0).status){fail(BOOTSTRAP_FILESYSTEM);chosen=NULL;goto done;}
+    const struct config_value *write_config=config("config.filesystem.writable",CONFIG_BOOL);
+    unsigned writable=write_config && *(const uint8_t *)write_config->data && chosen && block_writable(&chosen->part);
+    if(!chosen || CALL(state.mount,&chosen->part,&state.info.filesystem,writable?EXT4_MOUNT_WRITE:0).status){fail(BOOTSTRAP_FILESYSTEM);chosen=NULL;goto done;}
     state.info.disk=chosen->disk;state.info.partition=chosen->part;state.info.transport=chosen->transport;state.info.hardware_index=chosen->transport==BOOTSTRAP_USB?UINT64_MAX:chosen->index;state.info.usb_controller=chosen->transport==BOOTSTRAP_USB?chosen->index:0;state.info.namespace_id=chosen->nsid;state.info.port=chosen->port;state.info.usb=chosen->usb;disk_copy(state.info.disk_guid,chosen->disk_guid,16);
     const struct kernel_hub_table *o=kernel_hub_find_table(state.hub,"boot.origin");const struct boot_origin *origin=o?(const void *)o->address:NULL;uint8_t zero[16]={0};
     if(origin && origin->present && !disk_equal(origin->disk_guid,zero,16))state.info.origin=disk_equal(origin->disk_guid,chosen->disk_guid,16)?BOOTSTRAP_ORIGIN_MATCH:BOOTSTRAP_ORIGIN_DIFFERENT;

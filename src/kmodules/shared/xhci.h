@@ -22,7 +22,8 @@ struct xhci_table {uint64_t magic;uint16_t major,minor;uint32_t record_bytes;uin
  * only when reaping a completed request; that buffer must remain valid until reap.
  * wait(id,request_id,out,absolute_deadline_ns) blocks with wake credits; timeout
  * leaves the request owned and pending until completion/cancel. One waiter per
- * request. Reap before closing; close refuses outstanding results/waiters.
+ * request. UINT64_MAX means notification-only waiting, without a timer deadline.
+ * Reap before closing; close refuses outstanding results/waiters.
  * cancel(id,device,endpoint) stops/resets endpoint and advances its dequeue.
  * hub(id,request) configures hub/TT context. disconnect(id,token) invalidates
  * the subtree and wakes pending I/O without releasing DMA.

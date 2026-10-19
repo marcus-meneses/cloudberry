@@ -9,7 +9,7 @@ static struct keyboard_layout layout;
 static struct keyboard_hid keyboard;
 static struct cb_keyboard_event *history;static size_t capacity,count,head;
 struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_keyboard_read read;uint64_t grant_ns;};
-static struct pending *pending;
+static struct pending *pending,*spare;
 static unsigned char incoming[CB_FRAME_LIMIT],outgoing[CB_FRAME_LIMIT];
 static void copy(void *dst,const void *src,size_t bytes){unsigned char *d=dst;const unsigned char *s=src;for(size_t i=0;i<bytes;++i)d[i]=s[i];}
 static int same_interface(const struct cb_interface_id *a,const struct cb_interface_id *b){for(unsigned i=0;i<16;++i)if(a->bytes[i]!=b->bytes[i])return 0;return 1;}
@@ -49,7 +49,11 @@ static int read_request(struct pending *request,int may_wait){
     if(!batch.count){if(request->delivery.call.deadline_ns && emitted_ns>=request->delivery.call.deadline_ns){reply(&request->delivery,CB_TIMEOUT,CB_NOT_COMMITTED,0);return 1;}return !may_wait;}
     copy(outgoing+sizeof(struct cb_reply_header),&batch,sizeof(batch));reply(&request->delivery,CB_OK,CB_COMMITTED,result-sizeof(struct cb_reply_header));return 1;
 }
-static void serve_pending(void){struct pending **at=&pending;while(*at){struct pending *request=*at;if(read_request(request,1)){*at=request->next;release(request);}else at=&request->next;}}
+/* Timed reads are frequent. Reuse one owned pending node rather than mapping
+ * and unmapping a process page for every empty read and timeout. */
+static struct pending *pending_allocate(void){struct pending *p=spare;if(p)spare=NULL;else p=allocate(sizeof(*p));return p;}
+static void pending_release(struct pending *p){if(!spare){p->next=NULL;spare=p;}else release(p);}
+static void serve_pending(void){struct pending **at=&pending;while(*at){struct pending *request=*at;if(read_request(request,1)){*at=request->next;pending_release(request);}else at=&request->next;}}
 static int admission(const unsigned char *data,size_t bytes,uint64_t *grant){struct cb_admission a;if(!cb_admission_parse(data,bytes,&a))return 0;*grant=a.grant_ns;return 1;}
 
 static void publish(void){
@@ -83,19 +87,21 @@ __attribute__((noreturn)) void _start(uint64_t argument){
             if(!delivery.call.handle && same_interface(&delivery.call.interface,&base) && delivery.call.operation==CB_HANDLE_RELEASE){
                 while(pending){struct pending *p=pending;pending=p->next;reply(&p->delivery,CB_REVOKED,CB_NOT_COMMITTED,0);release(p);}
                 struct cb_io_subscription close={subscription};if(invoke(io_handle,io,CB_IO_KEYBOARD_CLOSE,&close,sizeof(close),NULL,0,NULL))cb_exit(CB_RESOURCE_FAILURE);
-                release(history);(void)cb_system_release(publication);(void)cb_system_release(io_handle);(void)cb_system_release(memory_handle);cb_exit(0);
+                release(spare);spare=NULL;release(history);(void)cb_system_release(publication);(void)cb_system_release(io_handle);(void)cb_system_release(memory_handle);cb_exit(0);
             }
             if(!same_interface(&delivery.call.interface,&io) || delivery.call.operation!=CB_IO_KEYBOARD_EVENT || delivery.call.payload_bytes!=sizeof(struct cb_io_keyboard_event))cb_exit(CB_BAD_REQUEST);
     struct cb_io_keyboard_event event;copy(&event,payload,sizeof(event));if(event.subscription!=subscription)cb_exit(CB_BAD_HANDLE);
+            if(event.kind==CB_IO_ERROR && event.status==CB_PROVIDER_FAILED){cb_exit(CB_PROVIDER_FAILED);}
             if(event.kind==CB_IO_DEVICE_ADDED){device_id=event.device_id;keyboard_reset(&keyboard,emit,NULL);emit(NULL,CB_KEY_DEVICE_ADDED,0,0,0,0,0);struct cb_io_protocol protocol={.id=subscription};if(invoke(io_handle,io,CB_IO_KEYBOARD_PROTOCOL,&protocol,sizeof(protocol),NULL,0,NULL))cb_exit(CB_UNAVAILABLE);}
-            else if(event.kind==CB_IO_REPORT){unsigned previous=keyboard.repeat_key;keyboard_report(&keyboard,&layout,event.report,emit,NULL);if(previous!=keyboard.repeat_key)repeat_at=keyboard.repeat_key?emitted_ns+400000000:0;}
+            else if(event.kind==CB_IO_REPORT){/* Payload is copied; rearm capture before decoding/reply work. */acknowledge();unsigned previous=keyboard.repeat_key;keyboard_report(&keyboard,&layout,event.report,emit,NULL);if(previous!=keyboard.repeat_key)repeat_at=keyboard.repeat_key?emitted_ns+400000000:0;}
             else {keyboard_reset(&keyboard,emit,NULL);repeat_at=0;emit(NULL,CB_KEY_DEVICE_REMOVED,0,0,0,0,0);device_id=0;}
-            acknowledge();serve_pending();continue;
+            if(event.kind!=CB_IO_REPORT){acknowledge();}
+            serve_pending();continue;
         }
         uint64_t grant_ns;if(delivery.call.flags!=CB_CALL_PROVIDER_DELIVERY || delivery.call.handle!=publication || !admission(incoming+sizeof(delivery),delivery.context_bytes,&grant_ns)){reply(&delivery,CB_DENIED,CB_NOT_COMMITTED,0);continue;}
         if(delivery.call.operation==CB_KEYBOARD_STATE && !delivery.call.payload_bytes){struct cb_keyboard_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};size_t size=sizeof(struct cb_reply_header)+sizeof(state);for(unsigned i=0;i<256;++i)if(keyboard.pressed[i]){struct cb_keyboard_pressed key={device_id,7,i,0};copy(outgoing+size,&key,sizeof(key));size+=sizeof(key);++state.count;}copy(outgoing+sizeof(struct cb_reply_header),&state,sizeof(state));reply(&delivery,CB_OK,CB_COMMITTED,size-sizeof(struct cb_reply_header));}
         else if(delivery.call.operation==CB_KEYBOARD_READ && delivery.call.payload_bytes==sizeof(struct cb_keyboard_read)){struct pending request={.delivery=delivery,.grant_ns=grant_ns};copy(&request.read,payload,sizeof(request.read));if(request.read.version.bytes!=sizeof(request.read) || request.read.version.major!=1 || request.read.reserved || !request.read.max_events){reply(&delivery,CB_BAD_REQUEST,CB_NOT_COMMITTED,0);continue;}
-            if(!read_request(&request,1)){struct pending *copy_request=allocate(sizeof(*copy_request));if(!copy_request){reply(&delivery,CB_RESOURCE_FAILURE,CB_NOT_COMMITTED,0);continue;}*copy_request=request;copy_request->next=pending;pending=copy_request;}
+            if(!read_request(&request,1)){struct pending *copy_request=pending_allocate();if(!copy_request){reply(&delivery,CB_RESOURCE_FAILURE,CB_NOT_COMMITTED,0);continue;}*copy_request=request;copy_request->next=pending;pending=copy_request;}
         }else reply(&delivery,CB_BAD_REQUEST,CB_NOT_COMMITTED,0);
     }
 }

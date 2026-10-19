@@ -6,7 +6,8 @@
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 struct inode {uint64_t number,size;uint32_t flags,generation;uint16_t mode;uint8_t map[60];};
 struct volume {struct volume *next;struct block_device device;struct ext4_info info;uint64_t first_data,groups;uint32_t blocks_group,inodes_group,descriptor_bytes,seed,metadata;unsigned busy,disconnected;struct ext4_engine *engine;uint8_t scratch[4096],node[4096],data[4096];};
-static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;unsigned mounting;struct volume *first;kernel_surface_call cpu,thread,irq,alloc,free;} state;
+struct fs_waiter {struct fs_waiter *next;uint64_t cookie,thread;};
+static struct {struct fs_waiter *waiters;const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;unsigned mounting;struct volume *first;kernel_surface_call cpu,thread,irq,alloc,free;} state;
 static int foreground(void){uint64_t flags;__asm__ volatile("pushfq;pop %0":"=r"(flags));return (flags&512) && state.hub && !CALL(state.cpu,CPU_CURRENT,0,0).value && !CALL(state.cpu,CPU_DEPTH,0,0).value && !CALL(state.irq,0,0,0).value && CALL(state.thread,THREAD_CURRENT,0,0).value;
 }
 static uint64_t lock(void){return CALL(state.cpu,CPU_ENTER,0,0).value;
@@ -15,12 +16,16 @@ static void unlock(uint64_t f){CALL(state.cpu,CPU_LEAVE,f,0);}
 static struct volume *find(uint64_t id){for(struct volume *v=state.first;v;v=v->next)if(v->info.cookie==id)return v;
     return NULL;
 }
-static struct volume *acquire(uint64_t id){if(!foreground())return NULL;
-    uint64_t f=lock();struct volume *v=find(id);if(v && !v->busy && !v->disconnected){v->busy=1;v->info.error=EXT4_OK;}else v=NULL;unlock(f);
-    if(v && v->engine && !ext4_engine_enter(v->engine)){f=lock();v->busy=0;v->info.error=ext4_engine_error(v->engine);if(!v->info.error)v->info.error=EXT4_BUSY;unlock(f);return NULL;}
-    return v;
+/* Wait by stable cookie, never retain a volume pointer across a block. This
+ * serializes one mount's calls and survives disconnect/unmount while queued. */
+static void wake_volume(uint64_t cookie){for(struct fs_waiter *w=state.waiters;w;w=w->next)if(w->cookie==cookie)(void)CALL(state.thread,THREAD_WAKE,w->thread,0);}
+static struct volume *acquire(uint64_t id){
+    if(!foreground())return NULL;
+    for(;;){uint64_t f=lock();struct volume *v=find(id);if(!v || v->disconnected){unlock(f);return NULL;}if(!v->busy){v->busy=1;v->info.error=EXT4_OK;unlock(f);if(v->engine && !ext4_engine_enter(v->engine)){f=lock();v->busy=0;v->info.error=ext4_engine_error(v->engine);if(!v->info.error)v->info.error=EXT4_BUSY;wake_volume(id);unlock(f);return NULL;}return v;}
+        struct fs_waiter waiter={.cookie=id,.thread=CALL(state.thread,THREAD_CURRENT,0,0).value,.next=state.waiters};state.waiters=&waiter;unlock(f);struct kernel_surface_result blocked=CALL(state.thread,THREAD_BLOCK,0,0);f=lock();struct fs_waiter **at=&state.waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;unlock(f);if(blocked.status)return NULL;
+    }
 }
-static void finish(struct volume *v){if(v->engine){if(!v->info.error)v->info.error=ext4_engine_error(v->engine);ext4_engine_leave();}uint64_t f=lock();v->busy=0;unlock(f);}
+static void finish(struct volume *v){if(v->engine){if(!v->info.error)v->info.error=ext4_engine_error(v->engine);ext4_engine_leave();}uint64_t f=lock();v->busy=0;wake_volume(v->info.cookie);unlock(f);}
 static int fail(struct volume *v,unsigned error){v->info.error=error;return 0;
 }
 static uint32_t crc(uint32_t seed,const void *p,size_t n){return disk_crc(seed,p,n,0x82f63b78);
@@ -185,7 +190,7 @@ struct kernel_surface_result ext4_fs_surface_unmount(MODULE_ARGS){
     if(v->engine){if(!ext4_engine_unmount(v->engine)){finish(v);return module_result(0,0);}v->engine=NULL;ext4_engine_leave();}
     if(v->device.control(v->device.cookie,BLOCK_RELEASE,0,0,0,0).status){finish(v);return module_result(0,0);
     }
-    uint64_t flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;unlock(flags);CALL(state.free,state.heap,v,0);return module_result(1,1);
+    uint64_t flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;wake_volume(v->info.cookie);unlock(flags);CALL(state.free,state.heap,v,0);return module_result(1,1);
 }
 struct kernel_surface_result ext4_fs_surface_stat(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);
@@ -240,6 +245,6 @@ struct kernel_surface_result ext4_fs_surface_disconnect(MODULE_ARGS){
         if(v->engine){if(!ext4_engine_abort_enter(v->engine)){flags=lock();v->busy=0;unlock(flags);ok=0;break;}
             if(!ext4_engine_abort(v->engine)){ext4_engine_leave();flags=lock();v->busy=0;unlock(flags);ok=0;break;}v->engine=NULL;ext4_engine_leave();}
         if(v->device.control(v->device.cookie,BLOCK_RELEASE,0,0,0,0).status){flags=lock();v->busy=0;unlock(flags);ok=0;break;}
-        flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;unlock(flags);CALL(state.free,state.heap,v,0);++removed;
+        flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;wake_volume(v->info.cookie);unlock(flags);CALL(state.free,state.heap,v,0);++removed;
     }return module_result(removed,ok);
 }

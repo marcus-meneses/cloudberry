@@ -193,12 +193,12 @@ Port arrays are freed on rebind and exited worker stacks are reaped. Interrupt
 bitmaps are bounded to 32 bytes by the USB descriptor's 255-port field. No USB
 class allocation occurs in the IRQ handler.
 
-Boot configuration now supplies seven `config.<key>` descriptor references,
+Boot configuration now supplies eight `config.<key>` descriptor references,
 including the real appended drivers-partition GUID. The parser still permits
 omission of that optional schema item, but image building requires it.
-Each descriptor is 24 bytes and points into config-owned heap storage. The seven
-schema slots occupy 392 bytes, plus copied strings (31 bytes for the default
-directory/module/provider lists) and allocator metadata.
+Each descriptor is 24 bytes and points into config-owned heap storage. The eight
+schema slots occupy 448 bytes, plus copied directory/module/provider strings
+and allocator metadata. `filesystem.writable` is the added boolean descriptor.
 Limine reports the source file's address/size; parsed pointers do not depend on
 that source buffer. Config initializes after the boot heap, before hardware/APs.
 `hub.publish_tables(refs,count)` validates a whole batch before publication under
@@ -235,3 +235,21 @@ The privileged userland `/@applications` provider separately owns dynamic child
 and deferred-wait records through its private `/@memory` handle. Its readonly
 startup catalog and initial-launch data are copied by the existing process loader.
 Neither catalog pointers nor kernel process records cross into caller messages.
+
+
+## Console runtime
+
+Bootstrap supplies the validated Limine framebuffer metadata to the I/O mechanism.
+Only the catalog-bound display provider can invoke framebuffer writes; userland
+gets copied dimensions/pixels, never its mapping. Graphics allocates a display-sized
+ARGB backbuffer plus dynamic owner-local off-screen surfaces through private memory.
+Each surface has affine/clip/composition state, generation and dirty bounds.
+Owner-exit mailboxes reclaim abandoned surfaces. Text allocates a dimensions-derived
+cell grid; the terminal separately owns command parsing and stream routing.
+
+Pipes allocate 16 KiB buffers on demand; endpoint capabilities and wait registrations
+are separate. Launch binds new child-local directional capabilities before start.
+Ordinary process CPUs are selected by the kernel, while hardware providers retain
+required BSP affinity. This does not add thread migration. File streams retain
+copied paths/offsets and join BSP workers for ext4 operations; same-mount callers
+wait by cookie without retaining a volume pointer while blocked.

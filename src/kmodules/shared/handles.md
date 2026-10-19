@@ -1,112 +1,217 @@
-# Application handle mediation
+# Application-facing handle boundary, revision 1
 
-`handles` is a boot-pinned kernel mechanism, separate from the trusted kmodule
-hub. Applications enter through a copied `cb_system_gate` on vector 128; the
-kernel authenticates the process from its current thread. Local pointer fields
-exist only in this gate descriptor. Owned request/delivery/reply frames contain
-fixed-width fields and inline data, never caller pointers or hub method addresses.
+The headers define the public C ABI. Initial protected processes, copied handle
+mediation, boot-policy JSON authorization and the C system library are implemented;
+see [handles](../kmodules/shared/handles.md). These interfaces never expose the
+kmodule hub. Installed application identity and lifecycle now use a build-owned
+catalog and privileged userland provider. Sections below describe the complete
+target contract; vows, interactive approval, automatic safe rebind and C++ wrappers
+are not implemented by the initial boot-provider milestone.
 
-Trusted bootstrap admits an immutable copied JSON manifest while a process is
-READY, before its first thread starts. Version 1 has `resources`, each with a
-`name`, `operations`, optional `scope`, and optional `publish`. Resource/operation
-lists allocate on demand with no fixed count ceiling. ASCII identifiers and
-ASCII Unicode escapes are supported; unknown/duplicate keys, malformed framing,
-duplicate resources/operations and unsupported scopes fail closed. Only kernel
-boot policy can admit manifests or grant an OS publication name. Installation,
-signature verification, interactive approval and multiple user sessions remain
-separate work; this is not an app-supplied self-authorization mechanism.
+## Identity, discovery and reflection
 
-Named acquisition matches interface UUID and major/minimum-minor version, then
-mints a process-local capability with a never-reused boot token. Another process's
-token does not confer authority. Operation grants are frozen at acquisition;
-reflection returns only those operations and the authenticated data scope.
-Unscoped provider facts are withheld. `/@memory` grants only self-owned mappings;
-`/@io` currently requires keyboard scope; `/@keyboard` clients require boot-input
-scope. Keyboard delivery context carries the authenticated boot stream and
-capability grant timestamp. The single boot input domain is explicit, not a multi-session input router.
+The system library acquires handles by name and interface ID/version. The kernel
+derives process, session, installation and privilege from the executing context;
+the application cannot supply another caller identity. A handle is an opaque,
+process-local capability with a generation, not a provider pointer or a global
+numeric ID that another process may reuse. Zero is invalid. A stale capability
+must never alias a new grant. Transport adapters translate capability references;
+they never send local token integers as remote authority.
 
-Calls capture/validate input and the complete output range before dispatch.
-Preallocated kernel I/O channels and FIFO request queues wake blocked provider/
-client threads using existing wake credits. No broker lock spans provider code,
-USB I/O, waits or bulk user-memory allocation. Both same-CPU and cross-CPU process
-calls use this boundary. No ordinary resource syscall bypasses handle admission.
-The C implementation of the system library lives under `sdk/`; interface headers
-remain compile-time contracts, not direct resource implementations.
+The first loaded driver/handler is the privileged **keyboard handler**. Its
+single named resource is **`/@keyboard`**, interface `keyboard` 1.0. Foundational
+kmodules still load before it. `/@` is reserved for OS resources; custom `@` names
+are per-user and userland-owned. One logical handle has one name; a provider can
+publish several distinct handles. Duplicate names fail atomically.
 
-The transport limits each captured input to 15872 bytes and each reply to 16384
-bytes. These bound messages, not files, allocation sizes or manifest counts. The
-caller must offer at least a reply header before an operation may dispatch. A
-larger result than its buffer returns the required size and the reply header with
-the kernel-assigned request ID. Retrying that ID with the next attempt and identical
-payload retrieves the retained result; it never silently dispatches again. A
-changed payload, guessed request ID or a reply from another provider is rejected.
-Request records live until explicit `cb_system_request_release(id)`, capability
-release or caller exit. Forgetting a completed record relinquishes result replay;
-busy records cannot be forgotten. Providers release internal completed clock/I/O
-records so ongoing input does not accumulate a permanent request cache. There is no automatic
-exactly-once guarantee or automatic side-effect retry. Explicit status/vow APIs
-and transport implementations for remote providers are not implemented yet.
+Every handle supports the base interface: describe, release and request-status.
+Development tools may inspect a provider's complete published interface schema.
+Runtime describe reports only operations/data visible under that capability's
+effective grant. It exposes contract identity/version, compatible provider epoch,
+available granted operations and permitted resource facts, never implementation
+addresses, other clients, ungranted operations or hidden data. Providers supply
+their interface; the broker filters the view and independently checks every call.
+Importing these interface headers establishes types, not resource acquisition.
 
-A deadline can stop a queued call before dispatch. A timeout after dispatch has
-UNKNOWN outcome and preserves the captured request; a later provider result can
-replace that provisional timeout. Errors include original payload and a redacted
-broker trace frame, without kernel addresses. Authorized provider result data
-(such as an INPUT_RESYNC anchor) remains alongside that error information. Provider-specific private trace text
-is currently withheld. C callers receive statuses and structured frames; C++
-exception/RAII wrappers remain future SDK work.
+Interface IDs and operation numbers are stable. Major versions change incompatible
+contracts; minor versions add compatible operations/fields. Requests require an
+exact major and minimum minor. Explicit structure byte lengths allow later known
+prefixes; unknown mandatory operations/flags fail. Rights are sets of operation
+IDs and data scopes, not a fixed-size bitmask or a 16-resource manifest ceiling.
 
-`handles.decommission(pid)` is a kernel-owned cooperative lifecycle operation:
-it stops publication admission and queues a preallocated base-release event to
-the provider, which can finish admitted work and shut down. It is not a forced
-kill. `handles.inspect` copies publication identity and request counters for trusted
-diagnostics; it does not expose other clients through application reflection.
+## Authorization and publication
 
-Explicit publication release stops admission and fails queued calls, while already
-dispatched work may finish. Provider exit removes discovery immediately and wakes
-clients with NOT_DISPATCHED or UNKNOWN outcomes. Capability/request references keep
-publication metadata alive until readers release it. Caller exit releases its
-capabilities, captured requests and pending kernel events; process reap also runs
-cleanup for admitted but never-started images. Safe automatic provider rebind and
-restart policy are not implemented by this first transport milestone.
+Applications declare resource names, contract versions, demanded operations and
+data scopes in JSON manifests. Acquisition resolves availability/version, then
+evaluates those demands against installation policy and user grants. Authorization
+denial goes to the trusted OS approval path; refusal returns DENIED, with approval
+lifetime chosen by the user. Missing/unavailable resources return UNAVAILABLE
+without a permission prompt. Manifest declarations do not require every permission
+to be granted at app startup: a capability can expose the granted subset, and
+denied operations fail when requested rather than terminating an app merely for
+declaring them. No denied operation reaches the provider. A later permission review changes future admissions;
+dispatched calls finish and queued calls fail on revocation.
 
-`test-manifest` and `test-handles` run focused UBSan grammar, reflection, token,
-OOM rollback and lifetime checks, including preallocated event mailbox delivery.
-`test-process-boot` adds real protected server/client ELF fixtures on disposable
-ext4 media: scoped I/O, private memory allocation/release, denied reflection and
-operations, forged tokens/IDs/delivery flags/replies, invalid buffers, retained
-results and failure after provider exit. Four-CPU tests place the client on an AP.
-Fixtures never enter candidate images.
+A provider's privileged status does not grant arbitrary publication or hardware
+access. Only kernel-approved OS providers can publish `/@` resources. Identity
+combines the signing-key fingerprint and a system-assigned installed-provider ID
+(distinct for different installed providers, stable across their updates); key changes
+follow the existing explicit old/new-pair and user-approved installation policy.
+Boot providers receive explicit policy grants before startup, preventing the
+keyboard provider from needing a keyboard-driven approval prompt to initialize.
 
-Local acceptance: UBSan manifest/broker tests pass, including mailbox backpressure
-and OOM cleanup. Protected process/handle boots pass on one CPU
-(`367e08baf1eb47cbba4cc33f2f4bfb25`) and four CPUs/VT-d
-(`01b61ef8068547feac50ef81bbe04d9e`) under TCG. The latter uses a
-provider on the BSP and client on an AP. The subsequent keyboard acceptance exercises real emulated USB reports,
-independent read/state grants, grant-time-filtered replay, unplug/replug and
-cooperative shutdown through the production isolated provider. See
-[the keyboard handler](../../handlers/keyboard/README.md).
+## Invocation, buffers and errors
 
-Provider reply allocation failure does not mark an earlier provisional timeout as
-a final provider completion. The reply can be retried; captured input and retained
-reply state remain owned. Host OOM checks cover preserved prior result storage.
+The kernel entry is a copied-frame gate into kernel-space handle mediation.
+Resource operations remain handle invocations; no independent filesystem,
+keyboard or other resource-specific syscall family bypasses those grants.
+
+The public foundation is the C ABI; C++20 RAII/types/exceptions wrap it without
+putting vtables, C++ layouts or compiler symbols into messages. C callers receive
+status/outcome and retain full error details. Native applications are the target.
+
+`handle.h` defines fixed-width request/reply/error prefixes. Payloads follow the
+declared header size, with explicit byte counts. No pointers, callbacks, physical
+addresses or mapped-memory references appear on the wire. The system library's
+local C pointer arguments are marshalled into these records. The kernel first
+copies/validates caller buffers, checks overflow and all pages/permissions, then
+owns a stable request copy before dispatch. No raw caller pointer survives into
+provider execution. A future shared-memory handle is separately authorized and
+method-based; ordinary invocation does not imply direct shared-memory access.
+
+This framing specifies crossings, not mandatory IPC for every implementation.
+A provider in the same address space may use a private C dispatch path while
+preserving the interface, grants, immutable input, errors and lifetime rules.
+Kernel-native handlers can execute through kernel handle mediation without an
+extra provider process. Privilege/process crossings still require safe copies;
+remote transports marshal explicitly. Admission metadata can be pre-encoded and
+cached rather than rebuilt for each call. Implementations remain interchangeable
+without pretending that locality, latency and failure outcomes are identical.
+
+Current target encoding is little endian, with the tested C layouts. Remote or
+different-ABI adapters encode/decode these fields explicitly; they do not send
+native struct padding. Message chunks may be bounded; resource/file sizes and
+permission counts are not inferred from one frame's buffer size. Undersized reply
+buffers report the required size without repeating provider side effects: the
+broker retains the completed result until delivery/release under explicit resource
+failure policy. `cb_frame_fits` only checks framing, not authorization or user-copy.
+
+Methods are synchronous by default; blocking waits suspend the caller rather than
+poll. Zero deadline means no timeout. Optional async methods return an unnamed
+vow with await: completed results can be awaited repeatedly, a timeout does not
+cancel the operation, and overlapping awaits on the same vow fail BUSY.
+
+The kernel assigns a request namespace/serial and authenticates it per process.
+An initial call supplies a zero request ID and attempt zero; the broker assigns
+the ID returned in the reply. Only IDs already owned by that caller are accepted
+for retries/status queries. The broker rewrites the received handle token to the
+provider's local publication token and binds reply authorization to the admitted
+request/provider epoch; neither a forwarded client token nor a guessed request
+ID authenticates a provider response. Provider receive waits on its delivery queue.
+Its delivery-only prefix contains the provider epoch and a kernel-owned admission
+context before the original payload. That context supplies the effective operation/
+data grants and opaque input-routing/stream identity; clients cannot set it.
+Client invoke rejects the delivery flag and provider-only context. A provider uses
+this authenticated context, never client-supplied process/session/scope fields.
+Opaque IDs in its JSON are hexadecimal strings, preserving full-width identity
+for languages whose ordinary numeric values cannot represent every uint64_t.
+Retries preserve the logical request ID and use a new attempt number; they cannot
+change its original payload. Reports distinguish NOT_DISPATCHED, NOT_COMMITTED,
+COMMITTED and UNKNOWN. These are provider-validated outcomes, not an exactly-once
+promise. Expired/lost outcome records are UNKNOWN; clients choose retries.
+Failure preserves the original complete payload plus request ID/outcome and an
+appended trace chain. The broker supplies that original payload from its captured
+request, never from a provider's replacement. Frames carry provider/operation/attempt identity; addresses,
+private arguments and protected details are filtered across privilege boundaries.
+The C++ SDK maps these errors to exceptions; C gets the same structured details.
+
+## Lifetime and failure
+
+Release drops a capability reference. Ordinary providers live until final handle
+release unless explicitly decommissioned; boot providers also have an OS-owned
+reference. Owner revocation/decommission stops admission, finishes dispatched
+calls and fails queued calls before releasing state. Process exit drops its grants
+and references, and cannot free memory still owned by dispatched work.
+
+A provider failure removes its name immediately. Existing logical capabilities
+become suspended; undispatched calls may wait for safe recovery with deadlines.
+Dispatched calls fail with their original payload/outcome; the broker never
+silently redispatches them. Safe recovery rebinds existing logical handles only
+after verifying provider identity, compatible version, equivalent resource/data
+scope and the existing operation grants. Replacement code cannot expand rights.
+Provider epochs change; stale transport/device identities are rejected. Essential
+providers that cannot recover safely produce a stack dump. Userland restart/death
+remains user policy. Table pointers and executable lifetimes inside the trusted
+kmodule hub retain their existing separate rules.
+
+## First executable milestone
+
+Load the keyboard handler first from the configured driver filesystem after its
+foundational transport/storage kmodules are ready. It is a privileged isolated
+process using an OS I/O handle and its own memory handle, not a ring-0 kmodule
+given the public hub. The existing format3 `.kmod`/`.driver` loader loads trusted
+kmodules; it cannot silently substitute for a handler executable loader.
+
+Initial ring-3 entry/return, fault containment, owned process lifetime, static
+ext4 ELF loading and the copying/admission gate are implemented. Scoped USB HID facilities
+are bridged through /@io for the keyboard provider. The disk-loaded provider publishes `/@keyboard`; independent isolated clients
+acquire only manifest-authorized read/state operations. No general app installer, graphical interface, arbitrary
+device manager, networking or module image unloading is required for this step.
+See [the keyboard provider](../handlers/keyboard/README.md).
+
+`startup.h` defines the readonly native process startup-data envelope: versioned
+header plus named inline file entries. It carries bundle data explicitly selected
+by trusted startup policy, never handles, kernel pointers or additional runtime
+authority. The keyboard provider selects/interprets its own config/layout within
+that envelope. This is separate from handle invocation and from format3 kmodule
+initialization. Conventional argv/environment and runtime bundle filesystem access
+remain future work.
 
 
-Small gate frames use bounded per-call stack scratch; larger frames use a
-separate temporary allocation. Every retained request owns one allocation that
-contains both metadata and the immutable captured input, released together.
-Replies retain separate ownership so provisional timeout replacement and result
-replay keep their existing semantics. Host tests cover failed allocation, cleanup
-and source-buffer mutation after capture.
+## Installed application lifecycle
 
-Disposable tests can replace this module with an instrumented variant exposing
-`handles.profile` to the trusted test owner only. Candidate exports and code have
-no profiler. See [phase measurements and concurrency acceptance](../../tests/handle-profiling.md).
+`applications.h` defines launch/info/wait/stop/release frames for `/@applications`.
+`installations.h` defines the immutable OS catalog; `sdk/application.h` validates
+readonly argv/cwd startup data. `admission.h` decodes the broker-generated caller
+PID, installation ID and grant time. No payload field can replace those identities.
+Launch authority additionally requires the installation's launcher role; child
+operations require the caller owner. This initial installed policy is bound to the
+trusted build-owned image/catalog, without a general installer, sessions or signature checks.
+The [applications provider](../handlers/applications/README.md) owns runtime policy;
+`/@io` only bridges the catalog-bound process execution and completion mechanisms.
 
 
-Provider admission context now also carries a kernel-authenticated caller process
-ID and OS-bound installation ID, alongside the existing input domain/grant time.
-`interfaces/admission.h` parses that canonical context; it is not caller payload.
-The keyboard provider uses the shared parser, preserving its grant-time filtering.
-Native kernel-resource calls reserve their copied result buffer before mutation.
-A valid provider BAD_REQUEST is a completed error result; normalization framing
-is validated separately so provisional timeouts can be replaced and released.
+## Console, rendering and standard streams
+
+`display.h` defines dimensions, fill and canonical RGB region blits. `graphics.h`
+defines dynamically owned ARGB surfaces, software shapes/paths, transforms,
+clipping/composition, bitmaps/blits and generation/dirty-region tracking. `text.h`
+defines the actual cell grid, UTF-8 output and positioned cells. Their providers
+are independent privileged processes in text → graphics → display order.
+
+`stream.h` defines directional pipe/file read/write capabilities. Launch ABI 1.1
+adds explicit stdin/stdout/stderr sources. Only the kernel translates these to
+new child-local capabilities after child-manifest validation; the SDK retrieves
+them with `cb_standard`. The new system gate returns zero for an absent binding.
+`filesystem.h` exposes canonical-path open/stat/list/remove/mkdir and returns
+caller-owned streams, preserving the same read/write contract across backing types.
+The C layouts contain no kernel or provider pointers. See [streams](../sdk/streams.md)
+and [graphics](../handlers/graphics/README.md) for bounds and lifetime rules.
+
+
+## Standard stream mechanisms
+
+The broker publishes the `/@streams` I/O factory. Directional endpoints carry
+owned pipe/file state and reflect only their granted direction. Blocking releases
+metadata locks and uses stack wait records plus scheduler wake credits. Pipe EOF,
+backpressure and broken-peer errors are independent of terminal policy.
+`handles.stream_bind` is trusted launch-time delegation into a READY admitted
+child, constrained by its manifest. `CB_SYSTEM_STANDARD` retrieves those bindings;
+releasing a bound endpoint clears that standard slot. File workers retain bounded
+buffers until full join completion and never execute ext4 on an AP.
+
+Catalog-bound display/filesystem/graphics providers acquire narrower `/@io`
+operations. `handles.owner_watch` preallocates owner-exit mailboxes used for
+abandoned graphics-surface reclamation; notifications never contain kernel pointers.
+File mutation resource failures are reported with unknown outcome conservatively.
+The normal broker variant contains no test profiling exports.

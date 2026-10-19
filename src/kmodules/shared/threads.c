@@ -159,6 +159,7 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
         suspend(a==THREAD_YIELD?THREAD_RUNNABLE:THREAD_BLOCKED,a==THREAD_BLOCK_UNTIL?b:0);return module_result(1,1);
     }
     uint64_t flags=enter();
+    if(a==THREAD_SELECT_CPU) {size_t best=0,minimum=SIZE_MAX;for(size_t cpu=0;cpu<state.count;++cpu){size_t load=0;for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==cpu && t->info.process_id && status(t)!=THREAD_EXITED && status(t)!=THREAD_REAPING)++load;if(load<minimum){minimum=load;best=cpu;}}leave(flags);return module_result(best,1);}
     if(a==THREAD_CURRENT) {struct thread *current=state.cpus[current_cpu()].current;uint64_t id=current?current->info.id:0;leave(flags);return module_result(id,1);}
     if(a==THREAD_TIMING && c) {*(struct thread_timing *)c=state.cpus[current_cpu()].timing;leave(flags);return module_result(1,1);}
     if(a==THREAD_DEADLINE) {uint64_t deadline=0;

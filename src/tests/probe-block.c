@@ -67,8 +67,8 @@ struct kernel_surface_result probe_block_call(MODULE_ARGS){
     CHECK(CALL(close,job->write==1?0:disk.cookie,0,0).status);
     CHECK(part.write(part.cookie,part.blocks,1,(uintptr_t)buffer,sizeof(buffer),0).status);
     struct ext4_info fs;CHECK(!CALL(mount,&part,&fs,EXT4_MOUNT_WRITE).status && !fs.readonly);CHECK(CALL(unselect,part.cookie,0,0).status);
-    struct kernel_surface_result r=read(fs.cookie,(uintptr_t)"/boot/system/drivers/probe.bin",123,(uintptr_t)buffer,sizeof(buffer),0);CHECK(!r.status && r.value==sizeof(buffer));for(unsigned i=0;i<sizeof(buffer);++i)CHECK(buffer[i]==(uint8_t)((i+123)*37+11));
-    const char *path="/boot/system/drivers/backend-write.bin";
+    struct kernel_surface_result r=read(fs.cookie,(uintptr_t)"/boot/kmodules/drivers/probe.bin",123,(uintptr_t)buffer,sizeof(buffer),0);CHECK(!r.status && r.value==sizeof(buffer));for(unsigned i=0;i<sizeof(buffer);++i)CHECK(buffer[i]==(uint8_t)((i+123)*37+11));
+    const char *path="/boot/kmodules/drivers/backend-write.bin";
     for(unsigned i=0;i<sizeof(buffer);++i)buffer[i]=i*13+7;
     CHECK(!write(fs.cookie,(uintptr_t)path,0,(uintptr_t)buffer,sizeof(buffer),EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE).status);
     CHECK(!write(fs.cookie,(uintptr_t)path,UINT64_MAX,(uintptr_t)"TAIL",4,EXT4_WRITE_APPEND).status);
@@ -76,8 +76,8 @@ struct kernel_surface_result probe_block_call(MODULE_ARGS){
     CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(mount,&part,&fs,0).status && fs.readonly);
     r=read(fs.cookie,(uintptr_t)path,4096,(uintptr_t)buffer,sizeof(buffer),0);CHECK(!r.status && r.value==4 && buffer[0]=='T' && buffer[3]=='L');
     CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(mount,&part,&fs,EXT4_MOUNT_WRITE).status);
-    CHECK(!mutate(fs.cookie,EXT4_MUTATE_RENAME,(uintptr_t)path,0,(uintptr_t)"/boot/system/drivers/renamed.bin",0).status);
-    CHECK(!mutate(fs.cookie,EXT4_MUTATE_REMOVE,(uintptr_t)"/boot/system/drivers/renamed.bin",0,0,0).status);
+    CHECK(!mutate(fs.cookie,EXT4_MUTATE_RENAME,(uintptr_t)path,0,(uintptr_t)"/boot/kmodules/drivers/renamed.bin",0).status);
+    CHECK(!mutate(fs.cookie,EXT4_MUTATE_REMOVE,(uintptr_t)"/boot/kmodules/drivers/renamed.bin",0,0,0).status);
     CHECK(!CALL(unmount,fs.cookie,0,0).status && !CALL(unselect,part.cookie,0,0).status);
     uint64_t route=0;struct irq_info irq;
     if(job->write==1){CHECK(!CALL(kernel_surface_find(hub,"nvme.info"),&ni,0,0).status && ni.interrupts);route=ni.route_id;}

@@ -1,5 +1,6 @@
 #include "io.h"
 #include "io-process.h"
+#include "io-console.h"
 #include "process.h"
 #include "threads.h"
 #include "usb.h"
@@ -53,9 +54,8 @@ struct kernel_surface_result io_surface_worker(MODULE_ARGS){
             flags=lock();s->active=0;unlock(flags);if(stopped(s))break;
             if(!read.status && result.state==HOST_COMPLETE && result.bytes==8){if(!event(s,CB_IO_REPORT,CB_OK)){ok=0;break;}continue;}
             struct usb_device device={0};int alive=!CALL(state.device,&s->ref,&device,0).status && device.state==USB_CONFIGURED;
-            /* Existing USB transactions retain their one-second health deadline.
-             * Empty interrupt endpoints are rearmed after safe cancellation;
-             * applications wait on notifications rather than polling the bus. */
+            /* Interrupt-IN waits for reports/disconnect without an idle timeout.
+             * Explicit cancellation may still terminate a retained receive. */
             if(alive && result.state==HOST_CANCELLED)continue;
             if(!event(s,alive?CB_IO_ERROR:CB_IO_DEVICE_REMOVED,alive?CB_UNAVAILABLE:CB_OK)){ok=0;break;}
             if(alive)s->skip_id=s->ref.id;
@@ -64,6 +64,14 @@ struct kernel_surface_result io_surface_worker(MODULE_ARGS){
         if(!release_claim(s)){ok=0;break;}
     }
     (void)CALL(state.watch,0,0,0);if(!release_claim(s))ok=0;
+    /* Terminal failure is one-way: never wait for a potentially failed
+     * provider to acknowledge our own exit. The preallocated mailbox copies
+     * the payload; unsafe DMA ownership remains retained. */
+    if(!stopped(s)){
+        ok=0;struct cb_io_keyboard_event failed={.subscription=s->id,.device_id=s->ref.id,.timestamp_ns=CALL(state.clock,0,0,0).value,.kind=CB_IO_ERROR,.status=CB_PROVIDER_FAILED};
+        const struct cb_interface_id interface=CB_IO_INTERFACE_ID;
+        (void)state.post(s->pid,s->id,(uintptr_t)&failed,sizeof(failed),(uintptr_t)&interface,CB_IO_KEYBOARD_EVENT);
+    }
     uint64_t flags=lock();for(struct subscription *other=state.first;other;other=other->next)if(other!=s && other->thread)CALL(state.thread,THREAD_WAKE,other->thread,0);unlock(flags);
     return module_result(ok,ok);
 }
@@ -72,7 +80,7 @@ struct kernel_surface_result io_surface_init(MODULE_ARGS){
 #define BIND(field,name) do{state.field=kernel_surface_find(hub,name);if(!state.field)return module_result(0,0);}while(0)
     BIND(alloc,"mem.calloc");BIND(free,"mem.free");BIND(cpu,"cpu.control");BIND(thread,"threads.control");BIND(create,"threads.create");BIND(clock,"clock.now_ns");BIND(device,"usb.device");BIND(interface,"usb.interface");BIND(endpoint,"usb.endpoint");BIND(claim,"usb.claim");BIND(release,"usb.release");BIND(control,"usb.control");BIND(transfer,"usb.transfer");BIND(cancel,"usb.cancel");BIND(watch,"usb.watch");BIND(channel,"handles.channel");BIND(post,"handles.post");BIND(unsubscribe,"handles.unsubscribe");BIND(process_info,"process.info");
 #undef BIND
-    state.hub=hub;state.heap=b;return module_result(1,io_process_init(hub,b));
+    state.hub=hub;state.heap=b;io_console_hub(hub);return module_result(1,io_process_init(hub,b) && (!c || io_console_init((const void *)c)));
 }
 static cb_status_t close_subscription(struct subscription *s,int wait){
     uint64_t flags=lock();__atomic_store_n(&s->stop,1,__ATOMIC_RELEASE);uint64_t tid=s->thread;int active=s->active;unlock(flags);
@@ -87,6 +95,8 @@ static cb_status_t close_subscription(struct subscription *s,int wait){
 struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !state.hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
     if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(state.clock,0,0,0).value;copy(r->output,&time,8);r->actual=8;r->status=CB_OK;}return module_result(1,1);}
+    if(io_filesystem_invoke(r))return module_result(1,1);
+    if(io_console_invoke(r))return module_result(1,1);
     if(io_process_invoke(r))return module_result(1,1);
     struct process_info process;if(CALL(state.process_info,r->process,&process,0).status || process.cpu || CALL(state.cpu,CPU_CURRENT,0,0).value){r->status=CB_DENIED;return module_result(1,1);}
     if(r->operation==CB_IO_KEYBOARD_SUBSCRIBE && !r->bytes && r->capacity>=8){

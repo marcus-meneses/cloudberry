@@ -15,7 +15,7 @@ struct ring {struct trb *trbs;uint64_t physical;unsigned tail,cycle;};
 struct endpoint {
     struct ring ring;struct dma *storage;struct host_endpoint_request definition;
     struct host_transfer_result result;void *buffer;uint32_t bytes,direction;
-    uint64_t event_pointer,data_pointer,setup_pointer,waiter;unsigned short_bytes,short_seen,configured,halted;
+    uint64_t event_pointer,data_pointer,setup_pointer,waiter;unsigned short_bytes,short_seen,configured,halted,cancelling;
 };
 struct slot {uint64_t token,port_generation,parent;unsigned port,addressed,route,depth,speed,downstream,hub_ports,multi_tt,think_time,tt_slot,tt_port,disconnected;struct dma *contexts;struct endpoint *ep[32];};
 struct command_waiter {struct command_waiter *next;uint64_t thread;};
@@ -154,7 +154,11 @@ static unsigned drain(struct controller *c) {
                 if(endpoint->result.state==HOST_PENDING) {
                     uint64_t pointer=event.parameter&~UINT64_C(15);unsigned residual=event.status&0xffffff;
                     if(pointer!=endpoint->event_pointer && pointer!=endpoint->data_pointer && pointer!=endpoint->setup_pointer)mark_failed(c);
-                    else if(code==13 && ep==1 && pointer==endpoint->data_pointer && pointer!=endpoint->event_pointer) {
+                    else if(endpoint->cancelling && (code==26 || code==27)) {
+                        /* Stop Endpoint reports quiescence before command completion.
+                         * Retain the request until Set TR Dequeue commits cancellation. */
+                        endpoint->result.completion_code=code;
+                    } else if(code==13 && ep==1 && pointer==endpoint->data_pointer && pointer!=endpoint->event_pointer) {
                         if(residual>endpoint->bytes)mark_failed(c);else {endpoint->short_seen=1;endpoint->short_bytes=endpoint->bytes-residual;}
                     } else {
                         endpoint->result.completion_code=code;
@@ -502,12 +506,20 @@ struct kernel_surface_result xhci_surface_cancel(MODULE_ARGS) {
     struct slot *s=device_find(p,b,&number,0);unsigned dci=endpoint_index(c);
     struct endpoint *ep=s && !(c&~143u) && (!c || (c&15))?s->ep[dci]:NULL;
     if(!ep || !ep->configured)return finish(p,0,0);
-    uint32_t *out=(void *)(s->contexts->pages.address+dci*p->record.info.context_bytes);unsigned epstate=out[0]&7;
-    unsigned pending=ep->result.state==HOST_PENDING;
-    unsigned cmd=epstate==2?14:15;
-    if(!command(p,(struct trb){.control=(cmd<<10)|(dci<<16)|(number<<24)},NULL))return finish(p,0,0);
-    if(!command(p,(struct trb){.parameter=(ep->ring.physical+ep->ring.tail*16)|ep->ring.cycle,.control=(16u<<10)|(dci<<16)|(number<<24)},NULL))return finish(p,0,0);
-    uint64_t flags=lock();if(pending && ep->result.state!=HOST_COMPLETE && ep->result.state!=HOST_DISCONNECTED)ep->result.state=HOST_CANCELLED;ep->halted=0;notify(ep);unlock(flags);return finish(p,1,1);
+    const volatile uint32_t *out=(void *)(s->contexts->pages.address+dci*p->record.info.context_bytes);
+    uint64_t flags=lock();unsigned epstate=out[0]&7,pending=ep->result.state==HOST_PENDING;ep->cancelling=1;unlock(flags);
+    int ok=0;
+    /* Running -> Stop; Halted -> Reset; Stopped already permits Set Dequeue.
+     * Re-stopping a Stopped endpoint produces Context State Error on real HCIs. */
+    if(epstate==1 || epstate==2){unsigned cmd=epstate==2?14:15;
+        if(!command(p,(struct trb){.control=(cmd<<10)|(dci<<16)|(number<<24)},NULL))goto done;
+    }else if(epstate!=3)goto done;
+    if(!command(p,(struct trb){.parameter=(ep->ring.physical+ep->ring.tail*16)|ep->ring.cycle,.control=(16u<<10)|(dci<<16)|(number<<24)},NULL))goto done;
+    ok=1;
+done:
+    flags=lock();ep->cancelling=0;
+    if(ok){if(pending && ep->result.state!=HOST_COMPLETE && ep->result.state!=HOST_DISCONNECTED)ep->result.state=HOST_CANCELLED;ep->halted=0;notify(ep);}
+    unlock(flags);return finish(p,ok,ok);
 }
 struct kernel_surface_result xhci_surface_remove(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);if(!begin(p,a))return failure();
@@ -533,13 +545,13 @@ struct kernel_surface_result xhci_surface_wait(MODULE_ARGS) {
     MODULE_UNUSED();struct controller *p=find(a);if(!foreground() || !p || !c || !d)return failure();
     uint64_t current=CALL(state.thread,THREAD_CURRENT,0,0).value;if(!current)return failure();
     for(;;) {
-        uint64_t time=now(),flags=lock();struct endpoint *ep=request_find(p,b);
+        uint64_t time=d==UINT64_MAX?0:now(),flags=lock();struct endpoint *ep=request_find(p,b);
         if(p->record.info.id!=a || !ep || (ep->waiter && ep->waiter!=current)) {unlock(flags);return failure();}
         if(ep->result.state!=HOST_PENDING) {*(struct host_transfer_result *)c=ep->result;ep->waiter=0;unlock(flags);return module_result(1,1);}
         if(time==UINT64_MAX || time>=d) {ep->waiter=0;unlock(flags);return failure();}
         ep->waiter=current;unlock(flags);
         /* Wake credits cover completion between the check and blocking. */
-        if(CALL(state.thread,THREAD_BLOCK_UNTIL,d,0).status) {flags=lock();ep->waiter=0;unlock(flags);return failure();}
+        if(CALL(state.thread,d==UINT64_MAX?THREAD_BLOCK:THREAD_BLOCK_UNTIL,d==UINT64_MAX?0:d,0).status) {flags=lock();ep->waiter=0;unlock(flags);return failure();}
     }
 }
 

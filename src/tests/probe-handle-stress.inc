@@ -6,10 +6,10 @@ static int handle_stress(const struct kernel_surfaces *hub,uint64_t filesystem,s
     STRESS_CHECK(!(profiling && CALL(profiling,HP_LIVE,&heap_before,0).status));
     for(unsigned cycle=0;cycle<2;++cycle){
         uint64_t ids[7],deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
-        struct process_request r={.abi=1,.filesystem=filesystem,.path="/boot/system/drivers/handle-stress.elf",.stack_bytes=131072};
+        struct process_request r={.abi=1,.filesystem=filesystem,.path="/boot/kmodules/drivers/handle-stress.elf",.stack_bytes=131072};
         /* Construct every actor before starting: no ELF/manifest I/O in the
            short dispatched-timeout window. Spread clients across available CPUs. */
-        for(unsigned i=0;i<7;++i){r.cpu=i%probe->cpus;r.argument=i+1;struct kernel_surface_result p=CALL(load,&r,0,0);STRESS_CHECK(!(p.status || !admit_file(hub,filesystem,p.value,i?"/boot/system/drivers/stress-client.json":"/boot/system/drivers/stress-server.json")));ids[i]=p.value;}
+        for(unsigned i=0;i<7;++i){r.cpu=i%probe->cpus;r.argument=i+1;struct kernel_surface_result p=CALL(load,&r,0,0);STRESS_CHECK(!(p.status || !admit_file(hub,filesystem,p.value,i?"/boot/kmodules/drivers/stress-client.json":"/boot/kmodules/drivers/stress-server.json")));ids[i]=p.value;}
         STRESS_CHECK(!(CALL(start,ids[0],0,0).status));
         while(!CALL(available,"@stress",0,0).value){uint64_t time=CALL(clock,0,0,0).value;STRESS_CHECK(!(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status));}
         for(unsigned i=1;i<=3;++i)STRESS_CHECK(!(CALL(start,ids[i],0,0).status));

@@ -24,6 +24,8 @@ struct usb_interface {uint64_t owner;uint8_t number,alternate,class_code,subclas
 struct usb_endpoint {uint8_t address,transfer_type,interval,max_burst;uint16_t max_packet,max_esit;uint32_t host_type,supported;};
 struct usb_io {
     struct usb_ref device;
+    /* Zero: default bounded control/bulk, notification-only interrupt-IN.
+     * Finite values: caller's absolute deadline. UINT64_MAX: notification-only. */
     uint64_t owner,deadline_ns;
     uint32_t interface,endpoint,bytes,reserved;
     void *buffer;

@@ -1,0 +1,8 @@
+version=1
+executable=graphics.elf
+manifest=manifest.json
+ready=/@graphics
+installation_id=d33f70360e682facfa698f97f0c636c9
+cpu=0
+stack_bytes=262144
+files=

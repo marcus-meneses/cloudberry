@@ -549,7 +549,7 @@ The host image check extracts the packaged cloudberry.cnf, validates primary and
 backup GPT CRCs, confirms that its drivers.partition_guid selects exactly one
 Linux filesystem partition of at least 512 MiB and preserves an EFI partition.
 It extracts that partition to a disposable sparse regular file, runs e2fsck -fn
-and verifies the configured /boot/system/drivers directory through debugfs.
+and verifies the configured /boot/kmodules/drivers directory through debugfs.
 Normal and fault boot fixtures use the shared image builder, with all formatting
 at build time. The real boot probe now validates the typed partition-GUID reference
 and five config entries. Latest one-CPU UEFI acceptance: 99222c353e564ba1b12adc9f87cbce3d.
@@ -838,3 +838,177 @@ The process boot acceptance also runs a disposable registered lifecycle launcher
 concurrent ordinary apps, argv/cwd, manifest/owner denial, cooperative stop,
 deferred wait timeout/replay, child fault, caller abandonment and service cleanup.
 The candidate contains only `launch` and `true`, with no automatic test launch.
+
+
+## Console and software graphics
+
+`make -C src test-console-host` runs UBSan raster/quoting and stream ownership,
+backpressure, EOF/delegation/cleanup tests without booting. `test-interfaces`
+checks new rendering/stream/filesystem/launch C layouts in C and C++20.
+
+`make -C src test-console-boot QEMU_CPUS=4 QEMU_ACCEL=tcg` builds an isolated
+fixture image under `bin/tests/console/<run-id>`. The original candidate remains
+unchanged. The fixture registers graphics-check and a passive initial supervisor,
+plus a binary file larger than the pipe buffer. Real USB keyboard injection drives
+the production terminal; screenshot decoding verifies visible text. The test checks
+recreate/append, piping, cwd, protected paths, graphics primitives and damage,
+foreign-owner denial, abandoned-surface cleanup missing-file error delivery, independent stderr and interactive stdin/EOF.
+Type-ahead spanning idle/foreground transitions is retained in one event queue.
+After stopping QEMU it independently extracts and compares the large copied file.
+Only disposable boot media is attached; no developer NVMe/SATA disk is opened.
+Screenshots, decoded text, logs and result JSON remain in the run directory.
+
+For native correctness acceptance, use the same target with `QEMU_ACCEL=kvm`.
+This is not a replacement for repeated uninstrumented performance measurements.
+No /dev/kvm is exposed in the agent environment.
+
+
+`make -C src test-filesystem-tree` validates the generated production namespace,
+flat executable/manifest/resources paths, catalog-derived identity indexes,
+root-private state, shared keyboard definitions and every Limine module path.
+The isolated console test additionally writes/reads terminal's own root app-data
+and exercises `ls -a` for hidden underscore metadata. All test writes use a copied
+disposable image.
+
+
+For a stalled console, run the disposable harness with `--diagnostics`:
+
+```sh
+python3 src/tests/console-boot.py bin --cpus=4 --accel=tcg --fixtures --diagnostics
+```
+
+On failure it attaches GDB through a test-only Unix socket and saves
+`diagnostics.log`: relocated module symbols, vCPU stacks/registers, lock/watchdog
+state, scheduler threads, processes, handle requests/publications/channels,
+keyboard capture state and xHCI endpoints. Reads do not call guest methods or
+modify guest state; debugger attachment pauses/resumes the guest. No debug server
+is added to normal candidate startup. Fatal kernel messages are detected before
+waiting for a screen timeout. Keyboard injection uses explicit press/release
+edges, avoiding dependence on QMP `send-key`'s guest-time delay queue. The final
+idle-and-resume step checks that an empty interrupt-IN receive stays armed and
+resumes input without recurring idle cancellation/rearming.
+
+`test-hpet-counter` forces high-half rollovers, transient/persistent zero reads
+and bounded failure. Keyboard host tests cover pending-node reuse and failed
+worker notification; xHCI's model checks real endpoint states and intermediate
+Stopped transfer events.
+
+HPET zero-read diagnosis uses a separate kernel CPU object; the candidate kernel
+is never replaced:
+
+```sh
+make -C src ../bin/tests/hpet-zero-kernel.elf ../bin/tests/apps/graphics-check.elf
+python3 src/tests/console-boot.py bin --fixtures --cpus=4 --diagnostics \
+    --kernel bin/tests/hpet-zero-kernel.elf --mmio-trace
+```
+
+This deliberately traps on the first rejected all-zero sample and reports a
+failed console run when captured. Inspect `hpet_zero_probe`, its guest page-table
+walk and `mmio.log`; the probe is not an acceptance test. Tracing is expensive
+and can itself exhaust provider startup deadlines. Run
+`python3 src/tests/console-boot.py bin --cpus=4 --accel=kvm --storage-devices --diagnostics`
+for an isolated native reproduction with fresh 1 GiB NVMe/SATA disks. It attaches
+neither persistent development disk. Provider startup logs include bundle,
+launch/readiness phase, and available process exit/fault information; debugger
+snapshots include bootstrap records. See [the HPET investigation](../kmodules/shared/clock.md#zero-read-cause-established-2026-10-19)
+for the established QEMU wrong-device dispatch and the remaining qualifications.
+
+Focused console performance probes remain fixture-only:
+
+```sh
+python3 src/tests/console-boot.py bin --fixtures --profile-only --cpus=4 --diagnostics
+python3 src/tests/console-boot.py bin --fixtures --scroll-only --cpus=4 --diagnostics
+```
+
+`profile.json` records guest-clock nanoseconds for 1/32/128-character text writes,
+filesystem stat and create/write/remove of a temporary file on the disposable
+image. It also records host wall time and accelerator/CPU count. These are
+diagnostic samples, not a statistically qualified native baseline. `scroll.json`
+records wall time for 60 numbered lines, checking the final output/prompt after
+wrapping and scrolling. The complete console fixture also checks this case.
+Host raster checks compare batch output with individual glyphs, reject an entire
+malformed batch before drawing, and compare overlapping copies with the general
+snapshot path in both directions with clipping and damage/generation checks.
+
+Startup timing uses the production app catalog on copied media and exits after
+the first prompt visibly echoes an injected key:
+
+```sh
+python3 src/tests/console-boot.py bin --startup-only --storage-devices --cpus=4 --diagnostics
+python3 src/tests/console-boot.py bin --startup-only --startup-trace --storage-devices --cpus=4 --accel=kvm --diagnostics
+```
+
+`startup.json` records host-monotonic seconds from QEMU launch, the first observed
+prompt, the verified input echo and timestamped boot-log milestones. Image
+preparation is excluded. Framebuffer polling/decoding introduces detection delay;
+key-to-echo includes explicit press/release injection and is not a precise input
+latency benchmark. Runs are sequential diagnostic samples, not a statistical
+baseline. `--startup-trace` builds separate kernel/bootstrap images under
+`bin/tests`, with `CB_BOOT_TIMING` marking module initialization and provider
+load/readiness phases. Only copies in the disposable image are replaced; tracing
+is absent from normal candidate builds. It adds observable logging overhead.
+The diagnostic loader uses the matching bootstrap symbols on failure. No test
+apps are installed in startup-only images and persistent disks are never used.
+
+Startup repair checks: `test-ext4-write` also checks that twenty warmed deep-path
+metadata lookups issue zero physical reads. `test-console-host` compares uniform
+RGB detection for mixed, transparent, clipped-subregion and invalid bounds.
+`--startup-trace` includes per-file and process-load spans in addition to provider
+readiness; those messages are compiled only into the separate diagnostic module.
+
+The HPET profiler now samples 1/64 entries separately per CPU/domain when TSC
+is unqualified; qualified-TSC durations remain fully measured. `test-cpu-profile`
+checks exact selection counts, paired-reference retention, omitted-reference
+rejection, valid zero references and existing rate/epoch/regression contracts.
+Deliberately omitted durations are `cpu_metrics.sampled_out_ns`; they are not
+failed samples or measured zero durations. Historical full-HPET peak comparisons
+need this coverage difference considered before interpreting maxima.
+
+`--fixtures --profile-only --diagnostics` captures a read-only GDB snapshot after
+timing completes, including `performance-state.json`: clock/SMP qualification,
+profiler rate and per-CPU counters. The same companion is written on failures.
+No guest surface is invoked by the debugger. Native replay remains:
+
+```sh
+make -C src build
+python3 src/tests/console-boot.py bin --fixtures --profile-only --storage-devices --cpus=4 --accel=kvm --diagnostics
+```
+
+Focused native replay `7166875b0eec446c93158021ffe2a5c0` passes: four CPUs,
+6.994 s to observed prompt, qualified shared TSC at 2.096 GHz and zero unavailable
+profiling samples. `profile.json` records all seven probes and
+`performance-state.json` retains qualification/counter evidence. This profile
+mode is not the full console or long-duration acceptance suite.
+
+Clear/scroll checks: `test-console-host` includes production graphics decoder and
+presentation tests against a memory display, plus framebuffer-I/O tests for all
+overlap directions, pitch guards, channel layout, owner denial and malformed
+rectangles. Raster checks compare identity fills/self-copies against the general
+renderer, including clips, unchanged pixels and saturated generation counters.
+
+Dedicated guest timing uses five clears of a nonempty full canvas and five text
+newlines over full-width alternating color stripes. Preparation and result output
+are outside the measured operations. Results and medians are in `render.json`:
+
+```sh
+python3 src/tests/console-boot.py bin --fixtures --render-only --storage-devices --cpus=4 --accel=kvm --diagnostics
+```
+
+The fixture requires `bin/tests/apps/graphics-check.elf`, built with
+`make -C src ../bin/tests/apps/graphics-check.elf`. It is never installed into the
+candidate catalog. Use `--accel=tcg` for emulator checks. Native performance must
+be measured independently; a TCG speedup does not establish framebuffer-read
+cost on KVM or physical hardware.
+
+Native clear/scroll replay `c6a5770963b64e3688873034b5168393` passed operation
+checks but measured 5.337 ms clear and 311.815 ms dense scroll. This exposed the
+framebuffer-read cost that the TCG comparison did not establish. The backend now
+uses a private RAM shadow. Its host test counts framebuffer reads and verifies
+zero readback after full paint, coherence after RGB blits and overlap-safe copies,
+pitch guards and copy fallback without shadow allocation. Native shadow replay
+`9ffd0a0a32aa496ca2ef66031d09d082` passed with four KVM CPUs and disposable
+disks: five-sample median clear 6.521 ms and dense scroll 8.322 ms. Compared with
+the native pre-shadow run, scrolling is 37.5× faster; clearing did not improve.
+Both runs used HPET after shared-TSC uncertainty rejection. This closes the
+focused native rendering check; physical hardware and stable-TSC acceptance
+remain separate. Raw comparisons are in `bin/tests/render-comparison.json`.

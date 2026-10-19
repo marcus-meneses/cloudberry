@@ -20,7 +20,13 @@ int main(int argc,char **argv){
     struct kernel_surfaces hub={0};runtime.hub=&hub;runtime.heap=1;runtime.alloc=alloc_stub;runtime.free=free_stub;runtime.cpu=cpu_stub;runtime.load=load_stub;runtime.admit=admit_stub;runtime.reap=reap_stub;
     budget=0;assert(io_surface_installations(7,(uintptr_t)data,bytes,0,0,0).status && !blocks && !runtime.catalog);budget=-1;
     assert(!io_surface_installations(7,(uintptr_t)data,bytes,0,0,0).status && blocks==1);assert(!io_surface_installations(7,(uintptr_t)data,bytes,0,0,0).status && blocks==1);assert(io_surface_installations(8,(uintptr_t)data,bytes,0,0,0).status);
-    struct cb_startup packet={.version={24,1,0},.bytes=24};expected_path="/boot/system/drivers/applications/applications.elf";
+    struct cb_install_record terminal;assert(cb_install_find(runtime.catalog,"terminal",8,NULL,&terminal));
+    assert(io_installation_data(terminal.installation,"/system/root/_apps/terminal.data/history"));
+    assert(!io_installation_data(terminal.installation,"/system/root/_apps/echo.data/history"));
+    assert(!io_installation_data(terminal.installation,"/system/root/_apps/terminal.data"));
+    assert(!io_installation_data(terminal.installation,"/system/root/_apps/_index"));
+    assert(!io_installation_data(terminal.installation,"/system/apps/terminal"));
+    struct cb_startup packet={.version={24,1,0},.bytes=24};expected_path="/system/handlers/applications";
     budget=0;assert(io_surface_installed_load((uintptr_t)"applications",(uintptr_t)&packet,sizeof(packet),0,0,0).status && !runtime.manager && blocks==1);budget=-1;
     reject_admission=1;assert(io_surface_installed_load((uintptr_t)"applications",(uintptr_t)&packet,sizeof(packet),0,0,0).status && reaped==1 && !runtime.manager && blocks==1);reject_admission=0;
     assert(!io_surface_installed_load((uintptr_t)"applications",(uintptr_t)&packet,sizeof(packet),0,0,0).status && runtime.manager==99 && blocks==1);

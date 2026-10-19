@@ -141,3 +141,13 @@ Reference: [xHCI 1.2b requirements specification](https://cdrdv2-public.intel.co
 Modeled tests also check nested route saturation, high-speed multi-TT and
 inherited translators, subtree invalidation and parent-first removal refusal.
 `test-usb-hub-boot` exercises the class/transport integration with nested QEMU hubs.
+
+
+Cancellation follows output endpoint state: Running uses Stop Endpoint, Halted
+uses Reset Endpoint, and already-Stopped endpoints go directly to Set TR Dequeue.
+Disabled/Error states fail closed. While cancellation owns an endpoint, Stopped
+transfer events (26/27) are intermediate quiescence reports: they do not expose a
+failed completion or wake the client before command completion and dequeue
+publication. Successful completion/disconnect racing cancellation is preserved.
+Host tests model endpoint-state transitions, reject invalid repeated Stop
+commands and inject Stopped transfer events before command completion.

@@ -148,17 +148,33 @@ def build(stage, output, mib=512, drivers_source=None):
         if root.is_symlink():
             raise ValueError('Filesystem root must not be a symlink')
         shutil.rmtree(root)
-    driver_root = root / directory.lstrip('/')
-    driver_root.mkdir(parents=True)
-    if drivers_source is not None:
-        shutil.copytree(pathlib.Path(drivers_source).resolve(), driver_root, dirs_exist_ok=True)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('filesystem_tree', pathlib.Path(__file__).with_name('filesystem-tree.py'))
+    tree = importlib.util.module_from_spec(spec); spec.loader.exec_module(tree)
+    if directory != '/boot/kmodules/drivers':
+        raise ValueError('Driver directory must match the filesystem layout')
+    tree.populate(root, drivers_source)
     fs = work / 'drivers.ext4'
     regular_output(fs)
     with fs.open('wb') as stream:
         stream.truncate(mib * MIB)
     subprocess.run(['mke2fs', '-q', '-t', 'ext4', '-F', '-b', '4096', '-I', '256', '-m', '0',
-                    '-O', EXT4_FEATURES, '-L', 'CLOUDBERRY_DRV', '-U', str(uuid.uuid5(guid, 'filesystem')),
+                    '-O', EXT4_FEATURES, '-L', 'CLOUDBERRY_SYS', '-U', str(uuid.uuid5(guid, 'filesystem')),
                     '-E', 'lazy_itable_init=0,lazy_journal_init=0', '-d', str(root), str(fs)], check=True)
+    # mke2fs -d preserves host ownership. Normalize generated system content to
+    # guest root without requiring host chown, mounts or elevated permissions.
+    ownership = work / 'ownership.debugfs'
+    commands = []
+    for entry in [root] + sorted(root.rglob('*')):
+        name = '/' + entry.relative_to(root).as_posix() if entry != root else '/'
+        if any(ord(c) < 32 for c in name):
+            raise ValueError('Control character in filesystem path')
+        quoted = '"' + name.replace('\\', '\\\\').replace('"', '\\"') + '"'
+        commands.extend(['set_inode_field ' + quoted + ' uid 0',
+                         'set_inode_field ' + quoted + ' gid 0'])
+    ownership.write_text('\n'.join(commands) + '\n')
+    subprocess.run(['debugfs', '-w', '-f', str(ownership), str(fs)],
+                   check=True, capture_output=True)
     subprocess.run(['xorriso', '-as', 'mkisofs', '-R', '-r', '-J',
                     '--efi-boot', 'boot/limine/limine-uefi-cd.bin', '--efi-boot-part',
                     '--efi-boot-image', '--protective-msdos-label',
@@ -169,7 +185,7 @@ def build(stage, output, mib=512, drivers_source=None):
         raise ValueError('Expected one appended Linux filesystem partition')
     index = matches[0]['index']
     subprocess.run(['sgdisk', f'--partition-guid={index}:{guid}',
-                    f'--change-name={index}:Cloudberry drivers', str(output)], check=True)
+                    f'--change-name={index}:Cloudberry system', str(output)], check=True)
     report = verify(output, guid, mib * MIB)
     (work / 'layout.json').write_text(json.dumps(report, indent=2) + '\n')
     print(f'Boot image: ext4 drivers partition {index}, {mib} MiB, GUID {guid}', flush=True)

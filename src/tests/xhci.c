@@ -12,6 +12,7 @@ static unsigned producer,producer_cycle=1,lock_depth,irq_callback,master_enabled
 static unsigned model_command_tail,model_command_cycle=1,next_slot=1,disabled_slots,short_read,command_count;
 static uint64_t ticks,route_id;static unsigned wakes;
 static uintptr_t irq_cookie;
+static unsigned indefinite_blocks,complete_on_block;
 static uint32_t *reg(unsigned offset) {return (void *)(registers+offset);}
 uint64_t xhci_flags(void) {return 512;}
 uint32_t xhci_read32(uintptr_t p) {assert(p>=(uintptr_t)registers && p+4<=(uintptr_t)registers+sizeof(registers));return *(uint32_t *)p;}
@@ -42,10 +43,18 @@ void xhci_write32(uintptr_t p,uint32_t v) {
         if(type==11 || type==12) {
             struct slot *s=&c->slots[slot];copy((void *)s->contexts->pages.address,input(c,s,1),32*c->record.info.context_bytes);
         }
-        event((struct trb){.parameter=c->commands.physical+model_command_tail*16,.status=1u<<24,.control=(33u<<10)|(slot<<24)});
+        unsigned completion=1;
+        if(type==11 || type==12 || type==13){struct slot *s=&c->slots[slot];for(unsigned ep=1;ep<32;++ep)if(s->ep[ep]){uint32_t *out=(void *)(s->contexts->pages.address+ep*c->record.info.context_bytes);out[0]=(out[0]&~7u)|1;}}
+        if(type==14 || type==15 || type==16){unsigned dci=(cmd.control>>16)&31;struct slot *s=&c->slots[slot];struct endpoint *ep=s->ep[dci];assert(ep);uint32_t *out=(void *)(s->contexts->pages.address+dci*c->record.info.context_bytes);unsigned before=out[0]&7;
+            if((type==15 && before!=1) || (type==14 && before!=2) || (type==16 && before!=3))completion=19;
+            else if(type!=16){out[0]=(out[0]&~7u)|3;if(type==15 && ep->result.state==HOST_PENDING)event((struct trb){.parameter=ep->event_pointer,.status=26u<<24,.control=(32u<<10)|(slot<<24)|(dci<<16)});}
+        }
+        event((struct trb){.parameter=c->commands.physical+model_command_tail*16,.status=completion<<24,.control=(33u<<10)|(slot<<24)});
         if(++model_command_tail==255) {model_command_tail=0;model_command_cycle^=1;}
-    } else if(offset>0x2000 && offset<0x2100 && !delay_transfer) {
+    } else if(offset>0x2000 && offset<0x2100) {
         struct controller *c=state.head;unsigned slot=(offset-0x2000)/4;struct endpoint *ep=c->slots[slot].ep[v];
+        uint32_t *out=(void *)(c->slots[slot].contexts->pages.address+v*c->record.info.context_bytes);out[0]=(out[0]&~7u)|1;
+        if(delay_transfer)return;
         if(ep->direction)memset((void *)(ep->storage->pages.address+4096),0x5a,ep->bytes);
         if(short_read && v==1)event((struct trb){.parameter=ep->data_pointer,.status=(13u<<24)|(ep->bytes-3),.control=(32u<<10)|(slot<<24)|(v<<16)});
         event((struct trb){.parameter=ep->event_pointer,.status=1u<<24,.control=(32u<<10)|(slot<<24)|(v<<16)});
@@ -68,7 +77,7 @@ static struct kernel_surface_result route(MODULE_ARGS) {MODULE_UNUSED();const st
 static struct kernel_surface_result unroute(MODULE_ARGS) {MODULE_UNUSED();irq_cookie=0;return module_result(1,1);}
 static struct kernel_surface_result simple(MODULE_ARGS) {MODULE_UNUSED();return module_result(1,1);}
 static struct kernel_surface_result clock_now(MODULE_ARGS) {MODULE_UNUSED();ticks+=100000;return module_result(ticks,1);}
-static struct kernel_surface_result thread(MODULE_ARGS) {MODULE_UNUSED();if(a==THREAD_YIELD || a==THREAD_BLOCK_UNTIL)deliver();if(a==THREAD_WAKE)++wakes;return module_result(a==THREAD_CURRENT?1:0,1);}
+static struct kernel_surface_result thread(MODULE_ARGS) {MODULE_UNUSED();if(a==THREAD_BLOCK){assert(complete_on_block && !b);++indefinite_blocks;complete_on_block=0;struct endpoint *ep=state.head->slots[1].ep[3];event((struct trb){.parameter=ep->event_pointer,.status=1u<<24,.control=(32u<<10)|(1u<<24)|(3u<<16)});deliver();}if(a==THREAD_YIELD || a==THREAD_BLOCK_UNTIL)deliver();if(a==THREAD_WAKE)++wakes;return module_result(a==THREAD_CURRENT?1:0,1);}
 static struct kernel_surface_result context(MODULE_ARGS) {MODULE_UNUSED();return module_result(irq_callback,1);}
 static struct kernel_surface_result publish(MODULE_ARGS) {MODULE_UNUSED();assert(!strcmp(((struct kernel_hub_table *)a)->name,XHCI_TABLE_NAME));return module_result(1,1);}
 static void add(const char *name,kernel_surface_call fn) {struct kernel_surfaces *h=(void *)hub_memory;struct kernel_surface *m=(void *)(hub_memory+h->header_bytes);strcpy(m[h->count].name,name);m[h->count].call=fn;m[h->count++].major=1;}
@@ -99,6 +108,13 @@ int main(void) {
     struct host_transfer_result timed;assert(xhci_surface_wait(id,pending.value,(uintptr_t)&timed,ticks+200000,0,0).status);
     assert(xhci_surface_close(id,0,0,0,0,0).status);
     assert(xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0).status);assert(!xhci_surface_cancel(id,token,0x81,0,0,0).status);reap(id,pending.value,HOST_CANCELLED);
+    unsigned cancel_commands=command_count;
+    assert(!xhci_surface_cancel(id,token,0x81,0,0,0).status && command_count==cancel_commands+1);
+    /* A halted endpoint needs Reset, followed by Set Dequeue. */
+    struct slot *stopped_slot=&state.head->slots[1];uint32_t *endpoint_state=(void *)(stopped_slot->contexts->pages.address+3*state.head->record.info.context_bytes);*endpoint_state=(*endpoint_state&~7u)|2;
+    cancel_commands=command_count;assert(!xhci_surface_cancel(id,token,0x81,0,0,0).status && command_count==cancel_commands+2);
+    pending=xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0);assert(!pending.status);complete_on_block=1;uint64_t before_time=ticks;
+    assert(!xhci_surface_wait(id,pending.value,(uintptr_t)&timed,UINT64_MAX,0,0).status && indefinite_blocks==1 && ticks==before_time);reap(id,pending.value,HOST_COMPLETE);
     pending=xhci_surface_transfer(id,(uintptr_t)&request,0,0,0,0);assert(!pending.status);
     assert(!xhci_surface_watch(id,1,0,0,0,0).status && xhci_surface_watch(id,2,0,0,0,0).status);
     unsigned before_wake=wakes;

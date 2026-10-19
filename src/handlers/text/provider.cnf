@@ -1,0 +1,8 @@
+version=1
+executable=text.elf
+manifest=manifest.json
+ready=/@text
+installation_id=6a5e0a8f51bdac4b482459fa7b3bf286
+cpu=0
+stack_bytes=262144
+files=

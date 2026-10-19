@@ -18,7 +18,8 @@ Blank/non-GPT disks are skipped. GPT devices are checked against
 remain partition-module responsibilities. A corrupt GPT or failed supported
 transport stops selection. No match and duplicate matches are distinct errors.
 Changing USB topology during selection fails instead of choosing a partial scan.
-A unique partition is mounted read-only. Bootstrap owns the selected transport,
+A unique partition is mounted read-only unless `filesystem.writable=true` and
+the medium supports writes. The QEMU writable option uses a disposable snapshot. Bootstrap owns the selected transport,
 slice and mount; consumers use its filesystem cookie and must not close these
 objects. Other devices close without touching their contents. Uncertain cleanup
 records remain reachable in the module rather than freeing live DMA or ownership.
@@ -63,7 +64,8 @@ No candidate VM or developer persistent disk is run or attached by these tests.
 
 The core calls `bootstrap.apps` after volume selection starts. The startup worker
 waits for the selected readonly ext4 mount, then processes `boot.providers` in
-creation/readiness order. An empty list starts none; the default is `keyboard`.
+creation/readiness order. An empty list starts none; the schema fallback is `keyboard`; the supplied boot file starts keyboard,
+display, graphics, text, filesystem and applications in that readiness order.
 Each item is a bundle basename below `drivers.directory`. Bootstrap understands
 only the generic `provider.cnf` contract, never keyboard layouts or handler types.
 All foundational kmodules remain Limine-loaded and use their separate format3
@@ -129,3 +131,27 @@ and fault providers never enter candidate images. `tests/keyboard-boot.py` boots
 the ordinary production image on disposable readonly USB BOT/SCSI disk media and
 waits for `bootstrap: provider ready: keyboard`. Its explicit disk attachment
 preserves the hybrid image's 512-byte GPT geometry. Developer disks are untouched.
+
+
+## Packaged filesystem paths
+
+The authoritative catalog is `/system/state/installed.bin`. Registered providers
+load from flat `/system/handlers/<name>` executables, `<name>.manifest.json` and
+`<name>.provider.cnf`. Their startup resources live in `<name>.resources` or shared
+configuration directories. A provider `files` entry may use
+`logical-name=/absolute/source`; bootstrap preserves the logical startup name,
+validates both paths and copies bytes without interpreting their content.
+Unregistered, trusted low-level fixture bundles still use the configured
+`drivers.directory` under `/boot/kmodules/drivers`; no such fixtures enter the
+normal candidate. Ordinary applications reside in `/system/apps`. See the
+[filesystem map](../../maps/filesystem.md). All layout work happens in the host
+image builder.
+
+Provider startup failure logging includes the active bundle, launch/readiness
+phase and error, plus matching/failed provider process state, exit code and fault
+vector/address when available. The generic final failure line remains for tooling.
+Storage selection has a 30-second readiness budget. After each provider image is
+loaded and its process started, that provider gets a fresh 30-second publication
+budget. Image-loading time and earlier providers cannot consume this allowance.
+Clock, inspection, provider failure, timeout and blocking errors are reported as
+distinct phases. Providers are not automatically restarted.

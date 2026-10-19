@@ -23,8 +23,10 @@ defines this format. `/@io` accepts only a boot-keyboard interface and reports
 attach, bytes, removal or transport failure. The provider receives these kernel
 notifications and client calls through the same blocking gate. It acknowledges
 each notification before another USB read. Client reads and the kernel worker
-sleep on wakes/deadlines; no application polls hardware. USB retains its existing
-one-second transaction health deadline and safe cancellation/rearm behavior.
+sleep on wakes/deadlines; no application polls hardware. The interrupt-IN receive
+stays armed while idle, with notification-only waiting until input, disconnect
+or explicit cancellation. Control negotiation retains its one-second deadline.
+Idle time does not trigger recurring Stop Endpoint/Set Dequeue commands.
 
 ## Operations and event contract
 
@@ -98,3 +100,24 @@ General report-descriptor interpretation/NKRO, multiple keyboards, multi-session
 routing, LED output, native KVM input acceptance and physical USB qualification
 remain open. Unsupported formats fail explicitly; this implementation does not
 claim general HID or USB input hardware support.
+
+Packaged definitions now live in `/system/config/keyboard/{ibm,abnt2}.keymap`
+(JSON format), with `config.cnf` in the same directory. Generic bootstrap aliases
+preserve the handler’s logical startup names; there is no duplicated layout copy
+in the handler resources.
+
+
+## Capture liveness
+
+The kernel I/O worker reports `CB_IO_ERROR/CB_PROVIDER_FAILED` before an
+unexpected exit. The terminal notification is one-way; a dying worker never waits for a failed
+provider to acknowledge it. The keyboard handler exits, withdrawing its publication; blocked callers receive provider failure
+instead of waiting on an apparently live handle with no capture worker. Normal
+shutdown is not reported as failure, and unsafe DMA ownership remains retained.
+Terminal prints `keyboard input failed` if its read fails.
+
+Copied HID report deliveries are acknowledged before decoding and serving
+readers, permitting earlier capture rearming. Device-added negotiation still
+finishes before acknowledgement. One spare pending-read node is retained and
+reused; empty timed reads no longer map/unmap a private page on every request.
+The cache is released on normal handler shutdown and never crosses processes.

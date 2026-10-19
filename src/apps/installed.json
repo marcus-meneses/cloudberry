@@ -1,7 +1,7 @@
 [
   {
     "name": "keyboard",
-    "executable": "/boot/system/drivers/keyboard/keyboard.elf",
+    "executable": "/system/handlers/keyboard",
     "manifest": "keyboard/manifest.json",
     "installation_id": "636c6f756462657272792e6b62643100",
     "flags": 8,
@@ -10,7 +10,7 @@
   },
   {
     "name": "applications",
-    "executable": "/boot/system/drivers/applications/applications.elf",
+    "executable": "/system/handlers/applications",
     "manifest": "applications/manifest.json",
     "installation_id": "636c6f756462657272792e6170707300",
     "flags": 4,
@@ -19,7 +19,7 @@
   },
   {
     "name": "launch",
-    "executable": "/boot/system/drivers/launch/launch.elf",
+    "executable": "/system/apps/launch",
     "manifest": "launch/manifest.json",
     "installation_id": "636c6f756462657272792e6c61756e00",
     "flags": 3,
@@ -28,11 +28,92 @@
   },
   {
     "name": "true",
-    "executable": "/boot/system/drivers/true/true.elf",
+    "executable": "/system/apps/true",
     "manifest": "true/manifest.json",
     "installation_id": "636c6f756462657272792e7472756500",
     "flags": 1,
     "cpu": 0,
     "stack_bytes": 65536
+  },
+  {
+    "name": "display",
+    "executable": "/system/handlers/display",
+    "manifest": "display/manifest.json",
+    "installation_id": "8a4701a30e315e1df4ab50d47a6623cc",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "graphics",
+    "executable": "/system/handlers/graphics",
+    "manifest": "graphics/manifest.json",
+    "installation_id": "d33f70360e682facfa698f97f0c636c9",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "text",
+    "executable": "/system/handlers/text",
+    "manifest": "text/manifest.json",
+    "installation_id": "6a5e0a8f51bdac4b482459fa7b3bf286",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "filesystem",
+    "executable": "/system/handlers/filesystem",
+    "manifest": "filesystem/manifest.json",
+    "installation_id": "30375233cae8b33d753b7d27b37ca47f",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "terminal",
+    "executable": "/system/apps/terminal",
+    "manifest": "terminal/manifest.json",
+    "installation_id": "e77c870cd75841fc8f84880fa7b41c7c",
+    "flags": 3,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "echo",
+    "executable": "/system/apps/echo",
+    "manifest": "echo/manifest.json",
+    "installation_id": "6cd717d3ae186e4134f3ae6c5c3d2884",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 131072
+  },
+  {
+    "name": "cat",
+    "executable": "/system/apps/cat",
+    "manifest": "cat/manifest.json",
+    "installation_id": "1466093424ed0071cbfa53cc50643534",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 131072
+  },
+  {
+    "name": "pwd",
+    "executable": "/system/apps/pwd",
+    "manifest": "pwd/manifest.json",
+    "installation_id": "7a1ed5ce680afd545a62ed4af6d88127",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 131072
+  },
+  {
+    "name": "ls",
+    "executable": "/system/apps/ls",
+    "manifest": "ls/manifest.json",
+    "installation_id": "78d3f387761044c4d134a11300960506",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 131072
   }
 ]

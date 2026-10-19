@@ -1,0 +1,1 @@
+{"version": 1, "resources": [{"name": "/@graphics", "operations": ["info", "fill", "glyph", "blit", "glyphs"]}, {"name": "/@memory", "scope": "self", "operations": ["allocate", "free"]}, {"name": "/@text", "publish": true, "operations": ["info", "clear", "write", "cell"]}]}

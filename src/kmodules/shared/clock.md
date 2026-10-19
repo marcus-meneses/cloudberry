@@ -212,3 +212,49 @@ Calibration is performed at every boot; multi-CPU startup additionally invokes
 adaptive SMP qualification. No stored calibration or report.json is consumed.
 Latest AMD KVM evidence qualifies TSC with both IOMMU models; native Intel CPU
 and physical hardware qualification remain separate outstanding work.
+
+
+## Live HPET counter reads
+
+Clock reads, profiling samples and the independent kernel watchdog use the same
+small `hpet-counter.h` primitive: aligned 32-bit high/low/high samples, retrying
+rollover and transient all-zero values. These callers require an enabled,
+advancing counter; eight invalid samples fail explicitly without changing the
+output. No clock lock, allocation or recursive clock call is needed. Sampling
+brackets include the complete validated reference read. This also avoids assuming
+atomic 64-bit MMIO support: QEMU 6.2 exposes HPET accesses at 32-bit width
+([upstream implementation](https://github.com/qemu/qemu/blob/v6.2.0/hw/timer/hpet.c)).
+
+The kernel retains its five-second and iteration watchdogs. A first-failure
+record preserves start/end readings, elapsed time, CPU/depth, lock owners and
+spin count for debugger inspection; it does not replace or disable failure
+handling. Captured TCG zero reads previously triggered the regression branch of
+the lock watchdog despite no five-second wait.
+
+### Zero-read cause established, 2026-10-19
+
+An isolated four-CPU diagnostic kernel traps on the first rejected zero sample.
+In run `04c63f456cd243c9bc7225577da25480`, its guest address was
+`0xffffc000fed000f0`, but QEMU's `memory_region_ops_read` trace records CPU 3
+accessing **IOAPIC** `0xfec000f0` and `0xfec000f4`, returning zero. Its immediate
+reread reached **HPET** `0xfed000f0` and returned `324168864`; enable was 1 and
+capability was `0x8086a201`. No HPET low-counter callback returned zero. Just
+before this, CPU 0 restored AHCI BAR5 and enabled memory decoding at PCI ECAM
+`0xb00fa004`. A second traced capture, `82c197b8710f41d69cc1a14e39a930e9`, also
+walked the guest page tables: PTE `0x80000000fed0007b` translates the probe address
+correctly to `0xfed000f0`.
+
+This identifies wrong-device MMIO dispatch in the installed QEMU 6.2 TCG build
+(`1:6.2+dfsg-2ubuntu6.31`), consistent with QEMU's memory-dispatch/TLB update race.
+The upstream fix schedules both updates together on each vCPU:
+[commit 0d58c660](https://github.com/qemu/qemu/commit/0d58c660689f6da1e3feff8a997014003d928b3b),
+also tracked in [QEMU issue 1846](https://gitlab.com/qemu-project/qemu/-/issues/1846).
+The local binary still exports the old `cpu_reloading_memory_map` implementation.
+Use a QEMU build containing that fix for reliable MTTCG qualification; no host
+package was changed during investigation. A patched-QEMU comparison remains
+pending. This TCG finding does not establish a cause for KVM provider failures.
+
+The bounded read validation remains containment, not a repair of QEMU's dispatch:
+it cannot protect unrelated MMIO or detect every possible nonzero wrong-device
+value. No fences, timing normalization, weakened watchdogs or boot-time hardware
+workarounds were added. The diagnostic kernel and MMIO trace are test-only.

@@ -12,6 +12,8 @@ enum cpu_control_op {CPU_CURRENT,CPU_ENTER,CPU_LEAVE,CPU_DEPTH,CPU_CONFIGURE,CPU
  * inhibited. A five-second HPET watchdog (plus iteration fallback) faults on
  * stalled acquisition/IPI/TLB waits. CPU_LATENCY reports this policy; 2 ms
  * critical notices are observations, not hard real-time enforcement.
+ * Unqualified-TSC diagnostic HPET durations are sampled; raw tick counters and
+ * regression detection cover all operations. sampled_out_ns reports omissions.
  * IRQ callbacks must not enter these locks. Waiting CPUs service TLB mailboxes. */
 /* CPU_PROFILE_CLOCK requires held domain 1. b=0 invalidates statistics' TSC
  * rate, b=qualified Hz publishes a fresh epoch, b=UINT64_MAX queries whether a
@@ -24,6 +26,7 @@ struct cpu_metrics {
     uint64_t domain_acquisitions[2],domain_contended[2],domain_wait_ticks[2],domain_hold_ticks[2];
     uint64_t tsc_ns_samples,hpet_ns_samples,unavailable_ns_samples;
     struct cpu_profile_peak wait_peak,hold_peak,irq_peak;
+    uint64_t sampled_out_ns;
 };
 struct cpu_record {
     uintptr_t self; /* GS:0; kernel reserves IA32_GS_BASE. */
@@ -35,9 +38,10 @@ struct cpu_record {
     uint64_t lock_method[2],lock_depth[2],metrics_sequence,lock_caller[2],irq_method,irq_domain,irq_caller;
     struct cpu_profile_stamp lock_stamp[2],irq_stamp;
     uint64_t profile_fault_epoch,metrics_depth;
+    uint64_t profile_sequence[3]; /* independent global/clock/IRQ sampling */
 };
 struct cpu_config {struct cpu_record *records;size_t count;uintptr_t apic;uint32_t mode;uintptr_t watchdog_hpet;uint64_t hpet_period_fs;};
-struct cpu_latency_policy {uint64_t wait_budget_ns,critical_notice_ns;uint32_t hardware_clock,reserved;};
+struct cpu_latency_policy {uint64_t wait_budget_ns,critical_notice_ns;uint32_t hardware_clock,hpet_profile_stride;};
 struct kernel_surface_result kernel_cpu_control(MODULE_ARGS);
 bool kernel_cpu_backend(const struct kernel_surfaces *);
 uint64_t kernel_cpu_enter(void);

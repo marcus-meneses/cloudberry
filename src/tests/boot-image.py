@@ -2,6 +2,7 @@
 """Read-only image checks; extract ext4 to disposable regular-file storage."""
 import importlib.util
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,10 @@ def check(image):
         listed = subprocess.run(['debugfs', '-R', f'stat "{directory}"', str(filesystem)], check=True,
                                 capture_output=True, text=True)
         assert 'Type: directory' in listed.stdout, listed.stdout + listed.stderr
+        root_state = subprocess.run(['debugfs', '-R', 'stat /system/root', str(filesystem)],
+                                    check=True, capture_output=True, text=True)
+        assert 'Mode:  0700' in root_state.stdout, root_state.stdout
+        assert re.search(r'User:\s+0\s+Group:\s+0', root_state.stdout), root_state.stdout
     print(f'PASS boot image: GPT/backup CRCs, EFI preserved, ext4 >=512 MiB, matching config GUID {guid}, clean filesystem and drivers directory')
 
 

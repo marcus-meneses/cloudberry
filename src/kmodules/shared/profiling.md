@@ -20,7 +20,8 @@ Recursive entries into an already held domain with IF clear start no new sample
 and perform no timestamp/HPET reads. The outer hold still covers their execution.
 An IF-enabled lock entry reuses its initial ordered sample to start IRQ-off
 tracking; acquisition and release retain independent hold/wait measurements.
-Every outer acquisition remains measured; this is not sampled instrumentation.
+Every outer acquisition retains ordered tick counters and regression detection.
+Qualified-TSC nanosecond conversion also covers every sample.
 
 Clock policy publishes a statistics rate through CPU_PROFILE_CLOCK only while
 holding clock domain 1. Successful local TSC selection or shared-clock qualification
@@ -33,7 +34,14 @@ quarantines that epoch on all CPUs; the next clock read sees the fault and falls
 back to HPET. Resetting counters does not clear this quarantine. A fresh qualified
 epoch is required to resume fast statistics.
 
-Without a qualified rate, or during a clock update, durations use direct HPET.
+Without a qualified rate, or during a clock update, direct HPET duration
+statistics sample one out of 64 entries, independently per CPU and lock/IRQ
+domain. A selected entry retains paired references through acquisition/release;
+an unselected entry performs no HPET reads for statistics. `sampled_out_ns`
+counts deliberate omissions separately from failed/mixed-epoch durations in
+`unavailable_ns_samples`. Nanosecond peaks and 2 ms notices in this mode cover
+observed samples, not every operation. CPU_LATENCY reports `hpet_profile_stride`.
+This avoids amplifying slow virtual MMIO with profiler traffic.
 tsc_ns_samples/hpet_ns_samples record which conversion actually succeeded. The
 fast path performs no HPET MMIO for statistics on an uncontended lock. Independent
 HPET watchdog references start on actual contention and remain in lock/IPI/TLB

@@ -77,11 +77,13 @@ LDFLAGS := -nostdlib -static -no-pie -Wl,--build-id=none \
     -Wl,-z,noexecstack -Wl,-z,max-page-size=0x1000 -Wl,-T,boot/linker.ld
 
 # USB boot medium avoids attaching a legacy IDE optical drive. SATA uses AHCI.
+QEMU_BOOT_WRITABLE ?= 0
+QEMU_BOOT_MEDIA_MODE = $(if $(filter 1,$(QEMU_BOOT_WRITABLE)),snapshot=on,readonly=on)
 QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
     $(QEMU_IOMMU_FLAGS) -accel $(QEMU_ACCEL) -cpu $(QEMU_CPU) -smp cpus=$(QEMU_CPUS),sockets=1,cores=$(QEMU_CPUS),threads=1 -bios "$(OVMF)" \
     -device VGA -device qemu-xhci,id=xhci \
     -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
-    -drive if=none,id=bootmedia,format=raw,readonly=on,file="$(ISO)" \
+    -drive if=none,id=bootmedia,format=raw,$(QEMU_BOOT_MEDIA_MODE),file="$(ISO)" \
     -device usb-bot,id=bootusb,bus=xhci.0 \
     -device scsi-hd,bus=bootusb.0,drive=bootmedia,bootindex=1 \
     -drive if=none,id=nvmedisk,format=raw,file="$(NVME_DISK)" \
@@ -99,13 +101,14 @@ check-tools:
 	@test -f "$(LIMINE_DIR)/BOOTX64.EFI" -a -f "$(LIMINE_DIR)/limine-uefi-cd.bin"
 	@command -v xorriso >/dev/null
 	@command -v mke2fs >/dev/null
+	@command -v debugfs >/dev/null
 	@command -v sgdisk >/dev/null
 
 $(BUILD)/src-main.o: kernel/main.c kernel/modules.h kernel/surfaces.h boot/memory.h | check-tools
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Always relink/repackage candidate output from the active source tree.
+# Detect changes in selected objects without forcing every launch to repackage.
 $(BUILD)/src-logo.rgb: assets/cloudberry.png tools/pack-logo.py
 	@mkdir -p $(BUILD)
 	python3 tools/pack-logo.py $< $@
@@ -113,12 +116,22 @@ $(BUILD)/src-logo.rgb: assets/cloudberry.png tools/pack-logo.py
 $(BUILD)/src-limine-x2apic$(X2APIC).o: boot/limine.c boot/limine.h boot/memory.h | check-tools
 	$(CC) $(CFLAGS) -DBOOT_PREFER_X2APIC=$(X2APIC) -c $< -o $@
 
-$(KERNEL): $(OBJECTS) boot/linker.ld FORCE
+$(BUILD)/src-kernel-inputs: FORCE
+	@mkdir -p $(@D)
+	@printf '%s\n' '$(OBJECTS)' '$(CC) $(LDFLAGS)' > $@.tmp
+	@cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+
+$(BUILD)/src-image-inputs: FORCE
+	@mkdir -p $(@D)
+	@printf '%s\n' '$(BOOT_DRIVERS_MIB)' '$(BOOT_DRIVERS_SOURCE)' '$(LIMINE_DIR)' > $@.tmp
+	@cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+
+$(KERNEL): $(OBJECTS) boot/linker.ld $(BUILD)/src-kernel-inputs Makefile
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py
+$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/filesystem-tree.py tools/stage-kmodules.py
 	rm -rf $(STAGE)
-	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules $(STAGE)/EFI/BOOT
+	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules/drivers $(STAGE)/boot/kmodules/helpers $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/boot/kernel.elf
 	cp $(BUILD)/kmodules/xstate.kmod $(BACKENDS) $(STAGE)/boot/kmodules/
 	cp $(MEM_MODULE) $(STAGE)/boot/kmodules/mem.kmod
@@ -132,11 +145,14 @@ $(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(HANDLES_MODULE) $(PRO
 	cp $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
 	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
 	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
+	python3 tools/stage-kmodules.py $(STAGE)/boot/kmodules
 	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
 	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
 	python3 tools/build-boot-image.py "$(STAGE)" "$@" --drivers-mib=$(BOOT_DRIVERS_MIB) $(if $(strip $(BOOT_DRIVERS_SOURCE)),--drivers-source="$(BOOT_DRIVERS_SOURCE)",)
+
+$(ISO): $(BUILD)/src-image-inputs Makefile $(LIMINE_DIR)/BOOTX64.EFI $(LIMINE_DIR)/limine-uefi-cd.bin
 
 # Sparse, blank 1 GiB media, created once; no filesystem or boot-time formatting.
 $(NVME_DISK) $(SATA_DISK):
@@ -770,7 +786,7 @@ $(BUILD)/kmodules/ext4-fs.elf: $(EXT4_ENGINE_OBJECTS)
 
 $(TEST_BUILD)/tests/src-storage-fs: $(EXT4_LIBRARY_SOURCES) kmodules/shared/ext4-fs/engine.c kmodules/shared/ext4-fs/engine.h
 
-$(TEST_BUILD)/tests/src-ext4-write: tests/ext4-write.c tests/storage-fs.c kmodules/shared/partition.c kmodules/shared/ext4-fs.c kmodules/shared/ext4-fs/engine.c $(EXT4_LIBRARY_SOURCES) kmodules/shared/block.h kmodules/shared/ext4-fs.h
+$(TEST_BUILD)/tests/src-ext4-write: tests/ext4-write.c tests/storage-fs.c kmodules/shared/partition.c kmodules/shared/ext4-fs.c kmodules/shared/ext4-fs/engine.c $(EXT4_LIBRARY_SOURCES) kmodules/shared/block.h kmodules/shared/ext4-fs.h kmodules/shared/ext4-fs/runtime.h
 	@mkdir -p $(@D)
 	gcc -std=gnu11 -O1 -g -Wall -Wextra -Wno-error -fsanitize=undefined $(EXT4_ENGINE_FLAGS) $(filter-out tests/storage-fs.c,$(filter %.c,$^)) -Wl,--gc-sections -o $@
 
@@ -964,7 +980,7 @@ test-manifest:
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/manifest.c -o $(BUILD)/tests/manifest
 	$(BUILD)/tests/manifest
 
-$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-process-pic.o $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-console-pic.o $(BUILD)/kmodules/io-process-pic.o $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 .PHONY: test-handles
 test-handles:
@@ -975,7 +991,7 @@ test-handles:
 $(BUILD)/apps/keyboard.elf: interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-installations.py
+$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd)) $(foreach p,terminal echo cat ls pwd,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem)) $(foreach p,display graphics text filesystem,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
@@ -984,9 +1000,11 @@ $(BUILD)/src-handler-bundles/.ready: $(BUILD)/apps/keyboard.elf $(BUILD)/apps/ap
 	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
 	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
 	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
+	$(foreach p,display graphics text filesystem,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,terminal echo cat ls pwd,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
 	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
-	@touch $(BUILD)/src-handler-bundles/applications/initial.bin
+	python3 tools/build-initial.py terminal $(BUILD)/src-handler-bundles/applications/initial.bin
 	@touch $@
 .PHONY: test-keyboard
 test-keyboard:
@@ -995,6 +1013,8 @@ test-keyboard:
 	$(BUILD)/tests/keyboard handlers/keyboard/layouts/ibm.json handlers/keyboard/layouts/abnt2.json
 	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/keyboard-stream.c handlers/keyboard/hid.c -o $(BUILD)/tests/keyboard-stream
 	$(BUILD)/tests/keyboard-stream
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -Wl,--gc-sections tests/io-keyboard-failure.c -o $(BUILD)/tests/io-keyboard-failure
+	$(BUILD)/tests/io-keyboard-failure
 
 $(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
@@ -1061,5 +1081,81 @@ _test-process-boot: $(BUILD)/tests/apps/application-runtime.elf
 .PHONY: test-installations
 test-installations:
 	@mkdir -p $(BUILD)/tests
-	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/installation-contract.c -o $(BUILD)/tests/installation-contract
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/installation-contract.c kmodules/shared/io-console.c -o $(BUILD)/tests/installation-contract
 	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests
+
+# Application-facing rendering providers (independent replaceable contracts).
+CONSOLE_PROVIDERS := display graphics text filesystem
+CONSOLE_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(CONSOLE_PROVIDERS)))
+define CONSOLE_RULE
+$(BUILD)/apps/$(1).elf: handlers/$(1)/$(1).c
+	@mkdir -p $$(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) sdk/system.c -o $$@
+endef
+$(foreach p,$(CONSOLE_PROVIDERS),$(eval $(call CONSOLE_RULE,$(p))))
+$(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wildcard interfaces/*.h) handlers/graphics/font.h
+
+$(BUILD)/apps/graphics.elf: handlers/graphics/raster.c handlers/graphics/raster.h handlers/graphics/glyphs.h
+
+SHELL_APPS := terminal echo cat ls pwd
+SHELL_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(SHELL_APPS)))
+define SHELL_RULE
+$(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/application.h sdk/system.c $(wildcard interfaces/*.h)
+	@mkdir -p $$(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< sdk/system.c -o $$@
+endef
+$(foreach p,$(SHELL_APPS),$(eval $(call SHELL_RULE,$(p))))
+$(BUILD)/apps/terminal.elf: apps/terminal/parser.h
+
+.PHONY: test-console-host
+test-console-host:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/raster.c handlers/graphics/raster.c -o $(BUILD)/tests/raster
+	$(BUILD)/tests/raster
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/graphics-present.c handlers/graphics/raster.c sdk/system.c -Wl,--gc-sections -o $(BUILD)/tests/graphics-present
+	$(BUILD)/tests/graphics-present
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/display-copy.c -Wl,--gc-sections -o $(BUILD)/tests/display-copy
+	$(BUILD)/tests/display-copy
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/streams.c -o $(BUILD)/tests/streams
+	$(BUILD)/tests/streams
+
+.PHONY: test-console-boot
+test-console-boot: $(ISO) $(BUILD)/tests/apps/graphics-check.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL) --fixtures
+
+$(BUILD)/tests/apps/graphics-check.elf: tests/apps/graphics-check.c sdk/stream.h sdk/service.h $(wildcard interfaces/*.h) sdk/system.c sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+.PHONY: test-filesystem-tree
+test-filesystem-tree: $(ISO)
+	python3 tests/filesystem-tree.py $(BUILD)/src-handler-bundles $(STAGE) $(BUILD)/tests
+
+$(BUILD)/src-cpu.o $(BUILD)/kmodules/clock-x86-pic.o: kmodules/shared/hpet-counter.h
+
+# Read-only counter probe: isolated replacement kernel, never candidate objects.
+$(BUILD)/tests/hpet-zero-cpu.o: tests/hpet-zero-probe.c kernel/cpu.c kernel/cpu.h kmodules/shared/hpet-counter.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/tests/hpet-zero-kernel.elf: $(filter-out $(BUILD)/src-cpu.o,$(OBJECTS)) $(BUILD)/tests/hpet-zero-cpu.o boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter-out $(BUILD)/src-cpu.o,$(OBJECTS)) $(BUILD)/tests/hpet-zero-cpu.o -o $@
+.PHONY: test-hpet-counter
+test-hpet-counter:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/hpet-counter.c -o $(BUILD)/tests/hpet-counter
+	$(BUILD)/tests/hpet-counter
+
+# Phase tracing is restricted to replacement images in disposable startup tests.
+$(BUILD)/tests/startup-modules.o: kernel/modules.c kernel/modules.h kernel/surfaces.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -DCB_BOOT_TIMING -c $< -o $@
+$(BUILD)/tests/startup-kernel.elf: $(filter-out $(BUILD)/src-modules.o,$(OBJECTS)) $(BUILD)/tests/startup-modules.o boot/linker.ld
+	$(CC) $(LDFLAGS) $(filter-out $(BUILD)/src-modules.o,$(OBJECTS)) $(BUILD)/tests/startup-modules.o -o $@
+$(BUILD)/tests/startup-bootstrap-apps.o: kmodules/shared/bootstrap-apps.c kmodules/shared/bootstrap-apps.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -DCB_BOOT_TIMING -c $< -o $@
+$(BUILD)/tests/startup-bootstrap.elf: $(BUILD)/tests/startup-bootstrap-apps.o $(BUILD)/kmodules/bootstrap-load-pic.o $(BUILD)/kmodules/bootstrap-pic.o $(BUILD)/kmodules/bootstrap.exports.o kmodules/shared/module.ld
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/tests/startup-bootstrap.kmod: $(BUILD)/tests/startup-bootstrap.elf
+	$(OBJCOPY) -O binary $< $@

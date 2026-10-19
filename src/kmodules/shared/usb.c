@@ -467,7 +467,12 @@ static struct kernel_surface_result io(const struct usb_io *request,struct host_
         if(type==0)ok=ok && ((request->setup[0]&128) || (recipient==2 && request->setup[1]==1 && !word(request->setup+2) && !request->bytes));
     } else ok=ok && endpoint_find(dev,interface,request->endpoint);
     if(ok) {
-        ok=perform(dev,control?0:request->endpoint,control?request->setup:NULL,request->buffer,request->bytes,request->deadline_ns,out);
+        uint64_t deadline=request->deadline_ns;
+        /* An idle interrupt-IN endpoint has nothing to report. Keep its receive
+         * armed until an event, disconnect or explicit cancellation instead of
+         * periodically stopping/restarting a healthy keyboard or hub. */
+        if(!control && !deadline && (request->endpoint&128) && endpoint_find(dev,interface,request->endpoint)->transfer_type==3)deadline=UINT64_MAX;
+        ok=perform(dev,control?0:request->endpoint,control?request->setup:NULL,request->buffer,request->bytes,deadline,out);
 
     }
     finish(dev);return module_result(ok?out->bytes:0,ok);

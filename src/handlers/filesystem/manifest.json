@@ -1,0 +1,1 @@
+{"version": 1, "resources": [{"name": "/@io", "scope": "filesystem", "operations": ["filesystem"]}, {"name": "/@filesystem", "publish": true, "operations": ["open", "stat", "list", "remove", "mkdir"]}]}

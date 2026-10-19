@@ -176,6 +176,24 @@ readonly argv/cwd startup data. `admission.h` decodes the broker-generated calle
 PID, installation ID and grant time. No payload field can replace those identities.
 Launch authority additionally requires the installation's launcher role; child
 operations require the caller owner. This initial installed policy is bound to the
-trusted read-only image, without a general installer, sessions or signature checks.
+trusted build-owned image/catalog, without a general installer, sessions or signature checks.
 The [applications provider](../handlers/applications/README.md) owns runtime policy;
 `/@io` only bridges the catalog-bound process execution and completion mechanisms.
+
+
+## Console, rendering and standard streams
+
+`display.h` defines dimensions, fill and canonical RGB region blits. `graphics.h`
+defines dynamically owned ARGB surfaces, software shapes/paths, transforms,
+clipping/composition, bitmaps/blits and generation/dirty-region tracking. `text.h`
+defines the actual cell grid, UTF-8 output and positioned cells. Their providers
+are independent privileged processes in text → graphics → display order.
+
+`stream.h` defines directional pipe/file read/write capabilities. Launch ABI 1.1
+adds explicit stdin/stdout/stderr sources. Only the kernel translates these to
+new child-local capabilities after child-manifest validation; the SDK retrieves
+them with `cb_standard`. The new system gate returns zero for an absent binding.
+`filesystem.h` exposes canonical-path open/stat/list/remove/mkdir and returns
+caller-owned streams, preserving the same read/write contract across backing types.
+The C layouts contain no kernel or provider pointers. See [streams](../sdk/streams.md)
+and [graphics](../handlers/graphics/README.md) for bounds and lifetime rules.

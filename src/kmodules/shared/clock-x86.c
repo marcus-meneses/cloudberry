@@ -1,5 +1,6 @@
 #include "clock.h"
 #include "clock-platform.h"
+#include "hpet-counter.h"
 
 #include "cpu-platform.h"
 static kernel_surface_call tsc_info;
@@ -30,5 +31,5 @@ uint8_t clock_cmos_read(uint8_t index) {
 
 int clock_hpet_read(uintptr_t address,uint64_t *out) {
     if(!address || !out)return 0;
-    *out=*(volatile uint64_t *)(address+0xf0);return 1;
+    return hpet_counter_read(address+0xf0,out);
 }

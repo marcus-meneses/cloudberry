@@ -29,7 +29,7 @@ static void setup(const char *filename,struct block_device *part){
 }
 static void close_all(struct block_device *part,uint64_t id){assert(!CALL(ext4_fs_surface_unmount,id,0,0).status);assert(!CALL(partition_surface_close,part->cookie,0,0).status && !refs && !live);assert(!fclose(image));}
 static void full_mutations(struct block_device *part,uint64_t id){
-    const char *dir="/boot/system/drivers/newdir",*path="/boot/system/drivers/newdir/data.bin",*to="/boot/system/drivers/newdir/moved.bin";
+    const char *dir="/boot/kmodules/drivers/newdir",*path="/boot/kmodules/drivers/newdir/data.bin",*to="/boot/kmodules/drivers/newdir/moved.bin";
     assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MKDIR,(uintptr_t)dir,0,0,0).status);
     assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_CREATE,(uintptr_t)path,0,0,0).status);
     assert(ext4_fs_surface_mutate(id,EXT4_MUTATE_CREATE,(uintptr_t)path,0,0,0).status);
@@ -55,7 +55,18 @@ int main(int argc,char **argv){
     assert(argc>=3);struct block_device part;setup(argv[1],&part);struct ext4_info info;
     struct kernel_surface_result mounted=CALL(ext4_fs_surface_mount,&part,&info,EXT4_MOUNT_WRITE);
     if(mounted.status){fprintf(stderr,"mount failed error=%lu cookie=%llu\n",mounted.value,(unsigned long long)info.cookie);return 1;}uint64_t id=info.cookie;
-    if(!strcmp(argv[2],"normal")){
+    if(!strcmp(argv[2],"read-cache")){
+        const char *dirs[]={"/cache","/cache/a","/cache/a/b","/cache/a/b/c"};
+        for(unsigned i=0;i<4;++i)assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MKDIR,(uintptr_t)dirs[i],0,0,0).status);
+        const char *path="/cache/a/b/c/file";
+        assert(!ext4_fs_surface_write(id,(uintptr_t)path,0,(uintptr_t)"CACHE",5,EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE).status);
+        struct ext4_stat st;uint64_t before=block_reads;
+        assert(!CALL(ext4_fs_surface_stat,id,path,&st).status && st.bytes==5);
+        uint64_t cold=block_reads-before;before=block_reads;
+        for(unsigned i=0;i<20;++i)assert(!CALL(ext4_fs_surface_stat,id,path,&st).status && st.bytes==5);
+        printf("CACHE cold=%llu repeated=%llu\n",(unsigned long long)cold,(unsigned long long)(block_reads-before));
+        assert(block_reads==before);
+    }else if(!strcmp(argv[2],"normal")){
         full_mutations(&part,id);
         assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MKDIR,(uintptr_t)"/persist",0,0,0).status);
         assert(!ext4_fs_surface_write(id,(uintptr_t)"/persist/check.bin",0,(uintptr_t)"CHECK",5,EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE).status);
@@ -64,7 +75,7 @@ int main(int argc,char **argv){
     }
     else if(!strcmp(argv[2],"action") || !strcmp(argv[2],"append") || !strcmp(argv[2],"truncate") || !strcmp(argv[2],"remove") || !strcmp(argv[2],"rename")){
         tracing=1;writes=flushes=0;cut=argc>3?strtoull(argv[3],NULL,10):0;
-        const char *path="/boot/system/drivers/crash.bin";unsigned char bytes[8192];memset(bytes,0x59,sizeof(bytes));
+        const char *path="/boot/kmodules/drivers/crash.bin";unsigned char bytes[8192];memset(bytes,0x59,sizeof(bytes));
         if(!strcmp(argv[2],"action")){
             assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_CREATE,(uintptr_t)path,0,0,0).status);puts("ACK CREATE");fflush(stdout);
             assert(!ext4_fs_surface_write(id,(uintptr_t)path,0,(uintptr_t)bytes,sizeof(bytes),0).status);puts("ACK WRITE");fflush(stdout);
@@ -98,11 +109,11 @@ int main(int argc,char **argv){
         assert(ext4_fs_surface_write(id,(uintptr_t)"/failure.bin",0,(uintptr_t)"NO",2,0).status);
         puts("PASS failed I/O poisons volume and retains parent");fflush(stdout);_exit(78);
     }else if(!strcmp(argv[2],"recover-rename")){
-        struct ext4_stat old,new;int have_old=!CALL(ext4_fs_surface_stat,id,"/boot/system/drivers/crash.bin",&old).status,have_new=!CALL(ext4_fs_surface_stat,id,"/renamed.bin",&new).status;assert(have_old!=have_new);
-        const char *path=have_old?"/boot/system/drivers/crash.bin":"/renamed.bin";unsigned char bytes[8192];struct kernel_surface_result r=ext4_fs_surface_read(id,(uintptr_t)path,0,(uintptr_t)bytes,sizeof(bytes),0);assert(!r.status && r.value==8192);for(unsigned i=0;i<sizeof(bytes);++i)assert(bytes[i]==0x59);puts(have_old?"RECOVERED SOURCE":"RECOVERED DESTINATION");
+        struct ext4_stat old,new;int have_old=!CALL(ext4_fs_surface_stat,id,"/boot/kmodules/drivers/crash.bin",&old).status,have_new=!CALL(ext4_fs_surface_stat,id,"/renamed.bin",&new).status;assert(have_old!=have_new);
+        const char *path=have_old?"/boot/kmodules/drivers/crash.bin":"/renamed.bin";unsigned char bytes[8192];struct kernel_surface_result r=ext4_fs_surface_read(id,(uintptr_t)path,0,(uintptr_t)bytes,sizeof(bytes),0);assert(!r.status && r.value==8192);for(unsigned i=0;i<sizeof(bytes);++i)assert(bytes[i]==0x59);puts(have_old?"RECOVERED SOURCE":"RECOVERED DESTINATION");
     }else if(!strcmp(argv[2],"recover")){
-        struct ext4_stat stat;struct kernel_surface_result r=CALL(ext4_fs_surface_stat,id,"/boot/system/drivers/crash.bin",&stat);
-        if(!r.status){assert(stat.bytes==0 || stat.bytes==137 || stat.bytes==8192 || stat.bytes==16384);unsigned char data[16384];r=ext4_fs_surface_read(id,(uintptr_t)"/boot/system/drivers/crash.bin",0,(uintptr_t)data,sizeof(data),0);assert(!r.status && r.value==stat.bytes);for(size_t i=0;i<r.value;++i)assert(data[i]==0x59);printf("RECOVERED %llu\n",(unsigned long long)stat.bytes);}else puts("RECOVERED ABSENT");
+        struct ext4_stat stat;struct kernel_surface_result r=CALL(ext4_fs_surface_stat,id,"/boot/kmodules/drivers/crash.bin",&stat);
+        if(!r.status){assert(stat.bytes==0 || stat.bytes==137 || stat.bytes==8192 || stat.bytes==16384);unsigned char data[16384];r=ext4_fs_surface_read(id,(uintptr_t)"/boot/kmodules/drivers/crash.bin",0,(uintptr_t)data,sizeof(data),0);assert(!r.status && r.value==stat.bytes);for(size_t i=0;i<r.value;++i)assert(data[i]==0x59);printf("RECOVERED %llu\n",(unsigned long long)stat.bytes);}else puts("RECOVERED ABSENT");
     }else assert(0);
     close_all(&part,id);puts("PASS writable ext4");return 0;
 }

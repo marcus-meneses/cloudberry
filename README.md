@@ -79,10 +79,13 @@ Implemented foundations include:
 - Copied capability calls, boot manifest grants, filtered reflection and scoped memory/I/O.
 - A disk-loaded isolated `/@keyboard` provider with IBM/ABNT2 layouts and USB hotplug.
 - Declarative provider startup, handler-owned configuration, explicit stop/reap ownership and copied status snapshots.
-- A privileged userland `/@applications` lifecycle service, build-owned installation bindings, and ordinary `launch`/`true` apps.
+- A privileged userland `/@applications` lifecycle service, build-owned installation bindings, and ordinary native apps.
+- Replaceable text → graphics → display providers, software graphics primitives, owned surfaces and modification tracking.
+- An ordinary terminal with explicit stdin/stdout/stderr handles, concurrent pipelines and ext4 file redirection.
 
-The keyboard and applications providers run through the handle boundary.
-Installation identity is bound by the read-only image catalog; general per-user
+Keyboard, display, graphics, text, filesystem and application providers run through
+the handle boundary.
+Installation identity is bound by the immutable build-owned catalog; general per-user
 installation policy, interactive approval, automatic provider recovery,
 general HID formats and runtime ACPI notification/driver policy remain ahead.
 QEMU acceptance includes isolated one/four-CPU runs with emulated IOMMU models.
@@ -90,7 +93,7 @@ AMD-host KVM validates SMP, clocks, extended state and the native process/input/
 boundary across nine repeated one/four-CPU boots. Physical-device and native Intel
 CPU acceptance remain pending.
 
-The [current assessment](src/README.md#current-assessment-2026-10-18) separates
+The [current assessment](src/README.md#current-assessment-2026-10-19) separates
 implemented mechanisms, validation and remaining limits. Foundational kmodules
 remain Limine-loaded; the first isolated keyboard handler comes from the ext4
 bundle. The full sequence is tracked in the [roadmap](src/ROADMAP.md).

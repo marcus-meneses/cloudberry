@@ -17,9 +17,10 @@ save()
 try:
     stage=test/'stage';shutil.rmtree(stage,ignore_errors=True);shutil.copytree(build/'src-iso-root',stage)
     shutil.copy2(build/('tests/src-process-kernel.elf' if args.process_only else 'tests/src-spaces-kernel.elf' if args.spaces_only else 'tests/src-bootstrap-kernel.elf' if args.bootstrap else 'tests/src-hub-kernel.elf' if args.hub_only else 'tests/src-block-kernel.elf'),stage/'boot/kernel.elf');shutil.copy2(build/'kmodules/probe.kmod',stage/'boot/kmodules/probe.kmod')
+    config=stage/"boot/cloudberry.cnf";config.write_text(config.read_text().replace("filesystem.writable=true","filesystem.writable=false"))
     if args.profile_handles:
         if not args.process_only:raise RuntimeError('handle profiling requires process test')
-        shutil.copy2(build/'tests/handles-profile.kmod',stage/'boot/kmodules/handles.kmod')
+        shutil.copy2(build/'tests/handles-profile.kmod',stage/'boot/kmodules/helpers/handles.kmod')
     with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);shutil.copytree(build/'src-handler-bundles',fixture,dirs_exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:

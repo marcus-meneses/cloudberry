@@ -2,7 +2,7 @@
 #define CLOUDBERRY_INTERFACE_HANDLE_H
 #include <stdint.h>
 #include <stddef.h>
-/* Contract definitions, not an implemented application runtime. See README.md.
+/* Public C contracts implemented by the SDK and handle broker. See README.md.
  * Wire records use fixed-width integers, explicit sizes and inline byte payloads;
  * neither kernel pointers nor provider function addresses cross this boundary. */
 typedef uint64_t cb_handle_t;
@@ -16,7 +16,7 @@ struct cb_request_id {uint64_t namespace_id,serial;};
 enum {CB_ABI_MAJOR=1,CB_ABI_MINOR=0};
 enum {CB_OK,CB_DENIED,CB_UNAVAILABLE,CB_TIMEOUT,CB_REVOKED,CB_BAD_HANDLE,
       CB_BAD_REQUEST,CB_VERSION_MISMATCH,CB_BUFFER_TOO_SMALL,CB_RESOURCE_FAILURE,
-      CB_PROVIDER_FAILED,CB_BUSY,CB_INPUT_RESYNC,CB_NAME_IN_USE};
+      CB_PROVIDER_FAILED,CB_BUSY,CB_INPUT_RESYNC,CB_NAME_IN_USE,CB_WOULD_BLOCK,CB_BROKEN_PIPE,CB_READ_ONLY,CB_NOT_FOUND,CB_STATUS_COUNT};
 enum {CB_NOT_DISPATCHED,CB_NOT_COMMITTED,CB_COMMITTED,CB_OUTCOME_UNKNOWN};
 enum {CB_HANDLE_DESCRIBE=1,CB_HANDLE_RELEASE=2,CB_HANDLE_REQUEST_STATUS=3};
 enum {CB_VOW_AWAIT=1};

@@ -15,17 +15,17 @@ int main(void){
     struct thread_info info;assert(!call(threads_surface_control,THREAD_INFO,1,(uintptr_t)&info).status && info.state==THREAD_BLOCKING);
     for(unsigned i=0;i<2;++i)assert(!call(threads_surface_control,THREAD_WAKE,1,0).status);
     assert(status(&t)==THREAD_BLOCKING && t.wake_pending && !wakes);
-    local.current=NULL;finish_suspend(&t);
+    local.current=NULL;finish_suspend(&t,123,1);
     assert(status(&t)==THREAD_RUNNABLE && !t.wake_pending && !t.wake_ns);
     /* No wake: publish quiescent BLOCKED, preserving its sleep deadline. */
-    set_status(&t,THREAD_BLOCKING);t.wake_ns=999;finish_suspend(&t);
+    set_status(&t,THREAD_BLOCKING);t.wake_ns=999;finish_suspend(&t,123,1);
     assert(status(&t)==THREAD_BLOCKED && t.wake_ns==999);
     assert(!call(threads_surface_control,THREAD_INFO,1,(uintptr_t)&info).status && info.state==THREAD_BLOCKED);
     assert(!call(threads_surface_control,THREAD_WAKE,1,0).status);
     assert(status(&t)==THREAD_RUNNABLE && !t.wake_ns && !t.wake_pending && wakes==1 && t.ready_ns==123);
     /* Existing before-block credits and exit/reap lifecycle remain intact. */
     for(unsigned mode=THREAD_RUNNABLE;mode<=THREAD_RUNNING;++mode){set_status(&t,mode);assert(!call(threads_surface_control,THREAD_WAKE,1,0).status && t.wake_pending);t.wake_pending=0;}
-    set_status(&t,THREAD_EXITING);finish_suspend(&t);assert(status(&t)==THREAD_EXITED);
+    set_status(&t,THREAD_EXITING);finish_suspend(&t,123,1);assert(status(&t)==THREAD_EXITED);
     puts("PASS thread state: blocking publication, coalesced transition wakes, post-block IPI and exit publication");
     return 0;
 }

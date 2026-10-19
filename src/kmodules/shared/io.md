@@ -43,3 +43,17 @@ Hub surfaces are `io.init`, `io.invoke` (kernel-owned invocation record),
 The keyboard integration test exercises actual eight-byte reports and USB topology
 notifications, a replacement device identity, cleared pressed state, worker close
 and process reap. Native KVM/physical HID acceptance remains open.
+
+The display-only `display_copy` operation validates both rectangle bounds and
+exact payload size before writing. It performs overlap-safe native-pixel region
+copying with framebuffer pitch, behind the installation-bound display provider.
+`display_fill` computes its channel packing once per rectangle. Both remain
+preemptible framebuffer I/O mechanisms; graphics owns composition and damage.
+
+Framebuffer transport maintains one private native-pixel RAM shadow for its
+resident lifetime, allocated lazily with mem.pages_alloc(owner=0). It is neither
+shared with applications nor used for composition. Fill/blit keep it coherent;
+copy reads it rather than doing one MMIO read per pixel. Full-frame painting
+initializes it without readback; an early partial scene is read back once if a
+copy needs it. Allocation failure preserves pixel presentation and disables only
+the optional copy acceleration. No disk or boot configuration changes are needed.

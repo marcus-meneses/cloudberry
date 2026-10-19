@@ -1,12 +1,15 @@
 #include "handles.h"
 #include "manifest.h"
 #include "io.h"
+#include "../../interfaces/stream.h"
+#include "../../interfaces/filesystem.h"
+#include "ext4-fs.h"
 #include "process.h"
 #include "threads.h"
 #include "../../kernel/cpu.h"
 #include "../../interfaces/system.h"
 #include "../../interfaces/memory.h"
-struct channel {struct channel *next;uint64_t pid,token,sequence;int ready;unsigned char *frame;size_t capacity,bytes;};
+struct channel {struct channel *next;uint64_t pid,token,sequence,owner_watch;int ready;unsigned char *frame;size_t capacity,bytes;};
 struct operation {struct operation *next;const char *name;};
 struct grant {struct grant *next;const char *name,*scope;int publish;struct operation *operations;};
 struct hp_call;
@@ -14,9 +17,10 @@ struct policy {
 #ifdef CB_HANDLES_PROFILE
     struct hp_call *probe;
 #endif
-struct policy *next;uint64_t pid,receiver;char *json;struct grant *grants,*building;struct cb_provider_identity identity;};
+struct policy *next;uint64_t pid,receiver;cb_handle_t standard[3];char *json;struct grant *grants,*building;struct cb_provider_identity identity;};
 struct publication {struct publication *next;uint64_t pid,token,epoch,refs,completed,last_operation;int dead,kernel;char *name;unsigned char *description;size_t bytes;};
-struct capability {struct capability *next;uint64_t id,pid,grant_ns;int publisher;char *scope;struct publication *publication;struct operation *operations;};
+struct stream;
+struct capability {struct capability *next;uint64_t id,pid,grant_ns;int publisher;struct stream *stream;unsigned direction;char *scope;struct publication *publication;struct operation *operations;};
 struct request {
 #ifdef CB_HANDLES_PROFILE
     uint64_t queued_at,delivered_at,responded_at;
@@ -78,7 +82,7 @@ static struct capability *capability(uint64_t pid,uint64_t id){for(struct capabi
 static int permitted(struct operation *ops,const void *name,size_t n){for(;ops;ops=ops->next)if(named(ops->name,name,n))return 1;return 0;}
 static void free_operations(struct operation *op,int strings){while(op){struct operation *next=op->next;if(strings)release((void *)op->name);release(op);op=next;}}
 static void free_policy(struct policy *p){while(p->grants){struct grant *g=p->grants;p->grants=g->next;free_operations(g->operations,0);release(g);}release(p->json);release(p);}
-static int manifest_resource(void *context,const char *name,const char *scope,int publish){struct policy *p=context;if(!identifier(name,1) || grant(p,name) || !(mf_equal(scope,"self") || mf_equal(scope,"keyboard") || mf_equal(scope,"boot-input") || mf_equal(scope,"process-manager")))return 0;
+static int manifest_resource(void *context,const char *name,const char *scope,int publish){struct policy *p=context;if(!identifier(name,1) || grant(p,name) || !(mf_equal(scope,"self") || mf_equal(scope,"keyboard") || mf_equal(scope,"boot-input") || mf_equal(scope,"process-manager") || mf_equal(scope,"display") || mf_equal(scope,"filesystem") || mf_equal(scope,"graphics")))return 0;
     struct grant *g=allocate(sizeof(*g));if(!g)return 0;g->name=name;g->scope=scope;g->publish=publish;g->next=p->grants;p->grants=g;p->building=g;return 1;}
 static int manifest_operation(void *context,const char *name){struct policy *p=context;if(!identifier(name,0) || permitted(p->building->operations,name,length(name)))return 0;
     struct operation *op=allocate(sizeof(*op));if(!op)return 0;op->name=name;op->next=p->building->operations;p->building->operations=op;return 1;}
@@ -99,7 +103,8 @@ static int resource_operation(struct publication *p,uint32_t id,struct cb_operat
 static int interface_equal(const struct cb_interface_id *a,const struct cb_interface_id *b){return equal_bytes(a,b,sizeof(*a));}
 static void drop_publication(struct publication *p){if(p->refs)--p->refs;if(p->refs || !p->dead || p->kernel)return;struct publication **at=&state.publications;while(*at && *at!=p)at=&(*at)->next;if(*at)*at=p->next;release(p->name);release(p->description);release(p);}
 static void drop_request(struct request *r){struct request **at=&state.requests;while(*at && *at!=r)at=&(*at)->next;if(*at)*at=r->next;if(state.request_tail==r){state.request_tail=NULL;for(struct request *tail=state.requests;tail;tail=tail->next)state.request_tail=tail;}drop_publication(r->publication);release(r->reply);release(r);}
-static void drop_capability(struct capability *cap){struct capability **at=&state.caps;while(*at && *at!=cap)at=&(*at)->next;if(*at)*at=cap->next;free_operations(cap->operations,1);release(cap->scope);drop_publication(cap->publication);release(cap);}
+static void stream_drop(struct capability *);
+static void drop_capability(struct capability *cap){struct policy *owner=policy(cap->pid);if(owner)for(unsigned i=0;i<3;++i)if(owner->standard[i]==cap->id)owner->standard[i]=0;stream_drop(cap);struct capability **at=&state.caps;while(*at && *at!=cap)at=&(*at)->next;if(*at)*at=cap->next;free_operations(cap->operations,1);release(cap->scope);drop_publication(cap->publication);release(cap);}
 static struct capability *new_capability(struct policy *owner,struct publication *p,struct grant *g,int publisher){
     struct capability *cap=allocate(sizeof(*cap));if(!cap)return NULL;cap->id=serial();if(!cap->id){release(cap);return NULL;}struct kernel_surface_result granted=CALL(state.clock,0,0,0);if(granted.status){release(cap);return NULL;}cap->grant_ns=granted.value;cap->pid=owner->pid;cap->publisher=publisher;cap->publication=p;cap->scope=allocate(length(g->scope)+1);if(!cap->scope){release(cap);return NULL;}copy_bytes(cap->scope,g->scope,length(g->scope)+1);
     struct cb_description d=description(p);size_t off=d.version.bytes;
@@ -123,7 +128,7 @@ static cb_status_t acquire(struct policy *owner,const unsigned char *input,size_
     if(bytes<sizeof(struct cb_acquire))return CB_BAD_REQUEST;
     struct cb_acquire a;copy_bytes(&a,input,sizeof(a));if(a.reserved || a.name_bytes!=bytes-sizeof(a) || !a.name_bytes)return CB_BAD_REQUEST;
     struct grant *g=NULL;for(struct grant *x=owner->grants;x;x=x->next)if(named(x->name,input+sizeof(a),a.name_bytes)){g=x;break;}if(!g)return CB_DENIED;
-    if((mf_equal(g->name,CB_IO_NAME) && !(mf_equal(g->scope,"keyboard") || mf_equal(g->scope,"process-manager"))) || (mf_equal(g->name,CB_MEMORY_NAME) && !mf_equal(g->scope,"self")) || (mf_equal(g->name,"/@keyboard") && !mf_equal(g->scope,"boot-input")))return CB_DENIED;
+    if((mf_equal(g->name,CB_IO_NAME) && !(mf_equal(g->scope,"keyboard") || mf_equal(g->scope,"process-manager") || mf_equal(g->scope,"display") || mf_equal(g->scope,"filesystem") || mf_equal(g->scope,"graphics") || mf_equal(g->scope,"self"))) || (mf_equal(g->name,CB_MEMORY_NAME) && !mf_equal(g->scope,"self")) || (mf_equal(g->name,"/@keyboard") && !mf_equal(g->scope,"boot-input")))return CB_DENIED;
     struct publication *p;for(p=state.publications;p;p=p->next)if(!p->dead && named(p->name,input+sizeof(a),a.name_bytes))break;if(!p)return CB_UNAVAILABLE;
     struct cb_description d=description(p);if(!interface_equal(&a.interface,&d.interface) || a.major!=d.interface_major || a.minor>d.interface_minor)return CB_VERSION_MISMATCH;
     struct capability *cap=new_capability(owner,p,g,0);if(!cap)return CB_RESOURCE_FAILURE;*value=cap->id;return CB_OK;
@@ -161,11 +166,15 @@ static cb_status_t reflect(struct capability *cap,unsigned char **out,size_t *by
     d.operation_count=count;d.operations_bytes=end-sizeof(struct cb_reply_header)-d.version.bytes;d.facts_bytes=facts_bytes;copy_bytes(reply+sizeof(struct cb_reply_header),&d,sizeof(d));copy_bytes(reply+end,facts,facts_bytes);end+=facts_bytes;
     struct cb_reply_header h={.version={sizeof(h),1,0},.status=CB_OK,.outcome=CB_COMMITTED,.provider_epoch=p->epoch,.result_bytes=end-sizeof(h)};copy_bytes(reply,&h,sizeof(h));*out=reply;*bytes=end;return CB_OK;
 }
+#include "handles-stream.inc"
+static size_t kernel_reply_capacity(struct publication *p,unsigned op){return p->kernel==3 && op==CB_STREAM_READ?CB_STREAM_CHUNK:p->kernel==2 && op==CB_IO_FILESYSTEM?512:64;}
 static cb_status_t kernel_call(uint64_t pid,struct publication *p,const struct cb_call_header *call,const unsigned char *payload,unsigned char **out,size_t *bytes){
-    unsigned char *reply=allocate(sizeof(struct cb_reply_header)+64);if(!reply)return CB_RESOURCE_FAILURE;
+    size_t capacity=kernel_reply_capacity(p,call->operation);
+    unsigned char *reply=allocate(sizeof(struct cb_reply_header)+capacity);if(!reply)return CB_RESOURCE_FAILURE;
     struct cb_reply_header h={.version={sizeof(h),1,0},.request=call->request,.status=CB_OK,.outcome=CB_COMMITTED,.provider_epoch=p->epoch};
-    if(p->kernel==2){struct io_invocation io={.process=pid,.operation=call->operation,.input=payload,.bytes=call->payload_bytes,.output=reply+sizeof(h),.capacity=64};
-        struct kernel_surface_result result=CALL(state.io,&io,0,0);if(result.status || io.status || io.actual>64){release(reply);return result.status || io.actual>64?CB_RESOURCE_FAILURE:io.status;}h.result_bytes=io.actual;
+    if(p->kernel==3){size_t actual=0;cb_status_t status=stream_call(pid,call,payload,reply+sizeof(h),&actual);if(status){release(reply);return status;}h.result_bytes=actual;
+    }else if(p->kernel==2){struct io_invocation io={.process=pid,.operation=call->operation,.input=payload,.bytes=call->payload_bytes,.output=reply+sizeof(h),.capacity=capacity};
+        struct kernel_surface_result result=CALL(state.io,&io,0,0);if(result.status || io.status || io.actual>capacity){release(reply);return result.status || io.actual>capacity?CB_RESOURCE_FAILURE:io.status;}h.result_bytes=io.actual;
     }else{
         struct cb_memory_request in;if(call->payload_bytes!=sizeof(in)){release(reply);return CB_BAD_REQUEST;}copy_bytes(&in,payload,sizeof(in));struct kernel_surface_result result;
         if(call->operation==CB_MEMORY_ALLOCATE && !in.address)result=CALL(state.memory_alloc,pid,in.bytes,0);
@@ -191,9 +200,9 @@ struct kernel_surface_result handles_surface_init(MODULE_ARGS){
 #undef BIND
     state.heap=b;state.hub=hub;
     state.io=kernel_surface_find(hub,"io.invoke");if(!state.io)return module_result(0,0);
-    const char *memory_names[]={"allocate","free"},*io_names[]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release"};
-    const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID;
-    return module_result(1,kernel_publication(CB_MEMORY_NAME,&memory,memory_names,2,1) && kernel_publication(CB_IO_NAME,&io,io_names,9,2));
+    const char *memory_names[]={"allocate","free"},*io_names[]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy"};
+    const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID,stream=CB_STREAM_INTERFACE_ID;const char *stream_names[]={"pipe","read","write"};
+    return module_result(1,kernel_publication(CB_MEMORY_NAME,&memory,memory_names,2,1) && kernel_publication(CB_IO_NAME,&io,io_names,15,2) && kernel_publication(CB_STREAM_NAME,&stream,stream_names,3,3));
 }
 struct kernel_surface_result handles_surface_admit(MODULE_ARGS){
     MODULE_UNUSED();const struct handle_policy *r=(const void *)a;if(!state.hub || !r || !r->manifest || !r->bytes || r->bytes==SIZE_MAX)return module_result(0,0);
@@ -238,11 +247,11 @@ static cb_status_t invoke(struct policy *owner,unsigned char *input,size_t bytes
         else if(p->kernel){
             /* Native results are at most header+64 bytes. Reserve the caller's
                copied result before a resource mutation can take effect. */
-            reserved_output=allocate(sizeof(struct cb_reply_header)+64);
+            reserved_output=allocate(sizeof(struct cb_reply_header)+kernel_reply_capacity(p,call.operation));
             if(!reserved_output){(void)error_reply(r,CB_RESOURCE_FAILURE,CB_NOT_DISPATCHED);r->completed=1;}
             else {
                 r->dispatched=1;unlock(flags);HP_KERNEL_BEGIN(owner);unsigned char *reply=NULL;size_t reply_bytes=0;cb_status_t status=kernel_call(owner->pid,p,&call,input+sizeof(call),&reply,&reply_bytes);HP_KERNEL_END(owner);flags=lock();
-                if(status){release(reserved_output);reserved_output=NULL;(void)error_reply(r,status,CB_NOT_COMMITTED);}else {r->reply=reply;r->reply_bytes=reply_bytes;r->done=1;}r->completed=1;++p->completed;p->last_operation=call.operation;
+                if(status){release(reserved_output);reserved_output=NULL;(void)error_reply(r,status,status==CB_RESOURCE_FAILURE && ((p->kernel==3 && call.operation==CB_STREAM_WRITE) || (p->kernel==2 && call.operation==CB_IO_FILESYSTEM))?CB_OUTCOME_UNKNOWN:CB_NOT_COMMITTED);}else {r->reply=reply;r->reply_bytes=reply_bytes;r->done=1;}r->completed=1;++p->completed;p->last_operation=call.operation;
             }
         }else{HP_HANDOFF(r,0);struct policy *provider=policy(p->pid);if(provider)wake(provider->receiver);}
     }
@@ -282,7 +291,7 @@ static cb_status_t receive(struct policy *owner,uint64_t deadline,unsigned char 
 static cb_status_t respond(struct policy *owner,const unsigned char *input,size_t bytes){
     if(bytes<sizeof(struct cb_reply_header))return CB_BAD_REQUEST;
     struct cb_reply_header h;copy_bytes(&h,input,sizeof(h));
-    if(h.version.bytes!=sizeof(h) || h.version.major!=1 || h.version.minor || h.outcome>CB_OUTCOME_UNKNOWN || h.status>CB_NAME_IN_USE || !cb_frame_fits(h.version.bytes,h.result_bytes,h.error_bytes,bytes) || h.version.bytes+h.result_bytes+h.error_bytes!=bytes || (!h.status && h.error_bytes))return CB_BAD_REQUEST;
+    if(h.version.bytes!=sizeof(h) || h.version.major!=1 || h.version.minor || h.outcome>CB_OUTCOME_UNKNOWN || h.status>=CB_STATUS_COUNT || !cb_frame_fits(h.version.bytes,h.result_bytes,h.error_bytes,bytes) || h.version.bytes+h.result_bytes+h.error_bytes!=bytes || (!h.status && h.error_bytes))return CB_BAD_REQUEST;
     uint64_t flags=lock();struct request *r;for(r=state.requests;r;r=r->next)if(r->provider==owner->pid && r->id.namespace_id==h.request.namespace_id && r->id.serial==h.request.serial)break;
     if(!r || !r->dispatched || r->completed || r->publication->epoch!=h.provider_epoch){unlock(flags);return CB_BAD_REQUEST;}
     if(h.status){
@@ -307,7 +316,8 @@ struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     unsigned char *input=g->input_bytes?(g->input_bytes<=sizeof(scratch)?scratch:owned_input):NULL,*output=NULL;size_t bytes=0;
     if(g->input_bytes && (!input || !transfer(pid,g->input,input,g->input_bytes,0))){release(owned_input);HP_CAPTURE_DONE();HP_STAMP(hp_dispatch);HP_STAMP(hp_output);HP_FINISH(owner);return module_result(CB_RESOURCE_FAILURE,1);}
     HP_CAPTURE_DONE();HP_STAMP(hp_dispatch);cb_status_t status=CB_BAD_REQUEST;uint64_t flags;
-    if(g->operation==CB_SYSTEM_ACQUIRE){flags=lock();status=acquire(owner,input,g->input_bytes,&g->value);unlock(flags);}
+    if(g->operation==CB_SYSTEM_STANDARD && !g->input_bytes && g->value<3){g->value=owner->standard[g->value];status=CB_OK;}
+    else if(g->operation==CB_SYSTEM_ACQUIRE){flags=lock();status=acquire(owner,input,g->input_bytes,&g->value);unlock(flags);}
     else if(g->operation==CB_SYSTEM_PUBLISH){flags=lock();status=publish(owner,input,g->input_bytes,&g->value);unlock(flags);}
     else if(g->operation==CB_SYSTEM_INVOKE){if(g->output_capacity<sizeof(struct cb_reply_header)){status=CB_BUFFER_TOO_SMALL;bytes=sizeof(struct cb_reply_header);}else status=invoke(owner,input,g->input_bytes,&output,&bytes,g->deadline_ns);}
     else if(g->operation==CB_SYSTEM_RECEIVE){if(!g->input_bytes)status=receive(owner,g->deadline_ns,&output,&bytes,g->output_capacity);}
@@ -317,8 +327,10 @@ struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     HP_STAMP(hp_output);g->result_bytes=bytes;if(output){if(g->output_capacity<bytes){status=CB_BUFFER_TOO_SMALL;if(g->operation==CB_SYSTEM_INVOKE && g->output_capacity>=sizeof(struct cb_reply_header) && !transfer(pid,g->output,output,sizeof(struct cb_reply_header),1))status=CB_BAD_REQUEST;}else if(!transfer(pid,g->output,output,bytes,1))status=CB_BAD_REQUEST;}
     release(owned_input);release(output);HP_FINISH(owner);return module_result(status,1);
 }
+struct kernel_surface_result handles_surface_post(MODULE_ARGS);
 struct kernel_surface_result handles_surface_exit(MODULE_ARGS){
     MODULE_UNUSED();uint64_t flags=lock();struct policy *owner=policy(a);if(!owner){unlock(flags);return module_result(1,1);}
+    const struct cb_interface_id io_interface=CB_IO_INTERFACE_ID;for(struct channel *ch=state.channels;ch;ch=ch->next)if(ch->owner_watch==a){ch->owner_watch=0;(void)handles_surface_post(ch->pid,ch->token,(uintptr_t)&a,8,(uintptr_t)&io_interface,CB_IO_OWNER_EXIT);}
     for(struct publication *p=state.publications;p;p=p->next)if(p->pid==a)retire_publication(p,1);
     struct channel **ch=&state.channels;while(*ch){struct channel *event=*ch;if(event->pid==a){*ch=event->next;release(event->frame);release(event);}else ch=&event->next;}
     struct request *r=state.requests;while(r){struct request *next=r->next;if(r->pid==a)drop_request(r);r=next;}
@@ -359,4 +371,8 @@ struct kernel_surface_result handles_surface_decommission(MODULE_ARGS){
     if(!owner || !control){unlock(flags);return module_result(0,0);}for(struct publication *p=state.publications;p;p=p->next)if(p->pid==a && !p->dead)retire_publication(p,0);
     struct cb_delivery_header delivery={.call={.version={sizeof(delivery),1,0},.interface=CB_HANDLE_INTERFACE_ID,.operation=CB_HANDLE_RELEASE,.flags=CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT},.provider_epoch=1};
     copy_bytes(control->frame,&delivery,sizeof(delivery));control->bytes=sizeof(delivery);control->sequence=serial();control->ready=1;wake(owner->receiver);unlock(flags);return module_result(1,1);
+}
+
+struct kernel_surface_result handles_surface_owner_watch(MODULE_ARGS){
+    MODULE_UNUSED();if(!a || !b || !c || d>1)return module_result(0,0);if(!d)return handles_surface_unsubscribe(a,c,0,0,0,0);uint64_t flags=lock();if(!policy(b)){unlock(flags);return module_result(0,0);}struct kernel_surface_result result=handles_surface_channel(a,c,8,0,0,0);if(!result.status)for(struct channel *ch=state.channels;ch;ch=ch->next)if(ch->pid==a && ch->token==c){ch->owner_watch=b;break;}unlock(flags);return result;
 }

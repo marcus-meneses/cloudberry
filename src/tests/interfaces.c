@@ -5,12 +5,24 @@
 #include "../interfaces/startup.h"
 #include "../interfaces/installations.h"
 #include "../interfaces/admission.h"
+#include "../interfaces/display.h"
+#include "../interfaces/graphics.h"
+#include "../interfaces/text.h"
+#include "../interfaces/stream.h"
+#include "../interfaces/filesystem.h"
 #include "../sdk/application.h"
 #ifdef __cplusplus
 #define ABI_ASSERT static_assert
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_application_launch_streams)==64,"stdio launch");
+ABI_ASSERT(sizeof(struct cb_stream_read)==16,"stream read");
+ABI_ASSERT(sizeof(struct cb_graphics_draw)==48,"graphics draw");
+ABI_ASSERT(sizeof(struct cb_graphics_state)==56,"graphics state");
+ABI_ASSERT(sizeof(struct cb_graphics_surface_info)==48,"graphics damage");
+ABI_ASSERT(sizeof(struct cb_graphics_blit)==48,"graphics blit");
+ABI_ASSERT(sizeof(struct cb_filesystem_request)==16,"filesystem request");
 ABI_ASSERT(sizeof(struct cb_install_catalog)==24,"installation catalog");
 ABI_ASSERT(sizeof(struct cb_install_record)==64,"installation entry");
 ABI_ASSERT(sizeof(struct cb_application_launch)==40,"application launch");

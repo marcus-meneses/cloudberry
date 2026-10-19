@@ -106,3 +106,10 @@ checks zero abort writes/flushes, keeps a retained slice invalid until final
 release, verifies all allocation/reference counts return to zero, and remounts
 the journal under fresh cookies. The existing 29 crash cuts and six I/O failure
 cases still pass. Guest validation removes/reinserts writable USB storage.
+
+The private engine uses a 128-block, lazily allocated metadata cache (at most
+512 KiB of block data with 4 KiB blocks, plus cache metadata). The upstream
+eight-block default repeatedly evicted directory/inode blocks during ordinary
+deep-path lookups. The focused regression records physical reads and requires
+zero reads across twenty repeated warmed metadata lookups. This does not defer
+journal commits, write barriers or synchronous mutation completion.

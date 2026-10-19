@@ -450,7 +450,11 @@ static bool load_iommu_backend(struct boot_pages *pages,const struct kernel_surf
 static bool startup_failure(const char *stage,const char *reason) {
     debug("Cloudberry startup: ");debug(stage);debug(" ");debug(reason);debug("\n");return false;
 }
+#ifdef CB_BOOT_TIMING
+#define START(stage,call) do {debug("BOOT-TIME init begin " stage "\n");if ((call).status) return startup_failure(stage,"failed");debug("BOOT-TIME init end " stage "\n");} while (0)
+#else
 #define START(stage,call) do {if ((call).status) return startup_failure(stage,"failed");} while (0)
+#endif
 bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     const char *names[]={"mem.configure","mem.context","mem.init","mem.pages_init","scheduler.init",
@@ -522,7 +526,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     kernel_surface_call bootstrap=kernel_surface_find(hub,"bootstrap.init");if(!bootstrap)return startup_failure("bootstrap.init","missing");
     START("bootstrap.init",bootstrap((uintptr_t)hub,heap,0,0,0,0));
     kernel_surface_call io=kernel_surface_find(hub,"io.init");if(!io)return startup_failure("io.init","missing");
-    START("io.init",io((uintptr_t)hub,heap,0,0,0,0));
+    START("io.init",io((uintptr_t)hub,heap,(uintptr_t)framebuffer_request.response,0,0,0));
     return true;
 }
 

@@ -16,6 +16,7 @@ addresses or execute kernel methods directly. The C contract lives in
   and continues receiving other calls; completion events trigger its reply.
 - `stop`: cooperative base-release notification, idempotent. No forced unwind.
 - `release`: relinquish a terminal result record. Running children return BUSY.
+- `list`: enumerate installed ordinary application names with an opaque cursor.
 
 Info/wait/stop/release require the process ID to belong to the authenticated
 caller. IDs are not authority. The broker supplies PID, installation identity
@@ -33,8 +34,8 @@ side-effect retry or capability rebind is introduced.
 The bootstrap coordinator starts this provider from `boot.providers` and checks
 readiness. It does not service launch requests or supervise running children.
 A trusted optional `initial.bin` startup file can name the initial application
-using the same launch frame. It is empty in ordinary builds. Disposable tests
-use it to run an installed test launcher; no test autostart enters the candidate.
+using the same launch frame. Normal builds launch the ordinary terminal. Disposable tests replace it with
+registered test launchers; no test autostart enters the candidate.
 
 ## Kernel mechanism boundary
 
@@ -64,12 +65,18 @@ and the manifest at admission. Bootstrap verifies registered provider metadata
 against the authoritative record. Trusted unregistered kernel fixture loading
 remains available, but cannot bind the process-manager role.
 
-The trust root is the read-only development boot image. This is not a signature
+The trust root is the build-owned boot image/catalog. The filesystem handler
+protects its installed boot/system tree from application mutations, including on
+an explicitly writable development snapshot. This is not a signature
 verification chain, installer, user/session permission system or writable app
 registry. Cwd is immutable startup metadata; there is no filesystem grant implied
 by it. Argv currently travels within one bounded handle message, retaining empty
 arguments, spaces and case; larger streamed launch packets are future transport
-work. Processes still have one pinned user thread. This handler and the device
+work. Launch ABI 1.1 supplies explicit parent-owned standard-stream endpoints. The
+kernel validates and delegates new child-local handles before start, intersecting
+the child manifest. The system library retrieves these bindings; raw parent
+tokens are cleared from child startup data. Processes still have one user thread;
+the kernel selects its initial CPU by live process occupancy and then pins it. This handler and the device
 I/O execution path currently run on CPU0. The catalog and handler child/wait
 records are dynamically sized; the catalog is immutable and boot-pinned.
 
@@ -92,3 +99,10 @@ physical hardware and native Intel CPU acceptance remain open. Reproduce with:
 ```sh
 make -C src -j4 test-process-boot QEMU_ACCEL=kvm QEMU_CPUS=4 QEMU_IOMMU=amd
 ```
+
+
+The console milestone extends native boot packaging to six providers and the
+ordinary terminal. It adds `list`, launch-bound stdio and kernel-selected ordinary
+process placement. The earlier native lifecycle result predates these extensions;
+new console/graphics correctness is covered by isolated TCG tests and still needs
+native KVM acceptance. See [console tests](../../tests/README.md#console-and-software-graphics).

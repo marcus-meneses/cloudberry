@@ -30,8 +30,8 @@ static void number(uint64_t value){char digits[24];unsigned n=0;do{digits[n++]='
 static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struct probe_process *probe){
     kernel_surface_call load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),cpu=kernel_surface_find(hub,"cpu.control"),clock_info=kernel_surface_find(hub,"clock.info");
     if(!clock_diagnostic(hub,1) || !clock_records(hub,probe->cpus))return 0;
-    uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000),ids[2];struct process_request r={.abi=1,.filesystem=filesystem,.path="/boot/system/drivers/handle-bench.elf",.stack_bytes=131072};
-    for(unsigned i=0;i<2;++i){r.cpu=i && probe->cpus>1?1:0;r.argument=i?0:1;struct kernel_surface_result p=CALL(load,&r,0,0);if(p.status || !admit_file(hub,filesystem,p.value,i?"/boot/system/drivers/bench-client.json":"/boot/system/drivers/bench-server.json"))return 0;ids[i]=p.value;}
+    uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000),ids[2];struct process_request r={.abi=1,.filesystem=filesystem,.path="/boot/kmodules/drivers/handle-bench.elf",.stack_bytes=131072};
+    for(unsigned i=0;i<2;++i){r.cpu=i && probe->cpus>1?1:0;r.argument=i?0:1;struct kernel_surface_result p=CALL(load,&r,0,0);if(p.status || !admit_file(hub,filesystem,p.value,i?"/boot/kmodules/drivers/bench-client.json":"/boot/kmodules/drivers/bench-server.json"))return 0;ids[i]=p.value;}
     if(CALL(start,ids[0],0,0).status)return 0;
     while(!CALL(kernel_surface_find(hub,"handles.available"),"@bench",0,0).value){uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline || CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}
     /* Reset each participating CPU's attribution on that CPU, before launch. */
@@ -68,9 +68,9 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     struct bootstrap_info volume;uint64_t boot_deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
     for(;;){CHECK(!CALL(boot_info,&volume,0,0).status);if(volume.state==BOOTSTRAP_READY)break;CHECK(volume.state!=BOOTSTRAP_FAILED && volume.state!=BOOTSTRAP_DISCONNECTED && CALL(clock,0,0,0).value<boot_deadline);CHECK(!CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     struct mem_pages_info before,after;CHECK(!CALL(pages,&before,0,0).status);
-    struct process_request request={.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/system/drivers/invalid.elf",.stack_bytes=65536};
+    struct process_request request={.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/kmodules/drivers/invalid.elf",.stack_bytes=65536};
     CHECK(CALL(load,&request,0,0).status);
-    request.path="/boot/system/drivers/process-probe.elf";
+    request.path="/boot/kmodules/drivers/process-probe.elf";
     uint64_t ids[8];
     for(unsigned i=0;i<8;++i){request.cpu=i>1 && probe->cpus>1?1:0;request.argument=i<2?0x1111*(i+1):((uint64_t)(i-1)<<32)|0x3333;
         struct kernel_surface_result r=CALL(load,&request,0,0);CHECK(!r.status && r.value);ids[i]=r.value;}
@@ -85,9 +85,9 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
         CHECK(CALL(info,ids[i],&result,0).status);++probe->completed;
     }
     kernel_surface_call admit=kernel_surface_find(hub,"handles.admit"),available=kernel_surface_find(hub,"handles.available"),read=kernel_surface_find(hub,"ext4_fs.read"),alloc=kernel_surface_find(hub,"mem.pages_alloc"),free=kernel_surface_find(hub,"mem.pages_free");
-    request.path="/boot/system/drivers/handles-probe.elf";request.cpu=0;request.stack_bytes=131072;uint64_t actors[2];
+    request.path="/boot/kmodules/drivers/handles-probe.elf";request.cpu=0;request.stack_bytes=131072;uint64_t actors[2];
     for(unsigned i=0;i<2;++i){request.cpu=i && probe->cpus>1?1:0;request.argument=i?0:1;struct kernel_surface_result created=CALL(load,&request,0,0);CHECK(!created.status);actors[i]=created.value;
-        struct mem_pages manifest;CHECK(!CALL(alloc,1,0,&manifest).status);const char *path=i?"/boot/system/drivers/handles-client.json":"/boot/system/drivers/handles-server.json";
+        struct mem_pages manifest;CHECK(!CALL(alloc,1,0,&manifest).status);const char *path=i?"/boot/kmodules/drivers/handles-client.json":"/boot/kmodules/drivers/handles-server.json";
         struct kernel_surface_result got=read(volume.filesystem.cookie,(uintptr_t)path,0,manifest.address,4096,0);CHECK(!got.status && got.value && got.value<4096);
         struct handle_policy policy={.process=actors[i],.manifest=(const void *)manifest.address,.bytes=got.value};policy.identity.installation_id[0]=i+1;
         CHECK(!CALL(admit,&policy,0,0).status && CALL(admit,&policy,0,0).status && !CALL(free,manifest.id,0,0).status);
@@ -109,8 +109,8 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     CHECK(CALL(kernel_surface_find(hub,"bootstrap.release"),keyboard.value,0,0).status);
     struct handle_publication_info publication;
     for(;;){if(!CALL(inspect,"/@keyboard",&publication,1).status)break;CHECK(!CALL(info,keyboard.value,&provider,0).status);probe->app_code=provider.exit_code;CHECK(provider.state!=PROCESS_EXITED && provider.state!=PROCESS_FAULTED && CALL(clock,0,0,0).value<deadline);CHECK(!CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
-    uint64_t clients[3];const char *policies[]={"/boot/system/drivers/keyboard-state.json","/boot/system/drivers/keyboard-read.json","/boot/system/drivers/keyboard-denied.json"};
-    request=(struct process_request){.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/system/drivers/keyboard-client.elf",.stack_bytes=131072};
+    uint64_t clients[3];const char *policies[]={"/boot/kmodules/drivers/keyboard-state.json","/boot/kmodules/drivers/keyboard-read.json","/boot/kmodules/drivers/keyboard-denied.json"};
+    request=(struct process_request){.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/kmodules/drivers/keyboard-client.elf",.stack_bytes=131072};
     for(unsigned i=0;i<3;++i){request.cpu=probe->cpus>1?1:0;request.argument=i==2?3:i;struct kernel_surface_result client=CALL(load,&request,0,0);CHECK(!client.status);clients[i]=client.value;CHECK(admit_file(hub,volume.filesystem.cookie,client.value,policies[i]) && !CALL(start,client.value,0,0).status);}
     for(;;){CHECK(!CALL(inspect,"/@keyboard",&publication,1).status);if(publication.pending>=2)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     text("READY keyboard input\n");for(unsigned i=0;i<3;++i)CHECK(finished(hub,clients[i],deadline,probe));
@@ -130,7 +130,7 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
         deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
         struct kernel_surface_result crashed=CALL(launch_keyboard,volume.filesystem.cookie,"keyboard-fault",0);CHECK(!crashed.status);
         for(;;){struct io_provider_info worker;if(!CALL(inspect,"/@keyboard",&publication,0).status && !CALL(io_info,crashed.value,&worker,0).status && worker.active)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
-        request=(struct process_request){.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/system/drivers/keyboard-client.elf",.stack_bytes=131072};request.cpu=probe->cpus>1?1:0;request.argument=4;
+        request=(struct process_request){.abi=1,.filesystem=volume.filesystem.cookie,.path="/boot/kmodules/drivers/keyboard-client.elf",.stack_bytes=131072};request.cpu=probe->cpus>1?1:0;request.argument=4;
         struct kernel_surface_result waiting=CALL(load,&request,0,0);CHECK(!waiting.status && admit_file(hub,volume.filesystem.cookie,waiting.value,policies[0]) && !CALL(start,waiting.value,0,0).status);
         CHECK(finished(hub,waiting.value,deadline,probe));CHECK(!CALL(info,crashed.value,&provider,0).status && provider.state==PROCESS_FAULTED && provider.fault_vector==6);CHECK(!CALL(kernel_surface_find(hub,"bootstrap.apps_info"),&app_status,0,0).status && app_status.state==4 && CALL(kernel_surface_find(hub,"bootstrap.release"),crashed.value,0,0).status);
         while(CALL(reap,crashed.value,0,0).status)CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);
