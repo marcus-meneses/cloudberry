@@ -17,7 +17,8 @@
         "process_stop",
         "process_reap",
         "process_release",
-        "process_sample"
+        "process_sample",
+        "process_data"
       ]
     },
     {
@@ -30,7 +31,8 @@
         "stop",
         "release",
         "list",
-        "processes"
+        "processes",
+        "data"
       ]
     }
   ]

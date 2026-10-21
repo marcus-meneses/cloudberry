@@ -159,6 +159,7 @@ def build(stage, output, mib=512, drivers_source=None):
     if directory != '/system/kmodules/drivers':
         raise ValueError('Driver directory must match the filesystem layout')
     tree.populate(root, drivers_source)
+    version_spec=importlib.util.spec_from_file_location('image_version',pathlib.Path(__file__).with_name('image-version.py'));version=importlib.util.module_from_spec(version_spec);version_spec.loader.exec_module(version);version.generate(stage,root)
     fs = work / 'drivers.ext4'
     regular_output(fs)
     with fs.open('wb') as stream:

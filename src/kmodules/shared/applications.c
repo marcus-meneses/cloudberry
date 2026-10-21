@@ -45,6 +45,7 @@ int applications_data(const unsigned char *identity,const char *path){
     }
     return 0;
 }
+#include "applications-access.inc"
 /* Trusted kernel entry. Ordinary callers can only reach the manager's narrower
  * process_launch operation, which cannot load provider/manager records. */
 struct kernel_surface_result applications_surface_installed_load(MODULE_ARGS){
@@ -113,6 +114,8 @@ static cb_status_t launch(struct io_invocation *invocation){
     flags=lock();++runtime.stats.launched;unlock(flags);child->thread=info.thread;__atomic_store_n(&child->published,1,__ATOMIC_RELEASE);CALL(runtime.control,THREAD_WAKE,child->worker,0);cb_install_copy(invocation->output,&child->process,8);invocation->actual=8;return CB_OK;
 }
 int applications_invoke(struct io_invocation *r){
+    if(r->operation==CB_IO_PROCESS_DATA){r->status=CB_DENIED;if(r->process!=runtime.manager || !runtime.manager)return 1;if(r->bytes!=8){r->status=CB_BAD_REQUEST;return 1;}uint64_t pid;cb_install_copy(&pid,r->input,8);char path[4096];r->status=application_data_path(pid,path);if(!r->status){size_t n=length(path);if(n>r->capacity)r->status=CB_BUFFER_TOO_SMALL;else {cb_install_copy(r->output,path,n);r->actual=n;}}return 1;}
+
     if(r->operation==CB_IO_PROCESS_SAMPLE){
         r->status=CB_DENIED;r->actual=0;if(r->process!=runtime.manager || !runtime.manager || CALL(runtime.cpu,CPU_CURRENT,0,0).value)return 1;
         r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_process_query) || r->capacity<sizeof(struct cb_process_sample))return 1;

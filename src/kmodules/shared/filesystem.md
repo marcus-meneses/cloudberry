@@ -93,3 +93,12 @@ Its metadata is synthesized read-only, and ordinary mutations are additionally
 blocked by the protected /boot policy. Parent-directory search permissions are
 checked across mount boundaries, so placing a mount under a private directory
 cannot bypass that directory's access rules. See [ISO9660](iso9660-fs.md).
+
+
+The manager also calls `applications.access` with the canonical mounted-namespace
+path and authenticated PID. This enforces protected namespaces and same-user
+private-container policy on metadata, mutations and every file-stream read/write.
+Mounted aliases cannot bypass it. `process.active` rejects closed sessions before
+backend execution; `filesystem.revoke(PID)` wakes queued mount waiters. Backend
+operations that have already begun finish synchronously; executable/context
+reclamation still waits for actual process exit.

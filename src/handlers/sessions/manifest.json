@@ -23,7 +23,8 @@
       "operations": [
         "self",
         "begin",
-        "end"
+        "end",
+        "status"
       ]
     }
   ]

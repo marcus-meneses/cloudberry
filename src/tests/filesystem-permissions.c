@@ -9,8 +9,10 @@ static struct kernel_surface_result backend(MODULE_ARGS){MODULE_UNUSED();struct 
 static struct kernel_surface_result cpu_fixture(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
 static struct kernel_surface_result allocate_fixture(MODULE_ARGS){MODULE_UNUSED();void *p=calloc(b,c);return module_result((uintptr_t)p,p!=NULL);}
 static struct kernel_surface_result free_fixture(MODULE_ARGS){MODULE_UNUSED();free((void *)b);return module_result(1,1);}
+static struct kernel_surface_result active_policy(MODULE_ARGS){MODULE_UNUSED();return module_result(1,1);}
+static struct kernel_surface_result application_policy(MODULE_ARGS){MODULE_UNUSED();return module_result(CB_OK,1);}
 int main(void){
-    struct {struct kernel_surfaces header;struct kernel_surface entries[1];} hub={0};hub.header.major=3;hub.header.count=1;hub.header.methods_address=(uintptr_t)hub.entries;hub.entries[0].call=credentials;strcpy(hub.entries[0].name,"process.credentials");fs.hub=&hub.header;fs.alloc=allocate_fixture;fs.free=free_fixture;
+    struct {struct kernel_surfaces header;struct kernel_surface entries[3];} hub={0};hub.header.major=3;hub.header.count=3;hub.header.methods_address=(uintptr_t)hub.entries;hub.entries[0].call=credentials;strcpy(hub.entries[0].name,"process.credentials");strcpy(hub.entries[1].name,"applications.access");hub.entries[1].call=application_policy;strcpy(hub.entries[2].name,"process.active");hub.entries[2].call=active_policy;fs.hub=&hub.header;fs.alloc=allocate_fixture;fs.free=free_fixture;
     struct backend format={.api={.invoke=backend}};struct mount mount={.backend=&format,.path="/"};struct filesystem_request r={.process=9,.path="/private/file",.operation=FS_READ};
     assert(access_file(&mount,&r)==CB_OK);caller.uid=43;assert(access_file(&mount,&r)==CB_DENIED);mode=0750;group=1;assert(access_file(&mount,&r)==CB_DENIED);r.path="/private";r.operation=FS_LIST;assert(access_file(&mount,&r)==CB_OK);group=0;assert(access_file(&mount,&r)==CB_DENIED);
     caller.uid=42;r.path="/private/file";r.operation=FS_PREPARE;r.mode=CB_FILE_APPEND;missing=1;assert(access_file(&mount,&r)==CB_OK && r.uid==42 && r.gid==2);mode=0500;assert(access_file(&mount,&r)==CB_DENIED);mode=0700;rootmode=0700;assert(access_file(&mount,&r)==CB_DENIED);rootmode=0777;valid=0;assert(access_file(&mount,&r)==CB_DENIED);caller.uid=0;assert(access_file(&mount,&r)==CB_OK);

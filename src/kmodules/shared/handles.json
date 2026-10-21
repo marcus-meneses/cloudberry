@@ -56,6 +56,14 @@
     {
       "name": "handles.owner_watch",
       "symbol": "handles_surface_owner_watch"
+    },
+    {
+      "name": "handles.identity",
+      "symbol": "handles_surface_identity"
+    },
+    {
+      "name": "handles.revoke",
+      "symbol": "handles_surface_revoke"
     }
   ]
 }

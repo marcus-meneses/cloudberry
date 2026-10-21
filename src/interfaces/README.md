@@ -253,3 +253,12 @@ descendant claims through a provider-owned dynamic stack; generation barriers
 and unrelated-claim denial remain. Mouse session gating uses copied IO focus/SID
 snapshots and keeps mouse independent within that session. Byte standard streams
 retain their existing launch bindings and transport behavior.
+
+
+Applications DATA (8) returns a canonical path for the authenticated UID/home and
+installation. No UID/name parameter or extra file access grant is accepted.
+cb_identity_home preserves the original 32-byte credential ABI and carries an
+atomic private-IO transition. Session END now returns cb_session_status (64 bytes);
+STATUS optionally takes a SID and restricts inspection to matching UID or root.
+Queued/new resource calls fail REVOKED after closure; dispatched results can still
+be collected and replied to. All added operation numbers append existing interfaces.

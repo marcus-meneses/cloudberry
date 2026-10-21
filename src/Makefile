@@ -133,7 +133,7 @@ $(BUILD)/src-image-inputs: FORCE
 $(KERNEL): $(OBJECTS) boot/linker.ld $(BUILD)/src-kernel-inputs Makefile
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/filesystem-tree.py tools/stage-kmodules.py
+$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/image-version.py tools/filesystem-tree.py tools/stage-kmodules.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/limine $(STAGE)/kmodules/drivers $(STAGE)/kmodules/helpers $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/kernel.elf
@@ -177,6 +177,12 @@ run-dev:
 	@test -f "$(DEV_DISK)" || { echo 'Run make -C src init-dev-disk first'; exit 1; }
 	@test -f "$(NVME_DISK)" -a -f "$(SATA_DISK)" || { echo 'Run make -C src build first'; exit 1; }
 	$(MAKE) _run-dev QEMU_BOOT_IMAGE="$(DEV_DISK)" QEMU_BOOT_MEDIA_MODE=cache=writeback
+
+# Writes a fresh output; original remains available for rollback.
+UPDATED_DEV_DISK ?= $(BUILD)/cloudberry-dev-next.img
+.PHONY: update-dev-disk
+update-dev-disk: build
+	python3 tools/update-dev-disk.py "$(ISO)" "$(DEV_DISK)" "$(UPDATED_DEV_DISK)"
 
 .PHONY: _run-dev
 _run-dev:
@@ -1297,3 +1303,7 @@ test-iso9660: $(ISO)
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/iso9660.c -o $(BUILD)/tests/iso9660
 	$(BUILD)/tests/iso9660 $(ISO)
+
+$(BUILD)/tests/apps/private-check.elf: tests/apps/private-check.c $(wildcard interfaces/*.h) sdk/service.h sdk/stream.h sdk/system.c sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@

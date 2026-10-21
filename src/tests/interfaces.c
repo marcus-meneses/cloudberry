@@ -20,6 +20,7 @@
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_identity_home)==40 && sizeof(struct cb_session_status)==64 && CB_APPLICATION_DATA==8,"identity home/session drain/appdata ABI");
 ABI_ASSERT(sizeof(struct cb_session)==32 && sizeof(struct cb_io_session)==24 && sizeof(struct cb_io_input_focus)==32,"session/focus ABI");
 ABI_ASSERT(sizeof(struct cb_filesystem_stat)==16 && sizeof(struct cb_filesystem_metadata)==32 && sizeof(struct cb_filesystem_owner)==16,"filesystem metadata ABI preserves STAT");
 ABI_ASSERT(CB_FILESYSTEM_MKDIR==5 && CB_FILESYSTEM_METADATA==6 && CB_FILESYSTEM_CHOWN==8 && CB_IDENTITY_HOME==12,"appended ownership/home operations");

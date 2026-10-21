@@ -15,7 +15,7 @@ static void wait_stream_changed(struct stream *stream){
     for(struct handle_waiter *w=handle_waiters;w;w=w->next)for(size_t i=0;i<w->count;++i)if(w->items[i].kind!=CB_WAIT_REQUEST){struct capability *cap=capability(w->pid,w->items[i].handle);if(cap && cap->stream==stream){wake(w->thread);break;}}
 }
 static cb_status_t wait_scan(uint64_t pid,const struct cb_wait_item *items,size_t count,uint64_t *ready){
-    *ready=UINT64_MAX;
+    *ready=UINT64_MAX;struct policy *owner=policy(pid);if(!owner)return CB_REVOKED;if(owner->revoked && !count)return CB_REVOKED;
     for(size_t i=0;i<count;++i){struct cb_wait_item item;copy_bytes(&item,items+i,sizeof(item));int available;
         if(item.reserved)return CB_BAD_REQUEST;
         if(item.kind==CB_WAIT_REQUEST){
@@ -23,6 +23,7 @@ static cb_status_t wait_scan(uint64_t pid,const struct cb_wait_item *items,size_
             struct request *r=owned_request(pid,item.request);if(!r)return CB_BAD_HANDLE;
             available=r->done || r->failure;
         }else if(item.kind==CB_WAIT_READ || item.kind==CB_WAIT_WRITE){
+            if(owner->revoked)return CB_REVOKED;
             if(item.request.serial || item.request.namespace_id)return CB_BAD_REQUEST;
             struct capability *cap=capability(pid,item.handle);if(!cap || !cap->stream)return CB_BAD_HANDLE;
             unsigned direction=item.kind==CB_WAIT_READ?CB_STREAM_READ:CB_STREAM_WRITE;

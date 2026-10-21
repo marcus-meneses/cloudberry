@@ -32,6 +32,10 @@
     {
       "name": "applications.info",
       "symbol": "applications_surface_info"
+    },
+    {
+      "name": "applications.access",
+      "symbol": "applications_surface_access"
     }
   ]
 }

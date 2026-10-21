@@ -4,6 +4,7 @@
 Paths resolve relative to the inherited cwd.
 
 ```text
+fsctl data                    # own installation-specific app-data location
 fsctl stat PATH
 fsctl chmod OCTAL PATH
 fsctl chown UID GID PATH

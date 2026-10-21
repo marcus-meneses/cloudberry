@@ -169,5 +169,8 @@ cannot create one. This is an explicit administrative operation, separate from
 the binary account transaction: a failure may leave an account with no home or a
 private staging tree. No provisioning, migration or repair scan runs during boot.
 Renames/deletions preserve existing directories; no automatic file movement or
-ownership reuse occurs. Per-user installation and app-specific home data grants
-remain future policy work; UID/mode protection isolates different users now.
+ownership reuse occurs. Per-user installation remains future work. Installed-app home data authorization
+now intersects UID/mode checks, including delegated file streams. Authentication
+uses the restricted atomic identity_home IO transition to bind credentials and an
+owned canonical home together; launch copies both. Renames do not silently rewrite
+running processes' home/credential snapshots.

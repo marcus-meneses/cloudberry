@@ -99,15 +99,22 @@ them. `.`/`..` keep path semantics and are not listed by this utility. Future fi
 pickers/completion should share the underscore rule. No access permission follows
 from visibility.
 
-The current filesystem provider protects `/boot` and `/system` against ordinary
-mutations, except a catalog-bound app may write descendants of its own
-`/system/root/_apps/<appname>.data/`. The provider supplies authenticated caller
-installation identity; the IO bridge resolves it against the trusted catalog.
-The data directory itself, other apps' state and `_index` cannot be mutated
-through that exception. This is the current single boot-domain policy, not a full
-app-specific home data authorization implementation. UID/mode checks isolate users. App-data writes require a writable
-medium, just like other writes. `/system/root` is built with mode 0700; ext4 modes
-alone are not a replacement for future handle authorization policy.
+The filesystem manager intersects UID/mode checks with installed-app policy on
+every operation, including file streams delegated through stdin/stdout. Authentication
+atomically supplies an owned home snapshot; launches copy it independently.
+`/@applications.data` resolves the calling installation to its canonical
+`<home>/_apps/<appname>.data` without accepting a caller-supplied user/app identity.
+Same-user apps cannot read, mutate, inspect or change permissions on another app's
+private data, even if mode bits permit it. An app cannot remove its container or
+mutate `_apps`/`_index`/installation sidecars. Ordinary document paths keep UID/mode
+semantics. Root retains administrative access, while protected identity files
+remain exclusive to the installed identity provider. Existing /system and /boot
+mutation restrictions remain. Names/caches confer no installation authority.
+
+Closed sessions revoke new resource calls, queued work and blocked stream/FS
+operations. Already executing backend work finishes before mappings are reclaimed.
+No boot-time provisioning is introduced; explicit offline updates preserve user
+state and regenerate catalog caches. See [development images](../tools/development-images.md).
 
 Keyboard `.keymap` files retain their existing JSON format. The build places them
 under `/system/config/keyboard`; startup aliases copy these files into the

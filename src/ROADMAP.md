@@ -8,8 +8,9 @@ nested interactive login and separate persistent development media are implement
 See the closure at the end for validation. Earlier sections record chronological
 milestones and their limitations at that time; current contracts live beside code.
 
-Next bounded gaps: installer/update support for existing development media,
-app-specific per-user data authorization and live credential/group revocation.
+Next bounded gaps: a guest installer/user application installation, live
+credential/group revocation and secure display/input ownership. Explicit offline
+updates, app-specific data authorization and session resource revocation are closed.
 Session stop remains cooperative; forced termination and a secure compositor are
 not provided by this milestone. Hardware/native KVM validation remains separate.
 
@@ -1729,3 +1730,47 @@ authenticated execution. Rebuilt-candidate interactive report
 2176b5f3fc6c491fbea3c27a51cd5fe7 passes nested terminal, ownership denial, monitor
 handoff and root restoration after the closed-session input fix. Focus tests also
 cover revoking a pending read from a closed owner and restoring its live parent.
+
+### App-private authorization, resource revocation and offline updates
+
+1. Closed per-user app-data authority. Authentication atomically binds credentials
+   and an owned home; launch copies both. `/@applications.data` resolves the real
+   caller's installation without accepting identity/path selectors. Filesystem
+   policy checks every operation, mounted namespace and delegated stream, denying
+   same-user private-container access and metadata mutation by other apps. Root
+   retains administrative exceptions; credential storage stays identity-only.
+   Existing STAT and credential ABI layouts are unchanged.
+2. Closed session resource revocation. Broker admission is revoked, undispatched
+   calls fail with original payload/outcome, and blocked pipe/filesystem waiters
+   wake and fail REVOKED. Dispatched work retains data and may reply/collect before
+   exit. END/STATUS report pending members and failed stop requests. Closing
+   records remain after owner exit until drain; no forced context/code reclamation
+   or asynchronous kill is introduced. Group/account edits still use snapshots.
+3. Closed explicit offline development updates. New output images combine one
+   verified candidate build with existing identities, homes and private/user state.
+   Numeric ownership, filesystem UUID and GPT identity are retained; immutable code,
+   resources/catalogs and configuration come from candidate. Existing outputs and
+   active/corrupt/mixed sources are refused. Only a disposable copy may replay an
+   ext4 journal; unresolved identity WAL requires old-guest recovery. No source
+   image is replaced. Build manifests verify coherence; startup compares a small
+   build marker before disk modules/providers, with no boot update or migration.
+
+Validation: focused C/C++ ABI, authentication/home inheritance, same-user policy,
+queued revocation, dispatched completion, OOM non-dispatch, blocked stream refusal,
+stop-failure/drain reporting, format/identity/keymap/namespace and image checks.
+Four-CPU TCG e60b97e3a81e4d4a9c4c9df87f81cab0 passes real app-data resolution,
+private file mutation/read denial, delegated cat denial, nested monitor focus and
+logout/root restoration. Updated-image four-CPU TCG
+a7acfd540ee04621b7ca5d788e2cb971 preserves credentials and home contents/modes
+across offline update and boot. Host update d36ef33908fb4f679ef3bebe93117edb
+verifies new build IDs, exact credential/home bytes, UID/GID/modes and original
+preservation; active-file, overwrite and corrupt-managed-build refusals pass.
+Tests use copied media only; native KVM/physical acceptance remains separate.
+
+Final broker/SDK acceptance 35bad66aca8145c1b06de73c406fcd4d (four-CPU TCG)
+also closes an immediate-rejection lifetime bug: rejected synchronous calls now
+retain a releasable request ID. A nested child ends its own session, verifies old
+file reads and new handle acquisition/invocation return REVOKED, releases existing
+resources successfully, and exits; its parent remains live. Host tests cover stop
+failures versus pending drain, malformed atomic home frames and OOM rollback.
+The final candidate build and GPT/ext4 checks pass. Disposable media were removed.

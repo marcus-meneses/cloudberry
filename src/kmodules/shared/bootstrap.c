@@ -95,6 +95,12 @@ struct kernel_surface_result bootstrap_surface_select(MODULE_ARGS){
     const struct config_value *write_config=config("config.filesystem.writable",CONFIG_BOOL);
     unsigned writable=write_config && *(const uint8_t *)write_config->data && chosen && block_writable(&chosen->part);
     if(!chosen || CALL(state.mount,&chosen->part,&state.info.filesystem,writable?EXT4_MOUNT_WRITE:0).status){fail(BOOTSTRAP_FILESYSTEM);chosen=NULL;goto done;}
+    /* Verify one copied build identifier before loading disk modules/providers.
+     * No provisioning, hashing scan, update or repair belongs in startup. */
+    const struct config_value *build=config("config.system.build_id",CONFIG_STRING);kernel_surface_call read_id=kernel_surface_find(state.hub,"ext4_fs.read");unsigned char marker[65];
+    if(!build || build->bytes!=65 || !read_id){fail(BOOTSTRAP_FILESYSTEM);goto done;}
+    struct kernel_surface_result checked=read_id(state.info.filesystem.cookie,(uintptr_t)"/system/state/build.id",0,(uintptr_t)marker,sizeof(marker),0);
+    if(checked.status || checked.value!=65 || marker[64]!='\n' || !disk_equal(marker,build->data,64)){log_text("bootstrap: kernel/system build mismatch\n");fail(BOOTSTRAP_FILESYSTEM);goto done;}
     state.info.disk=chosen->disk;state.info.partition=chosen->part;state.info.transport=chosen->transport;state.info.hardware_index=chosen->transport==BOOTSTRAP_USB?UINT64_MAX:chosen->index;state.info.usb_controller=chosen->transport==BOOTSTRAP_USB?chosen->index:0;state.info.namespace_id=chosen->nsid;state.info.port=chosen->port;state.info.usb=chosen->usb;disk_copy(state.info.disk_guid,chosen->disk_guid,16);
     const struct kernel_hub_table *o=kernel_hub_find_table(state.hub,"boot.origin");const struct boot_origin *origin=o?(const void *)o->address:NULL;uint8_t zero[16]={0};
     if(origin && origin->present && !disk_equal(origin->disk_guid,zero,16))state.info.origin=disk_equal(origin->disk_guid,chosen->disk_guid,16)?BOOTSTRAP_ORIGIN_MATCH:BOOTSTRAP_ORIGIN_DIFFERENT;

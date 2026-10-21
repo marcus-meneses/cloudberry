@@ -137,3 +137,20 @@ an authenticated PID/installation; handlers obtain UID/GID from kernel credentia
 through restricted IO rather than client payload. Identity management intersects
 manifest grants with root/admin checks at dispatch. Filesystem workers carry the
 actual stream caller PID, rechecking current credentials on every operation.
+
+
+## Session resource revocation
+
+`handles.revoke(PID)` marks admission revoked without dropping capabilities,
+executing code or dispatched request buffers. New acquire/publish/standard access
+and invoke/submit fail REVOKED. Undispatched calls receive a completed failure with
+original payload and NOT_DISPATCHED outcome; OOM still prevents their dispatch.
+Blocked pipe and mount callers wake and recheck revocation. Provider publications
+retire from discovery while dispatched calls may finish. Collection, reply,
+abandonment and release remain available to drain existing work.
+
+Immediate synchronous rejections retain their correlation/result record until SDK
+FORGET, including rejections without a publication. They must not return a temporary
+unregistered request ID: that masks the original error during SDK cleanup. Failed
+submissions return no accepted ID; OOM without an output rolls back the unobservable
+record. Focused broker and guest SDK tests cover these lifetime rules.

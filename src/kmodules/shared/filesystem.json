@@ -44,6 +44,10 @@
     {
       "name": "filesystem.release",
       "symbol": "filesystem_surface_release"
+    },
+    {
+      "name": "filesystem.revoke",
+      "symbol": "filesystem_surface_revoke"
     }
   ]
 }

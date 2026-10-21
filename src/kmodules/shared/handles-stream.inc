@@ -32,11 +32,13 @@ static cb_status_t stream_call(uint64_t pid,const struct cb_call_header *call,co
     else {if(count<8 || count-8>CB_STREAM_CHUNK){unlock(flags);return CB_BAD_REQUEST;}copy_bytes(&options,payload,8);if(options&~CB_STREAM_NONBLOCK){unlock(flags);return CB_BAD_REQUEST;}payload=(const unsigned char *)payload+8;count-=8;}
     struct stream_waiter waiter={.thread=CALL(state.control,THREAD_CURRENT,0,0).value};cb_status_t status=CB_OK;
     if(s->filesystem){
-        while(s->busy){if(options&CB_STREAM_NONBLOCK){unlock(flags);return CB_WOULD_BLOCK;}waiter.next=s->waiters;s->waiters=&waiter;unlock(flags);status=sleep_until(call->deadline_ns);flags=lock();struct stream_waiter **at=&s->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;if(status){unlock(flags);return status;}}
+        while(s->busy){if(policy(pid)->revoked){unlock(flags);return CB_REVOKED;}if(options&CB_STREAM_NONBLOCK){unlock(flags);return CB_WOULD_BLOCK;}waiter.next=s->waiters;s->waiters=&waiter;unlock(flags);status=sleep_until(call->deadline_ns);flags=lock();struct stream_waiter **at=&s->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;if(status){unlock(flags);return status;}}
+        if(policy(pid)->revoked){unlock(flags);return CB_REVOKED;}
         s->busy=1;struct file_job job={.process=pid,.filesystem=s->filesystem,.offset=s->offset,.path=s->path,.op=call->operation==CB_STREAM_READ?1:2,.mode=s->file_mode,.buffer=call->operation==CB_STREAM_READ?out:(void *)payload,.bytes=count};unlock(flags);status=file_run(&job);flags=lock();if(!status){s->offset+=job.actual;if(call->operation==CB_STREAM_READ)*actual=job.actual;else {uint64_t n=job.actual;copy_bytes(out,&n,8);*actual=8;}}s->busy=0;stream_wake(s);unlock(flags);return status;
     }
 
     for(;;){
+        if(policy(pid)->revoked){status=CB_REVOKED;break;}
         if(call->operation==CB_STREAM_READ){if(s->used || !s->writers || !count){if(count>s->used)count=s->used;for(size_t i=0;i<count;++i)((unsigned char *)out)[i]=s->data[(s->head+i)%CB_PIPE_CAPACITY];s->head=(s->head+count)%CB_PIPE_CAPACITY;s->used-=count;*actual=count;stream_wake(s);break;}}
         else {if(!s->readers){status=CB_BROKEN_PIPE;break;}if(s->used<CB_PIPE_CAPACITY || !count){if(count>CB_PIPE_CAPACITY-s->used)count=CB_PIPE_CAPACITY-s->used;for(size_t i=0;i<count;++i)s->data[(s->head+s->used+i)%CB_PIPE_CAPACITY]=((const unsigned char *)payload)[i];s->used+=count;uint64_t written=count;copy_bytes(out,&written,8);*actual=8;stream_wake(s);break;}}
         if(options&CB_STREAM_NONBLOCK){status=CB_WOULD_BLOCK;break;}
@@ -48,7 +50,7 @@ static cb_status_t stream_call(uint64_t pid,const struct cb_call_header *call,co
  * immutable manifest. Rollback drops all new endpoints before execution. */
 struct kernel_surface_result handles_surface_stream_bind(MODULE_ARGS){
     MODULE_UNUSED();if(!c)return module_result(0,0);uint64_t flags=lock();struct policy *parent=policy(a),*child=policy(b);struct process_info info;cb_handle_t source[3];copy_bytes(source,(const void *)c,sizeof(source));
-    if(!parent || !child || CALL(state.process_info,b,&info,0).status || info.state!=PROCESS_READY || info.thread){unlock(flags);return module_result(0,0);}
+    if(!parent || !child || parent->revoked || child->revoked || CALL(state.process_info,b,&info,0).status || info.state!=PROCESS_READY || info.thread){unlock(flags);return module_result(0,0);}
     struct capability *created[3]={0};int ok=1;
     for(unsigned i=0;i<3;++i){if(!source[i])continue;struct capability *from=capability(a,source[i]);struct grant *g=grant(child,CB_STREAM_NAME);unsigned direction=i?CB_STREAM_WRITE:CB_STREAM_READ;const char *op=i?"write":"read";
         if(!from || !from->stream || from->direction!=direction || !g || !permitted(g->operations,(const unsigned char *)op,length(op)) || child->standard[i]){ok=0;break;}

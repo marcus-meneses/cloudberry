@@ -36,4 +36,5 @@ struct kernel_surface_result process_surface_credentials(MODULE_ARGS);
  * descendant; reflexive queries test that the process/session remains live. Trusted only. */
 struct kernel_surface_result process_surface_session(MODULE_ARGS);
 struct kernel_surface_result process_surface_ancestor(MODULE_ARGS);
+struct kernel_surface_result process_surface_home(MODULE_ARGS);
 #endif

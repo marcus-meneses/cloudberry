@@ -72,6 +72,14 @@
     {
       "name": "process.ancestor",
       "symbol": "process_surface_ancestor"
+    },
+    {
+      "name": "process.home",
+      "symbol": "process_surface_home"
+    },
+    {
+      "name": "process.active",
+      "symbol": "process_surface_active"
     }
   ]
 }

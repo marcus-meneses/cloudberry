@@ -119,3 +119,14 @@ supplementary groups into each READY child before execution, with independent
 storage. Installed executable traversal/execute bits are checked for that owner.
 An authenticated accounts launcher can start a different-user execution subtree;
 this never changes the invoking terminal or existing sibling processes.
+
+## Per-user private data
+
+`data` (operation 8) takes no input and returns the authenticated caller's canonical
+app-data path as UTF-8 bytes without NUL. The kernel resolves installed identity
+and an owned home snapshot; caller-selected UID, app name or path is never accepted.
+The operation returns a location, not extra filesystem authority or automatic
+provisioning. `fsctl data` demonstrates it. Manifests still authorize acquisition
+and operations; filesystem checks apply on every call, including delegated files.
+Same-user applications cannot access each other's private containers. Root keeps
+its administrative exceptions, with credential storage restricted to identity.

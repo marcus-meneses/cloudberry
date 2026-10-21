@@ -17,7 +17,8 @@
         "credentials",
         "identity_set",
         "random",
-        "now_ns"
+        "now_ns",
+        "identity_home"
       ]
     },
     {

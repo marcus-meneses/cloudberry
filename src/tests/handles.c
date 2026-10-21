@@ -78,6 +78,20 @@ int main(void){
         provider_error.request=r->id;provider_error.status=status;assert(respond(policy(1),(const void *)&provider_error,sizeof(provider_error))==CB_OK && r->completed && r->done && !r->failure);struct cb_reply_header delivered;copy_bytes(&delivered,r->reply,sizeof(delivered));assert(delivered.status==status);drop_request(r);
     }
 
+    /* Closing a session revokes queued work and new calls while retaining a
+     * dispatched payload until its provider replies. No cap/code is reclaimed. */
+    struct request *queued=allocate(sizeof(*queued)+sizeof(captured_call)),*active=allocate(sizeof(*active)+sizeof(captured_call));assert(queued && active);
+    struct request *requests[2]={queued,active};for(unsigned i=0;i<2;++i){struct request *r=requests[i];r->input=(void *)(r+1);r->bytes=sizeof(captured_call);copy_bytes(r->input,captured_call,sizeof(captured_call));r->publication=cap->publication;++cap->publication->refs;r->pid=2;r->cap=cap->id;r->provider=i?1:0;r->id=(struct cb_request_id){2,serial()};r->dispatched=i;}
+    queued->next=active;state.requests=queued;state.request_tail=active;assert(!handles_surface_revoke(2,0,0,0,0,0).status && policy(2)->revoked && queued->done && queued->completed && !active->done && !active->completed);
+    struct cb_reply_header revoked;copy_bytes(&revoked,queued->reply,sizeof(revoked));assert(revoked.status==CB_REVOKED && revoked.outcome==CB_NOT_DISPATCHED);
+    provider_error.request=active->id;provider_error.status=CB_OK;provider_error.outcome=CB_COMMITTED;assert(respond(policy(1),(const void *)&provider_error,sizeof(provider_error))==CB_OK && active->done && active->completed);
+    drop_request(queued);drop_request(active);
+    struct request *oom=allocate(sizeof(*oom)+sizeof(captured_call));assert(oom);oom->input=(void *)(oom+1);oom->bytes=sizeof(captured_call);copy_bytes(oom->input,captured_call,sizeof(captured_call));oom->publication=cap->publication;++cap->publication->refs;oom->pid=2;oom->cap=cap->id;oom->id=(struct cb_request_id){2,serial()};state.requests=state.request_tail=oom;remaining=0;assert(!handles_surface_revoke(2,0,0,0,0,0).status && oom->done && oom->completed && oom->failure==CB_RESOURCE_FAILURE);remaining=-1;drop_request(oom);
+    struct cb_call_header denied_call={.version={sizeof(denied_call),1,0},.handle=cap->id,.interface=interface,.operation=1};unsigned char *denied_reply=NULL;size_t denied_bytes=0;
+    assert(invoke(policy(2),(void *)&denied_call,sizeof(denied_call),&denied_reply,&denied_bytes,0)==CB_REVOKED);struct cb_reply_header denied_header;copy_bytes(&denied_header,denied_reply,sizeof(denied_header));assert(denied_header.status==CB_REVOKED && denied_header.request.serial && owned_request(2,denied_header.request)->completed);release(denied_reply);drop_request(owned_request(2,denied_header.request));
+    struct stream *closed_pipe=allocate(sizeof(*closed_pipe)+CB_PIPE_CAPACITY);assert(closed_pipe);struct capability *closed_reader=stream_endpoint(policy(2),cap->publication,closed_pipe,CB_STREAM_READ);assert(closed_reader);struct cb_call_header closed_call={.handle=closed_reader->id,.operation=CB_STREAM_READ,.payload_bytes=sizeof(struct cb_stream_read)};struct cb_stream_read closed_read={1,0};size_t actual=0;unsigned char read_byte;
+    assert(stream_call(2,&closed_call,&closed_read,&read_byte,&actual)==CB_REVOKED);drop_capability(closed_reader);
+
     assert(!handles_surface_decommission(1,0,0,0,0,0).status && cap->publication->dead);
     assert(receive(policy(1),0,&notification,&notification_bytes,CB_FRAME_LIMIT)==CB_OK);copy_bytes(&delivered,notification,sizeof(delivered));assert(!delivered.call.handle && delivered.call.operation==CB_HANDLE_RELEASE && delivered.call.flags==(CB_CALL_SYSTEM_EVENT|CB_CALL_PROVIDER_DELIVERY));release(notification);
     assert(!CALL(handles_surface_exit,1,0,0).status && cap->publication->dead);assert(!CALL(handles_surface_exit,2,0,0).status);assert(!state.policies && !state.caps && !state.publications && !state.requests && blocks==0);

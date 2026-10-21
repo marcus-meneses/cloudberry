@@ -1,7 +1,7 @@
 # Interactive sessions
 
 The continuously running privileged `/@sessions` handler owns dynamic session
-records. `self`, `begin` and `end` take no payload. `self` returns the authenticated
+records. `self`, `begin` and `end` take no payload; `status` optionally takes a SID. `self` returns the authenticated
 caller's `cb_session`. `begin` uses current kernel credentials, creates a session
 owned by the caller PID, and records its parent session. It does not authenticate
 or elevate. `accounts login` authenticates through `/@identity` first.
@@ -13,10 +13,15 @@ UID, owner PID or SID. Session IDs use monotonic process IDs and are not recycle
 
 `end` is owner-only. It marks the session subtree closed, rejects subsequent
 launch/inheritance and requests cooperative stop of remaining members. Owner exit
-also closes its subtree through preallocated owner-watch notifications. Closing
+also closes its subtree through preallocated owner-watch notifications. Closing revokes new handle acquisition/publication/invocation, queued requests and
+blocked pipe/filesystem operations. Dispatched provider/backend work may finish;
+collection/reply/release remain available for draining. Closing
 retains running contexts and mappings until actual exit; this is not forced
-termination of hostile or unresponsive applications. Records are released on
-owner exit, with closed descendants reparented for cleanup.
+termination of hostile or unresponsive applications. Closing records remain after owner exit while members drain. END returns a copied
+status (members, running children, failed stop requests). STATUS permits the owner
+UID or root to inspect a retained SID. Stop failures remain distinct from pending
+drain; records are collected on subsequent service activity after drain, with
+closed descendants reparented for cleanup.
 
 `accounts login USER` starts an ordinary nested terminal at the verified existing
 home; `accounts login USER APP [ARGS]` retains authenticated one-app execution.

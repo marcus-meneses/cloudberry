@@ -33,7 +33,7 @@ UEFI firmware
             ├── bootstrap storage worker
             │   ├── wait for initial USB/hub discovery
             │   ├── find configured partition GUID over USB / NVMe / SATA
-            │   ├── mount known ext4 driver volume; check boot origin
+            │   ├── mount known ext4 driver volume; check boot origin and build ID
             │   └── load selected future modules from /system/kmodules/drivers
             └── provider startup worker (waits for volume readiness)
                 ├── adopt ext4 at /; mount verified ISO9660 boot filesystem at /boot; admit catalog
@@ -347,3 +347,15 @@ kernel-owned values, not borrowed pointers. Logout requests cooperative shutdown
 media once. `run-dev` uses that initialized image without rebuilding/copying it.
 Candidate runs remain read-only or disposable snapshots. Both still load all
 foundational kmodules through Limine; the appended ext4 holds system/user state.
+
+Application launch deep-copies the authenticated home snapshot with credentials.
+The app-data resolver uses immutable installation identity; filesystem operations
+recheck that policy even for delegated streams. Session closure marks membership
+closed, revokes broker admission, wakes blocked stream/mount waiters and retains
+dispatched work until completion. Copied drain reports distinguish stop failures
+from processes still running; reclamation still waits for actual exit.
+
+Image construction writes a build-owned content manifest, boot config build ID and
+matching system marker. Startup compares the marker before loading disk modules
+or providers. The offline updater verifies managed files, merges persistent data
+into a new image and leaves both inputs intact. It never executes in the guest.

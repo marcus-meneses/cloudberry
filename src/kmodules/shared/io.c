@@ -26,11 +26,12 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
         else if(identity_owner && r->process==identity_owner){if(r->bytes<8+sizeof(struct cb_credentials)){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t pid;__builtin_memcpy(&pid,r->input,8);r->status=credentials(pid,1,(uintptr_t)r->input+8,r->bytes-8,0,0).status?CB_RESOURCE_FAILURE:CB_OK;}
         return module_result(1,1);
     }
+    if(r->operation==CB_IO_IDENTITY_HOME){r->status=CB_DENIED;if(!identity_owner || r->process!=identity_owner)return module_result(1,1);if(r->bytes<8+sizeof(struct cb_identity_home)){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t pid;__builtin_memcpy(&pid,r->input,8);kernel_surface_call credentials=kernel_surface_find(hub,"process.credentials");r->status=!credentials || credentials(pid,4,(uintptr_t)r->input+8,r->bytes-8,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}
     if(r->operation==CB_IO_SESSION){
         r->status=CB_DENIED;if(r->bytes!=sizeof(struct cb_io_session))return module_result(1,1);struct cb_io_session request;__builtin_memcpy(&request,r->input,sizeof(request));if(!request.process)request.process=r->process;
         if((request.process!=r->process || request.operation) && (!sessions_owner || r->process!=sessions_owner))return module_result(1,1);
-        kernel_surface_call session=kernel_surface_find(hub,"process.session");if(!session || request.operation>2 || (!request.operation && r->capacity<sizeof(struct cb_session))){r->status=CB_BAD_REQUEST;return module_result(1,1);}
-        struct kernel_surface_result got=session(request.process,request.operation,request.operation==2?request.exclude:(uintptr_t)r->output,r->capacity,0,0);r->status=got.status?CB_BAD_REQUEST:CB_OK;if(!r->status && !request.operation)r->actual=sizeof(struct cb_session);return module_result(1,1);
+        kernel_surface_call session=kernel_surface_find(hub,"process.session");if(!session || request.operation>3 || ((!request.operation || request.operation==3) && r->capacity<(request.operation==3?sizeof(struct cb_session_status):sizeof(struct cb_session)))){r->status=CB_BAD_REQUEST;return module_result(1,1);}
+        struct kernel_surface_result got=session(request.process,request.operation,request.operation==2?request.exclude:(uintptr_t)r->output,r->capacity,0,0);r->status=got.status?CB_BAD_REQUEST:request.operation==2 && got.value?CB_RESOURCE_FAILURE:CB_OK;if(!r->status && (!request.operation || request.operation==3))r->actual=request.operation==3?sizeof(struct cb_session_status):sizeof(struct cb_session);return module_result(1,1);
     }
     if(r->operation==CB_IO_INPUT_ANCESTOR){r->status=CB_DENIED;if(!keyboard_owner || r->process!=keyboard_owner)return module_result(1,1);if(r->bytes!=16 || r->capacity<8){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t args[2];__builtin_memcpy(args,r->input,16);kernel_surface_call ancestor=kernel_surface_find(hub,"process.ancestor");struct kernel_surface_result got=ancestor?CALL(ancestor,args[0],args[1],0):module_result(0,0);r->status=got.status?CB_BAD_REQUEST:CB_OK;if(!r->status){__builtin_memcpy(r->output,&got.value,8);r->actual=8;}return module_result(1,1);}
     if(r->operation==CB_IO_INPUT_FOCUS_SET){r->status=CB_DENIED;if(!keyboard_owner || r->process!=keyboard_owner)return module_result(1,1);if(r->bytes!=16){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t args[2];__builtin_memcpy(args,r->input,16);kernel_surface_call cpu=kernel_surface_find(hub,"cpu.control");if(!cpu){r->status=CB_UNAVAILABLE;return module_result(1,1);}uint64_t flags=CALL(cpu,CPU_ENTER,0,0).value;if(args[1]<=focus_generation){CALL(cpu,CPU_LEAVE,flags,0);r->status=CB_BAD_REQUEST;return module_result(1,1);}focus_pid=args[0];focus_generation=args[1];CALL(cpu,CPU_LEAVE,flags,0);r->status=CB_OK;return module_result(1,1);}
@@ -42,7 +43,7 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     else if((r->operation>=CB_IO_DISPLAY_INFO && r->operation<=CB_IO_DISPLAY_BLIT) || r->operation==CB_IO_DISPLAY_COPY)backend=display;
     else if(r->operation==CB_IO_FILESYSTEM)backend=filesystem;
     else if(r->operation>=CB_IO_PROCESS_LAUNCH && r->operation<=CB_IO_PROCESS_RELEASE)backend=applications;
-    else if(r->operation==CB_IO_PROCESS_SAMPLE)backend=applications;
+    else if(r->operation==CB_IO_PROCESS_SAMPLE || r->operation==CB_IO_PROCESS_DATA)backend=applications;
     if(backend)(void)CALL(backend,r,0,0);
     return module_result(1,1);
 }

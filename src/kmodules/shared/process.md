@@ -125,3 +125,14 @@ missing/reaped intermediates fail closed. Keyboard uses this predicate through
 restricted IO to nest focus without allowing unrelated input takeover.
 Session 0 is the root boot domain. Credential replacement remains separate from
 session membership; no forced termination or existing-thread migration is added.
+
+
+Atomic credential operation 4 takes cb_identity_home plus groups/home bytes. It
+allocates and validates both before publishing either, and inheritance deep-copies
+the home. `process.home` copies the canonical snapshot (root defaults to
+/system/root); legacy credential-only replacement clears a non-root home binding.
+`process.active` reports open-session resource eligibility. Session close marks
+membership closed, calls handles.revoke/filesystem.revoke and records failed stop
+requests. Operation 3 returns a copied cb_session_status, including pending members
+and failures. Closing by SID continues to work after owner reap. No code, stack or
+active request payload is reclaimed by revocation.

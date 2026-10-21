@@ -330,7 +330,8 @@ Current QEMU boot media is a USB BOT disk backed by the hybrid ISO, read-only by
 VM exit and the ISO is unchanged. `filesystem.writable` permits writable ext4
 mounting when the medium supports it. The filesystem provider blocks app mutations
 under `/boot` and `/system`, except catalog-bound writes beneath the caller’s own
-root-session app-data directory; this is not general user-folder policy.
+root-session app-data directory. Per-user home/private-container policy is also
+enforced on every operation, including delegated file streams.
 An explicit `usb-bot`/`scsi-hd` attachment preserves its 512-byte GPT layout;
 the readonly medium must not be inferred as a 2048-byte optical device. USB storage exposes read/write/flush on suitably writable media; GPT and ext4 consumers can access the appended
 driver partition by its configured GUID. Normal startup runs the bootstrap
@@ -552,7 +553,8 @@ src/
 │   │   ├── handles.h
 │   │   ├── handles.json
 │   │   ├── handles.md
-│   │   ├── applications.c
+│   │   ├── applications-access.inc
+│   ├── applications.c
 │   │   ├── applications.h
 │   │   ├── applications.json
 │   │   ├── display.c
@@ -715,6 +717,7 @@ src/
 │   ├── system.c
 │   └── system.h
 ├── tests/
+│   ├── offline-update.py
 │   ├── persistent-sessions.py
 │   ├── console-boot.py
 │   ├── raster.c
@@ -744,6 +747,7 @@ src/
 │   │   ├── bench-server.json
 │   │   ├── application-runtime.c
 │   │   ├── graphics-check.c
+│   │   ├── private-check.c
 │   │   ├── identity-check.c
 │   │   ├── mouse-check.c
 │   │   ├── handle-bench.c
@@ -877,6 +881,9 @@ src/
 │   ├── build-initial.py
 │   ├── filesystem-tree.py
 │   ├── clean-tests.py
+│   ├── image-version.py
+│   ├── update-dev-disk.py
+│   ├── development-images.md
 │   ├── init-dev-disk.py
 │   ├── identity-db.py
 │   ├── stage-kmodules.py
@@ -1007,7 +1014,8 @@ The identity provider verifies passwords, authorizes root/admin management and
 authenticates app execution through the ordinary [accounts app](apps/accounts/README.md).
 Filesystem calls enforce ownership/mode bits, including on existing file streams.
 Explicit home provisioning and nested interactive sessions are implemented;
-per-user installers, app-specific home grants and live group revocation remain open.
+per-user installers and live group revocation remain open; app-specific home data
+authorization and session-wide resource revocation are implemented.
 
 The default keyboard layout is ABNT2 (IBM remains bundled). Boot filesystem
 contents are accessible through /@filesystem at /boot: kernel.elf, cloudberry.cnf,
@@ -1064,8 +1072,8 @@ make -C src run-dev QEMU_ACCEL=kvm QEMU_CPUS=4
 The separate `bin/cloudberry-dev.img` contains the initialized hybrid boot/system
 image. Normal builds, `run-dev`, test cleanup and `clean` do not replace it.
 `DEV_DISK=/absolute/path` selects another explicit destination. Updating installed
-code on existing persistent images still needs an installer/update workflow;
-rebuilding the candidate does not update that disk. Automated tests use disposable
+code on existing persistent images uses the explicit offline update workflow below;
+rebuilding the candidate alone does not update that disk. Automated tests use disposable
 copies under `bin/tests`; developer persistent disks are never auto-attached.
 
 Focused validation: `python3 src/tests/persistent-sessions.py bin --cpus 4` runs
@@ -1073,3 +1081,26 @@ two isolated TCG boots to verify persisted credentials, homes, files and modes,
 plus terminal/monitor focus restoration and root logout behavior. It removes
 successful disposable media and retains reports. Native runs may opt into
 `--accel kvm`; no native or physical validation is inferred from TCG results.
+
+## Private data, session revocation and offline updates
+
+Authentication binds an owned canonical home together with credentials; launches
+copy both. `/@applications.data` resolves the caller's installed app-data path;
+`fsctl data` displays its own location. Same-user applications cannot access other
+private containers through path calls, mode changes or delegated file streams.
+Root keeps administrative exceptions; only identity accesses credential storage.
+
+Session END revokes new resource calls and fails queued work, while dispatched
+operations can finish and release their results. Blocked pipe/mount waiters wake
+and fail REVOKED. END/STATUS expose running members and stop-request failures;
+closing records remain while draining. No executing context is forcibly freed.
+
+`make -C src update-dev-disk` produces `bin/cloudberry-dev-next.img` from the new
+candidate plus the previous disk's identity and user state. It preserves numeric
+ownership and installation/disk identity, rejects active/corrupt/mixed inputs and
+never replaces either input or an existing output. Select the result explicitly
+with `run-dev DEV_DISK=../bin/cloudberry-dev-next.img`. Managed code/catalogs come
+from one build, checked through a content manifest. Boot only compares a 64-byte
+build ID with the mounted system before loading disk modules/providers; all
+initialization, repair/import decisions and updates stay outside startup.
+See [development image workflow](src/tools/development-images.md).

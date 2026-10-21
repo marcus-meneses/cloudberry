@@ -5,7 +5,7 @@
 #include "../../kernel/cpu.h"
 struct backend {struct backend *next;kernel_surface_call query;struct filesystem_backend api;};
 struct mount {struct mount *next;struct backend *backend;uint64_t id,cookie,refs;unsigned active,closing,owned,busy;char *path;};
-struct fs_call_waiter {struct fs_call_waiter *next;uint64_t mount,thread;};
+struct fs_call_waiter {struct fs_call_waiter *next;uint64_t mount,thread,process;};
 static struct {struct fs_call_waiter *waiters;const struct kernel_surfaces *hub;uintptr_t heap;uint64_t owner,root,serial;unsigned management;struct backend *backends;struct mount *mounts;kernel_surface_call cpu,alloc,free;} fs;
 #define FC(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 static uint64_t flock(void){return FC(fs.cpu,CPU_ENTER,0,0).value;}
@@ -105,6 +105,10 @@ static cb_status_t namespace_access(struct mount *m,struct filesystem_request *r
 }
 static cb_status_t access_file(struct mount *m,struct filesystem_request *r){
     if(!r->process)return CB_OK;
+    kernel_surface_call active=kernel_surface_find(fs.hub,"process.active");if(!active || !active(r->process,0,0,0,0,0).value)return CB_REVOKED;
+    if(r->operation==FS_SYNC)return CB_DENIED;
+    char absolute[4096];size_t root=flength(m->path),relative=flength(r->path);if(root==1){if(relative>4095)return CB_BAD_REQUEST;fcopy(absolute,r->path,relative+1);}else {if(root+relative>4095)return CB_BAD_REQUEST;fcopy(absolute,m->path,root);if(relative==1)absolute[root]=0;else fcopy(absolute+root,r->path,relative+1);}
+    kernel_surface_call policy=kernel_surface_find(fs.hub,"applications.access");if(!policy)return CB_DENIED;struct kernel_surface_result permitted=policy(r->process,(uintptr_t)absolute,r->operation==FS_PREPARE && r->mode==CB_FILE_READ?FS_READ:r->operation,0,0,0);if(permitted.status || permitted.value)return permitted.status?CB_DENIED:permitted.value;
     if(r->operation==FS_SYNC)return CB_DENIED; /* Whole-mount sync stays kernel-only. */
     kernel_surface_call credentials=kernel_surface_find(fs.hub,"process.credentials");struct cb_credentials who;
     if(!credentials || credentials(r->process,0,(uintptr_t)&who,sizeof(who),0,0).status)return CB_DENIED;
@@ -119,7 +123,7 @@ struct kernel_surface_result filesystem_surface_file(MODULE_ARGS){
     if(r->operation<FS_STAT || r->operation>FS_CHOWN || (r->operation!=FS_SYNC && !canonical(r->path))){r->status=CB_BAD_REQUEST;return module_result(1,1);}
     uint64_t flags=flock();struct mount *m=find_mount(a);if(!m || m->closing || m->active==UINT32_MAX){funlock(flags);return module_result(1,1);}++m->active;
     kernel_surface_call control=kernel_surface_find(fs.hub,"threads.control");
-    while(m->busy){if(!control){--m->active;funlock(flags);r->status=CB_BUSY;return module_result(1,1);}struct fs_call_waiter waiter={.mount=a,.thread=FC(control,THREAD_CURRENT,0,0).value,.next=fs.waiters};fs.waiters=&waiter;funlock(flags);struct kernel_surface_result waited=FC(control,THREAD_BLOCK,0,0);flags=flock();struct fs_call_waiter **at=&fs.waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;if(waited.status){--m->active;funlock(flags);return module_result(1,1);}}
+    while(m->busy){kernel_surface_call active=kernel_surface_find(fs.hub,"process.active");if(r->process && (!active || !active(r->process,0,0,0,0,0).value)){--m->active;funlock(flags);r->status=CB_REVOKED;return module_result(1,1);}if(!control){--m->active;funlock(flags);r->status=CB_BUSY;return module_result(1,1);}struct fs_call_waiter waiter={.mount=a,.process=r->process,.thread=FC(control,THREAD_CURRENT,0,0).value,.next=fs.waiters};fs.waiters=&waiter;funlock(flags);struct kernel_surface_result waited=FC(control,THREAD_BLOCK,0,0);flags=flock();struct fs_call_waiter **at=&fs.waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;if(waited.status){--m->active;funlock(flags);return module_result(1,1);}}
     m->busy=1;funlock(flags);
     r->status=access_file(m,r);if(!r->status && r->operation!=FS_EXEC)(void)backend_call(m->backend,m->cookie,r);flags=flock();m->busy=0;--m->active;if(control)for(struct fs_call_waiter *w=fs.waiters;w;w=w->next)if(w->mount==a)(void)FC(control,THREAD_WAKE,w->thread,0);funlock(flags);return module_result(1,1);
 }
@@ -167,3 +171,5 @@ struct kernel_surface_result filesystem_surface_register(MODULE_ARGS){if(!manage
 struct kernel_surface_result filesystem_surface_mount(MODULE_ARGS){if(!management_enter())return module_result(CB_BUSY,0);struct kernel_surface_result result=manager_mount(a,b,c,d,e,f);management_leave();return result;}
 struct kernel_surface_result filesystem_surface_adopt(MODULE_ARGS){if(!management_enter())return module_result(CB_BUSY,0);struct kernel_surface_result result=manager_adopt(a,b,c,d,e,f);management_leave();return result;}
 struct kernel_surface_result filesystem_surface_unmount(MODULE_ARGS){if(!management_enter())return module_result(CB_BUSY,0);struct kernel_surface_result result=manager_unmount(a,b,c,d,e,f);management_leave();return result;}
+
+struct kernel_surface_result filesystem_surface_revoke(MODULE_ARGS){MODULE_UNUSED();if(!fs.hub)return module_result(0,0);uint64_t flags=flock();kernel_surface_call control=kernel_surface_find(fs.hub,"threads.control");if(control)for(struct fs_call_waiter *w=fs.waiters;w;w=w->next)if(w->process==a)(void)FC(control,THREAD_WAKE,w->thread,0);funlock(flags);return module_result(1,1);}
