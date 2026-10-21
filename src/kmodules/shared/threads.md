@@ -108,3 +108,12 @@ unsuccessful reap retains it. New threads for a draining provider fail. The medi
 gate counts an active call across thread preemption/blocking until it returns.
 See [hub lifetime](../../kernel/hub.md); this does not add forced cancellation or
 unmapping of executable providers.
+
+ACCOUNTING (appended control operation 12) copies cumulative scheduled runtime,
+current timestamp, state, assigned CPU, CPU count and validity. ID zero queries
+only clock/CPU count. Dispatch begins an interval and dispatcher return closes
+it; blocked time is excluded, active slices can be sampled, and clock regression
+or failure invalidates the cumulative measurement. Totals saturate on overflow.
+No new timestamp reads are added to the dispatch path: accounting uses its
+existing dispatch/return clock samples. This includes the thread's syscall time,
+not CPU-local dispatcher work or other kernel threads.

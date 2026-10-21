@@ -11,7 +11,7 @@ def save_report():report_path.write_text(json.dumps(state_report,indent=2)+'\n')
 def on_exit():
     if state_report['status']=='running':state_report['status']='failed';save_report()
 save_report();atexit.register(on_exit)
-source=work/'root';(source/'boot/kmodules/drivers').mkdir(parents=True,exist_ok=True)
+source=work/'root';(source/'system/kmodules/drivers').mkdir(parents=True,exist_ok=True)
 features=('none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,64bit,'
           'flex_bg,sparse_super,large_file,huge_file,dir_nlink,extra_isize,metadata_csum')
 guid='9beaeafd-7835-446a-8258-00331878d4f3'

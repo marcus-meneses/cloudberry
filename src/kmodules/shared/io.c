@@ -1,130 +1,44 @@
 #include "io.h"
-#include "io-process.h"
-#include "io-console.h"
+#include "../../interfaces/display.h"
 #include "process.h"
-#include "threads.h"
-#include "usb.h"
-#include "../../kernel/cpu.h"
-struct subscription {struct subscription *next;uint64_t pid,id,thread,skip_id;uint32_t stop,waiting,ack,claimed,negotiated,active,ready;struct usb_ref ref;uint32_t interface,endpoint;struct usb_io transfer;unsigned char report[8];};
-static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct subscription *first;
-    kernel_surface_call alloc,free,cpu,thread,create,clock,device,interface,endpoint,claim,release,control,transfer,cancel,watch,channel,post,unsubscribe,process_info;} state;
+static const struct kernel_surfaces *hub;
+static uint64_t graphics_owner,keyboard_owner,identity_owner;
+static kernel_surface_call hid,display,filesystem,applications,clock,watch,hid_exit,applications_exit;
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
-static uint64_t lock(void){return CALL(state.cpu,CPU_ENTER,0,0).value;}
-static void unlock(uint64_t flags){CALL(state.cpu,CPU_LEAVE,flags,0);}
-static void copy(void *dst,const void *src,size_t n){unsigned char *d=dst;const unsigned char *s=src;for(size_t i=0;i<n;++i)d[i]=s[i];}
-static struct subscription *find(uint64_t pid,uint64_t id){for(struct subscription *s=state.first;s;s=s->next)if(s->pid==pid && s->id==id)return s;return NULL;}
-static int stopped(struct subscription *s){return __atomic_load_n(&s->stop,__ATOMIC_ACQUIRE)!=0;}
-static int event(struct subscription *s,uint32_t kind,uint32_t status){
-    struct cb_io_keyboard_event e={.subscription=s->id,.device_id=s->ref.id,.timestamp_ns=CALL(state.clock,0,0,0).value,.kind=kind,.status=status};if(kind==CB_IO_REPORT)copy(e.report,s->report,8);
-    uint64_t flags=lock();s->waiting=1;s->ack=0;unlock(flags);
-    const struct cb_interface_id interface=CB_IO_INTERFACE_ID;
-    if(state.post(s->pid,s->id,(uintptr_t)&e,sizeof(e),(uintptr_t)&interface,CB_IO_KEYBOARD_EVENT).status)return 0;
-    while(!stopped(s) && !__atomic_load_n(&s->ack,__ATOMIC_ACQUIRE))if(CALL(state.thread,THREAD_BLOCK,0,0).status)return 0;
-    flags=lock();s->waiting=0;unlock(flags);return !stopped(s);
-}
-static int discover(struct subscription *s){
-    const struct kernel_hub_table *entry=kernel_hub_find_table(state.hub,USB_TABLE_NAME);if(!entry)return 0;const struct usb_table *table=(const void *)entry->address;uint64_t seen=0;
-    for(;;){struct usb_device snapshot={0};uint64_t flags=lock();for(struct usb_device *d=table->first;d;d=d->next)if(d->identity.id>seen && (!snapshot.identity.id || d->identity.id<snapshot.identity.id))snapshot=*d;unlock(flags);if(!snapshot.identity.id)return 0;seen=snapshot.identity.id;if(snapshot.state!=USB_CONFIGURED || seen==s->skip_id)continue;
-        struct usb_ref ref={snapshot.identity.id,snapshot.identity.generation};
-        for(unsigned i=0;i<snapshot.interfaces;++i){struct usb_interface interface;if(CALL(state.interface,&ref,i,&interface).status || interface.alternate || interface.owner || interface.class_code!=3 || interface.subclass!=1 || interface.protocol!=1)continue;
-            for(unsigned ep=129;ep<144;++ep){struct usb_endpoint endpoint;if(state.endpoint((uintptr_t)&ref,interface.number,ep,(uintptr_t)&endpoint,0,0).status || endpoint.transfer_type!=3 || !endpoint.supported || endpoint.max_packet<8)continue;
-                if(CALL(state.claim,&ref,interface.number,s).status)break;
-                flags=lock();s->ref=ref;s->interface=interface.number;s->endpoint=ep;s->claimed=1;s->negotiated=0;unlock(flags);return 1;}
-        }
-    }
-}
-static int release_claim(struct subscription *s){
-    if(!s->claimed)return 1;
-    struct usb_device d={0};
-    if(!CALL(state.device,&s->ref,&d,0).status && d.state==USB_CONFIGURED){if(CALL(state.release,&s->ref,s->interface,s).status)return 0;}
-    else if(d.state==USB_FAILED && d.error==USB_QUIESCENCE)return 0;
-    s->claimed=0;return 1;
-}
-struct kernel_surface_result io_surface_worker(MODULE_ARGS){
-    MODULE_UNUSED();struct subscription *s=(void *)a;if(!s)return module_result(0,0);if(CALL(state.watch,1,0,0).status){__atomic_store_n(&s->ready,2,__ATOMIC_RELEASE);return module_result(0,0);}
-    __atomic_store_n(&s->ready,1,__ATOMIC_RELEASE);
-    int ok=1;
-    while(!stopped(s)){
-        if(!discover(s)){if(CALL(state.thread,THREAD_BLOCK,0,0).status){ok=0;break;}continue;}
-        if(!event(s,CB_IO_DEVICE_ADDED,CB_OK))break;
-        if(!s->negotiated){(void)event(s,CB_IO_ERROR,CB_UNAVAILABLE);s->skip_id=s->ref.id;if(!release_claim(s)){ok=0;break;}continue;}
-        while(!stopped(s)){
-            uint64_t flags=lock();s->transfer=(struct usb_io){.device=s->ref,.owner=(uintptr_t)s,.interface=s->interface,.endpoint=s->endpoint,.bytes=8,.buffer=s->report};s->active=1;unlock(flags);
-            struct host_transfer_result result={0};struct kernel_surface_result read=CALL(state.transfer,&s->transfer,&result,0);
-            flags=lock();s->active=0;unlock(flags);if(stopped(s))break;
-            if(!read.status && result.state==HOST_COMPLETE && result.bytes==8){if(!event(s,CB_IO_REPORT,CB_OK)){ok=0;break;}continue;}
-            struct usb_device device={0};int alive=!CALL(state.device,&s->ref,&device,0).status && device.state==USB_CONFIGURED;
-            /* Interrupt-IN waits for reports/disconnect without an idle timeout.
-             * Explicit cancellation may still terminate a retained receive. */
-            if(alive && result.state==HOST_CANCELLED)continue;
-            if(!event(s,alive?CB_IO_ERROR:CB_IO_DEVICE_REMOVED,alive?CB_UNAVAILABLE:CB_OK)){ok=0;break;}
-            if(alive)s->skip_id=s->ref.id;
-            break;
-        }
-        if(!release_claim(s)){ok=0;break;}
-    }
-    (void)CALL(state.watch,0,0,0);if(!release_claim(s))ok=0;
-    /* Terminal failure is one-way: never wait for a potentially failed
-     * provider to acknowledge our own exit. The preallocated mailbox copies
-     * the payload; unsafe DMA ownership remains retained. */
-    if(!stopped(s)){
-        ok=0;struct cb_io_keyboard_event failed={.subscription=s->id,.device_id=s->ref.id,.timestamp_ns=CALL(state.clock,0,0,0).value,.kind=CB_IO_ERROR,.status=CB_PROVIDER_FAILED};
-        const struct cb_interface_id interface=CB_IO_INTERFACE_ID;
-        (void)state.post(s->pid,s->id,(uintptr_t)&failed,sizeof(failed),(uintptr_t)&interface,CB_IO_KEYBOARD_EVENT);
-    }
-    uint64_t flags=lock();for(struct subscription *other=state.first;other;other=other->next)if(other!=s && other->thread)CALL(state.thread,THREAD_WAKE,other->thread,0);unlock(flags);
-    return module_result(ok,ok);
-}
 struct kernel_surface_result io_surface_init(MODULE_ARGS){
-    MODULE_UNUSED();if(state.hub)return module_result(1,state.hub==(const void *)a);const struct kernel_surfaces *hub=(const void *)a;if(!hub || !b)return module_result(0,0);
-#define BIND(field,name) do{state.field=kernel_surface_find(hub,name);if(!state.field)return module_result(0,0);}while(0)
-    BIND(alloc,"mem.calloc");BIND(free,"mem.free");BIND(cpu,"cpu.control");BIND(thread,"threads.control");BIND(create,"threads.create");BIND(clock,"clock.now_ns");BIND(device,"usb.device");BIND(interface,"usb.interface");BIND(endpoint,"usb.endpoint");BIND(claim,"usb.claim");BIND(release,"usb.release");BIND(control,"usb.control");BIND(transfer,"usb.transfer");BIND(cancel,"usb.cancel");BIND(watch,"usb.watch");BIND(channel,"handles.channel");BIND(post,"handles.post");BIND(unsubscribe,"handles.unsubscribe");BIND(process_info,"process.info");
+    MODULE_UNUSED();if(hub)return module_result(1,hub==(const void *)a);if(!a || !b)return module_result(0,0);const struct kernel_surfaces *candidate=(const void *)a;
+#define BIND(field,name) field=kernel_surface_find(candidate,name);if(!field)return module_result(0,0)
+    BIND(hid,"hid.invoke");BIND(display,"display.invoke");BIND(filesystem,"filesystem.invoke");BIND(applications,"applications.invoke");BIND(clock,"clock.now_ns");BIND(watch,"handles.owner_watch");BIND(hid_exit,"hid.exit");BIND(applications_exit,"applications.exit");
 #undef BIND
-    state.hub=hub;state.heap=b;io_console_hub(hub);return module_result(1,io_process_init(hub,b) && (!c || io_console_init((const void *)c)));
+    static const char init[][24]={"applications.init","hid.init","display.init","filesystem.init"};
+    for(unsigned i=0;i<sizeof(init)/sizeof(init[0]);++i){kernel_surface_call start=kernel_surface_find(candidate,init[i]);if(!start)return module_result(0,0);struct kernel_surface_result result=start(a,b,c,0,0,0);if(result.status || !result.value)return module_result(0,0);}
+    hub=candidate;return module_result(1,1);
 }
-static cb_status_t close_subscription(struct subscription *s,int wait){
-    uint64_t flags=lock();__atomic_store_n(&s->stop,1,__ATOMIC_RELEASE);uint64_t tid=s->thread;int active=s->active;unlock(flags);
-    if(active)(void)CALL(state.cancel,&s->transfer,0,0);
-    if(tid)CALL(state.thread,THREAD_WAKE,tid,0);
-    for(;;){struct thread_info t;if(!tid)break;if(CALL(state.thread,THREAD_INFO,tid,&t).status)return CB_RESOURCE_FAILURE;if(t.state==THREAD_EXITED)break;if(!wait)return CB_BUSY;
-        uint64_t time=CALL(state.clock,0,0,0).value;if(time>UINT64_MAX-1000000 || CALL(state.thread,THREAD_BLOCK_UNTIL,time+1000000,0).status)return CB_RESOURCE_FAILURE;}
-    if(s->claimed)return CB_RESOURCE_FAILURE;
-    if(tid && CALL(state.thread,THREAD_REAP,tid,0).status)return CB_BUSY;
-    (void)CALL(state.unsubscribe,s->pid,s->id,0);flags=lock();struct subscription **at=&state.first;while(*at!=s)at=&(*at)->next;*at=s->next;unlock(flags);CALL(state.free,state.heap,s,0);return CB_OK;
-}
+struct kernel_surface_result io_surface_bind(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);if(kernel_hub_name_equal((const char *)a,"graphics"))graphics_owner=b;else if(kernel_hub_name_equal((const char *)a,"keyboard"))keyboard_owner=b;else if(kernel_hub_name_equal((const char *)a,"identity"))identity_owner=b;return module_result(1,1);}
 struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
-    MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !state.hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
-    if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(state.clock,0,0,0).value;copy(r->output,&time,8);r->actual=8;r->status=CB_OK;}return module_result(1,1);}
-    if(io_filesystem_invoke(r))return module_result(1,1);
-    if(io_console_invoke(r))return module_result(1,1);
-    if(io_process_invoke(r))return module_result(1,1);
-    struct process_info process;if(CALL(state.process_info,r->process,&process,0).status || process.cpu || CALL(state.cpu,CPU_CURRENT,0,0).value){r->status=CB_DENIED;return module_result(1,1);}
-    if(r->operation==CB_IO_KEYBOARD_SUBSCRIBE && !r->bytes && r->capacity>=8){
-        uint64_t flags=lock();for(struct subscription *s=state.first;s;s=s->next)if(s->pid==r->process){unlock(flags);r->status=CB_BUSY;return module_result(1,1);}if(state.serial==UINT64_MAX){unlock(flags);r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}uint64_t id=++state.serial;unlock(flags);
-        struct kernel_surface_result allocated=CALL(state.alloc,state.heap,1,sizeof(struct subscription));if(allocated.status){r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}struct subscription *s=(void *)allocated.value;s->pid=r->process;s->id=id;
-        if(CALL(state.channel,s->pid,s->id,sizeof(struct cb_io_keyboard_event)).status){CALL(state.free,state.heap,s,0);r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}
-        flags=lock();s->next=state.first;state.first=s;unlock(flags);
-        struct thread_request thread={.abi=1,.cpu=0,.stack_bytes=32768,.entry=(uintptr_t)kernel_surface_find(state.hub,"io.worker"),.major=1,.payload={.arguments={(uintptr_t)s}}};struct kernel_surface_result created=CALL(state.create,&thread,0,0);
-        if(created.status){(void)close_subscription(s,0);r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}s->thread=created.value;
-        while(!__atomic_load_n(&s->ready,__ATOMIC_ACQUIRE)){uint64_t time=CALL(state.clock,0,0,0).value;if(time>UINT64_MAX-1000000 || CALL(state.thread,THREAD_BLOCK_UNTIL,time+1000000,0).status){r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}}
-        if(s->ready!=1){(void)close_subscription(s,1);r->status=CB_RESOURCE_FAILURE;return module_result(1,1);}
-        copy(r->output,&id,8);r->actual=8;r->status=CB_OK;return module_result(1,1);
+    MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
+    if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(clock,0,0,0).value;for(unsigned i=0;i<8;++i)((unsigned char *)r->output)[i]=((unsigned char *)&time)[i];r->actual=8;r->status=CB_OK;}return module_result(1,1);}
+    if(r->operation==CB_IO_OWNER_WATCH){r->status=CB_DENIED;if((!graphics_owner || r->process!=graphics_owner) && (!keyboard_owner || r->process!=keyboard_owner) && (!identity_owner || r->process!=identity_owner))return module_result(1,1);r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_io_owner_watch))return module_result(1,1);struct cb_io_owner_watch request;for(size_t i=0;i<sizeof(request);++i)((unsigned char *)&request)[i]=((const unsigned char *)r->input)[i];if(request.enable<=1)r->status=watch(r->process,request.process,request.token,request.enable,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}
+    if(r->operation==CB_IO_CREDENTIALS || r->operation==CB_IO_IDENTITY_SET){
+        r->status=CB_DENIED;kernel_surface_call credentials=kernel_surface_find(hub,"process.credentials");if(!credentials)return module_result(1,1);
+        if(r->operation==CB_IO_CREDENTIALS){if(r->bytes!=8 || r->capacity<sizeof(struct cb_credentials)){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t pid;__builtin_memcpy(&pid,r->input,8);if(!pid)pid=r->process;if(pid!=r->process && (!identity_owner || r->process!=identity_owner))return module_result(1,1);struct kernel_surface_result result=credentials(pid,0,(uintptr_t)r->output,r->capacity,0,0);r->status=result.status?CB_BAD_REQUEST:result.value>r->capacity?CB_BUFFER_TOO_SMALL:CB_OK;if(!r->status)r->actual=result.value;}
+        else if(identity_owner && r->process==identity_owner){if(r->bytes<8+sizeof(struct cb_credentials)){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t pid;__builtin_memcpy(&pid,r->input,8);r->status=credentials(pid,1,(uintptr_t)r->input+8,r->bytes-8,0,0).status?CB_RESOURCE_FAILURE:CB_OK;}
+        return module_result(1,1);
     }
-    if(r->bytes!=(r->operation==CB_IO_KEYBOARD_PROTOCOL?sizeof(struct cb_io_protocol):sizeof(struct cb_io_subscription)))return module_result(1,1);
-    uint64_t id;copy(&id,r->input,8);uint64_t flags=lock();struct subscription *s=find(r->process,id);if(!s){unlock(flags);r->status=CB_BAD_HANDLE;return module_result(1,1);}
-    if(r->operation==CB_IO_KEYBOARD_ACK){if(s->waiting){__atomic_store_n(&s->ack,1,__ATOMIC_RELEASE);CALL(state.thread,THREAD_WAKE,s->thread,0);r->status=CB_OK;}unlock(flags);return module_result(1,1);}
-    if(r->operation==CB_IO_KEYBOARD_PROTOCOL){struct cb_io_protocol protocol;copy(&protocol,r->input,sizeof(protocol));if(protocol.reserved || protocol.protocol || !s->claimed || !s->waiting || s->active || stopped(s)){unlock(flags);return module_result(1,1);}struct usb_io control={.device=s->ref,.owner=(uintptr_t)s,.interface=s->interface,.setup={0x21,0x0b,0,0,s->interface,0,0,0}};unlock(flags);struct host_transfer_result result;
-        struct kernel_surface_result configured=CALL(state.control,&control,&result,0);if(!configured.status){control.setup[1]=0x0a;configured=CALL(state.control,&control,&result,0);}flags=lock();if(!configured.status){s->negotiated=1;r->status=CB_OK;}else r->status=CB_UNAVAILABLE;unlock(flags);return module_result(1,1);}
-    unlock(flags);if(r->operation==CB_IO_KEYBOARD_CLOSE)r->status=close_subscription(s,1);return module_result(1,1);
+    if(r->operation==CB_IO_RANDOM){r->status=CB_BAD_REQUEST;if(r->bytes!=8)return module_result(1,1);uint64_t n;__builtin_memcpy(&n,r->input,8);if(n>64 || n>r->capacity)return module_result(1,1);uint32_t eax=1,ebx,ecx,edx;__asm__ volatile("cpuid":"+a"(eax),"=b"(ebx),"=c"(ecx),"=d"(edx));if(!(ecx&(1u<<30))){r->status=CB_UNAVAILABLE;return module_result(1,1);}for(size_t at=0;at<n;){uint64_t value=0;unsigned char good=0;for(unsigned tries=0;tries<64 && !good;++tries)__asm__ volatile("rdrand %0; setc %1":"=r"(value),"=qm"(good));if(!good){for(size_t i=0;i<n;++i)((volatile unsigned char *)r->output)[i]=0;r->status=CB_UNAVAILABLE;return module_result(1,1);}for(unsigned i=0;i<8 && at<n;++i,++at)((unsigned char *)r->output)[at]=value>>(8*i);}r->actual=n;r->status=CB_OK;return module_result(1,1);
+    }
+    kernel_surface_call backend=NULL;
+    if((r->operation>=CB_IO_KEYBOARD_SUBSCRIBE && r->operation<=CB_IO_KEYBOARD_CLOSE) || (r->operation>=CB_IO_HID_SUBSCRIBE && r->operation<=CB_IO_HID_SET_FEATURE))backend=hid;
+    else if((r->operation>=CB_IO_DISPLAY_INFO && r->operation<=CB_IO_DISPLAY_BLIT) || r->operation==CB_IO_DISPLAY_COPY)backend=display;
+    else if(r->operation==CB_IO_FILESYSTEM)backend=filesystem;
+    else if(r->operation>=CB_IO_PROCESS_LAUNCH && r->operation<=CB_IO_PROCESS_RELEASE)backend=applications;
+    else if(r->operation==CB_IO_PROCESS_SAMPLE)backend=applications;
+    if(backend)(void)CALL(backend,r,0,0);
+    return module_result(1,1);
 }
-struct kernel_surface_result io_surface_exit(MODULE_ARGS){
-    MODULE_UNUSED();if(!state.hub)return module_result(1,1);cb_status_t children=io_process_exit(a);if(children)return module_result(children,0);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;unlock(flags);if(!s)return module_result(1,1);
-    if(CALL(state.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
-    cb_status_t result=close_subscription(s,0);return module_result(result,result==CB_OK);
-}
-
-struct kernel_surface_result io_surface_info(MODULE_ARGS){
-    MODULE_UNUSED();if(!b)return module_result(0,0);uint64_t flags=lock();struct subscription *s=state.first;while(s && s->pid!=a)s=s->next;
-    if(s)*(struct io_provider_info *)b=(struct io_provider_info){s->thread,s->id,s->ref.id,s->ref.generation,s->active,s->claimed,s->stop,s->waiting};
-    unlock(flags);return module_result(s!=NULL,s!=NULL);
-}
+struct kernel_surface_result io_surface_exit(MODULE_ARGS){MODULE_UNUSED();if(!hub)return module_result(1,1);struct kernel_surface_result result=CALL(applications_exit,a,0,0);if(result.status)return result;return CALL(hid_exit,a,0,0);}
+static struct kernel_surface_result forward(const char *name,uintptr_t a,uintptr_t b,uintptr_t c){kernel_surface_call call=hub?kernel_surface_find(hub,name):NULL;return call?CALL(call,a,b,c):module_result(0,0);}
+struct kernel_surface_result io_surface_info(MODULE_ARGS){MODULE_UNUSED();return forward("hid.info",a,b,c);}
+struct kernel_surface_result io_surface_installations(MODULE_ARGS){MODULE_UNUSED();kernel_surface_call call=hub?kernel_surface_find(hub,"applications.installations"):NULL;return call?call(a,b,c,d,e,f):module_result(0,0);}
+struct kernel_surface_result io_surface_installed_load(MODULE_ARGS){MODULE_UNUSED();return forward("applications.installed_load",a,b,c);}
+struct kernel_surface_result io_surface_process_info(MODULE_ARGS){MODULE_UNUSED();return forward("applications.info",a,b,c);}

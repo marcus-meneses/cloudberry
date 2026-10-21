@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@applications",
+      "operations": [
+        "processes"
+      ]
+    },
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "now_ns"
+      ]
+    },
+    {
+      "name": "/@text",
+      "operations": [
+        "info",
+        "cursor",
+        "write",
+        "clear"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "/@keyboard",
+      "scope": "boot-input",
+      "operations": [
+        "read",
+        "focus_claim",
+        "focus_release"
+      ]
+    }
+  ]
+}

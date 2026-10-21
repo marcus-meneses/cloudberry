@@ -9,6 +9,15 @@
     "stack_bytes": 262144
   },
   {
+    "name": "mouse",
+    "executable": "/system/handlers/mouse",
+    "manifest": "mouse/manifest.json",
+    "installation_id": "636c6f756462657272792e6d6f757365",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
     "name": "applications",
     "executable": "/system/handlers/applications",
     "manifest": "applications/manifest.json",
@@ -115,5 +124,32 @@
     "flags": 1,
     "cpu": 0,
     "stack_bytes": 131072
+  },
+  {
+    "name": "monitor",
+    "executable": "/system/apps/monitor",
+    "manifest": "monitor/manifest.json",
+    "installation_id": "636c6f756462657272792e746f700000",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "identity",
+    "executable": "/system/handlers/identity",
+    "manifest": "identity/manifest.json",
+    "installation_id": "636c6f756462657272792e6964656e74",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "accounts",
+    "executable": "/system/apps/accounts",
+    "manifest": "accounts/manifest.json",
+    "installation_id": "636c6f756462657272792e6163637473",
+    "flags": 3,
+    "cpu": 0,
+    "stack_bytes": 262144
   }
 ]

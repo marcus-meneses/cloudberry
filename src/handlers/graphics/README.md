@@ -53,7 +53,7 @@ Validation: host UBSan tests cover clipping/guards, affine bitmaps, alpha and
 compound path holes, as well as unchanged-pixel damage. Isolated one/four-CPU TCG
 console tests exercise the public operations, foreign-owner denial, owner-exit
 reclamation and visible dirty-region presentation. Tests add graphics-check only
-to their copied fixture image; the normal thirteen-record catalog has no test app.
+to their copied fixture image; the normal production catalog has no test app.
 Native KVM console acceptance remains separate from earlier native handle results.
 
 Solid-color presentation checks the final RGB pixels in the damaged region and

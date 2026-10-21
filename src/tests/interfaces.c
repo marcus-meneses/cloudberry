@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "../interfaces/keyboard.h"
+#include "../interfaces/mouse.h"
+#include "../interfaces/io.h"
 #include "../interfaces/system.h"
 #include "../interfaces/startup.h"
 #include "../interfaces/installations.h"
@@ -11,12 +13,26 @@
 #include "../interfaces/text.h"
 #include "../interfaces/stream.h"
 #include "../interfaces/filesystem.h"
+#include "../interfaces/identity.h"
 #include "../sdk/application.h"
 #ifdef __cplusplus
 #define ABI_ASSERT static_assert
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_credentials)==32 && sizeof(struct cb_identity_password)==16,"credential/password ABI");
+ABI_ASSERT(sizeof(struct cb_identity_info)==48 && sizeof(struct cb_identity_begin)==32,"identity metadata/transaction ABI");
+ABI_ASSERT(sizeof(struct cb_identity_stage)==24 && sizeof(struct cb_identity_credential)==88,"identity staging/credential ABI");
+ABI_ASSERT(sizeof(struct cb_process_query)==16 && sizeof(struct cb_process_sample)==336,"process samples");
+ABI_ASSERT(CB_APPLICATION_PROCESSES==7 && CB_IO_PROCESS_SAMPLE==25,"appended process monitoring operations");
+ABI_ASSERT(sizeof(struct cb_abandon_result)==8 && CB_SYSTEM_ABANDON==12,"abandon contract");
+ABI_ASSERT(sizeof(struct cb_mouse_event)==120,"mouse event");
+ABI_ASSERT(sizeof(struct cb_mouse_read)==32 && sizeof(struct cb_mouse_batch)==32,"mouse read");
+ABI_ASSERT(sizeof(struct cb_mouse_device)==56 && sizeof(struct cb_mouse_state)==32,"mouse state");
+ABI_ASSERT(sizeof(struct cb_io_hid_capture)==16,"HID report capture size");
+ABI_ASSERT(sizeof(struct cb_io_hid_event)==56 && sizeof(struct cb_io_hid_device)==32,"HID transport");
+ABI_ASSERT(CB_IO_DISPLAY_COPY==15 && CB_IO_HID_SUBSCRIBE==16 && CB_IO_HID_SET_FEATURE==24,"appended HID IO");
+ABI_ASSERT(sizeof(struct cb_text_cursor)==8 && CB_TEXT_CURSOR==5,"appended text cursor");
 ABI_ASSERT(sizeof(struct cb_wait_item)==32,"wait item");
 ABI_ASSERT(CB_SYSTEM_STANDARD==8 && CB_SYSTEM_WAIT==11,"appended gate operations");
 ABI_ASSERT(sizeof(struct cb_application_launch_streams)==64,"stdio launch");
@@ -44,6 +60,8 @@ ABI_ASSERT(sizeof(struct cb_operation_description)==40,"operation header");
 ABI_ASSERT(sizeof(struct cb_publication)==48,"publication header");
 ABI_ASSERT(sizeof(struct cb_keyboard_event)==64,"keyboard event");
 ABI_ASSERT(offsetof(struct cb_keyboard_event,codepoint)==52,"keyboard field offsets");
+ABI_ASSERT(sizeof(struct cb_keyboard_read_focus)==40 && sizeof(struct cb_keyboard_batch_focus)==40 && sizeof(struct cb_keyboard_focus)==32,"keyboard focus extensions");
+ABI_ASSERT(CB_KEYBOARD_FOCUS_CLAIM==3 && CB_KEYBOARD_FOCUS_RELEASE==4,"appended keyboard focus operations");
 ABI_ASSERT(sizeof(struct cb_keyboard_read)==32,"keyboard read");
 ABI_ASSERT(sizeof(struct cb_keyboard_batch)==32,"keyboard batch");
 ABI_ASSERT(sizeof(struct cb_keyboard_state)==32,"keyboard state");

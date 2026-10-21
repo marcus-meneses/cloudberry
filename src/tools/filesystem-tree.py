@@ -1,9 +1,9 @@
 """Build the guest namespace from compiler bundle intermediates; never run at boot."""
-import json,pathlib,shutil,struct
+import json,pathlib,shutil,struct,importlib.util
 
-DIRECTORIES = ('boot/kmodules/drivers','boot/kmodules/helpers','system/apps',
+DIRECTORIES = ('boot','system/apps',
  'system/handlers','system/kmodules/drivers','system/kmodules/helpers','system/fonts',
- 'system/config/keyboard','system/state','system/root/_config','system/root/_apps',
+ 'system/config/keyboard','system/config/identity','system/state','system/root/_config','system/root/_apps',
  'home','volumes','tmp')
 
 def populate(root, bundles=None):
@@ -13,7 +13,7 @@ def populate(root, bundles=None):
     if bundles is not None:
         bundles=pathlib.Path(bundles)
         # Loose low-level driver fixtures remain in the explicitly configured driver area.
-        drivers=root/'boot/kmodules/drivers'
+        drivers=root/'system/kmodules/drivers'
         shutil.copytree(bundles,drivers,dirs_exist_ok=True)
         catalog=bundles/'installed.bin'
         if catalog.exists():
@@ -24,7 +24,7 @@ def populate(root, bundles=None):
                 size,nb,pb,mb,identity,flags,cpu,stack=struct.unpack_from('<QQQQ16sIIQ',data,at)
                 if size!=64+nb+pb+mb or at+size>len(data):raise ValueError('invalid installation record')
                 name=data[at+64:at+64+nb].decode();target=data[at+64+nb:at+64+nb+pb].decode();manifest=data[at+64+nb+pb:at+size];at+=size
-                if target.startswith('/system/'):
+                if target.startswith(('/system/apps/','/system/handlers/')):
                     expected='/system/handlers/' if flags in (4,8) else '/system/apps/'
                     if target!=expected+name or name.startswith('_') or '/' in name:raise ValueError('invalid flat installation path')
                     source=bundles/name;destination=root/target.lstrip('/');destination.parent.mkdir(parents=True,exist_ok=True)
@@ -73,3 +73,6 @@ def populate(root, bundles=None):
         (root/name).chmod(0o700)
     for entry in (root/'system/root/_apps').glob('*.data'):entry.chmod(0o700)
     (root/'tmp').chmod(0o1777)
+
+    spec=importlib.util.spec_from_file_location('identity_db',pathlib.Path(__file__).with_name('identity-db.py'))
+    identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity);identity.provision(root)

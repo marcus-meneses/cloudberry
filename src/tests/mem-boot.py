@@ -71,20 +71,20 @@ stage = test / 'iso-root'
 if stage.exists():
     shutil.rmtree(stage)
 shutil.copytree(build / 'src-iso-root', stage)
-shutil.copyfile(build / ('tests/src-lock-watchdog.elf' if watchdog else 'tests/src-kernel.elf'), stage / 'boot/kernel.elf')
-shutil.copyfile(build / 'kmodules/probe.kmod', stage / 'boot/kmodules/probe.kmod')
-with (stage / 'boot/limine/limine.conf').open('a') as config:
-    config.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
+shutil.copyfile(build / ('tests/src-lock-watchdog.elf' if watchdog else 'tests/src-kernel.elf'), stage / 'kernel.elf')
+shutil.copyfile(build / 'kmodules/probe.kmod', stage / 'kmodules/probe.kmod')
+with (stage / 'limine/limine.conf').open('a') as config:
+    config.write('    module_path: boot():/kmodules/probe.kmod\n    module_cmdline: probe\n')
 if missing_clock:
-    config=stage/'boot/limine/limine.conf'
-    config.write_text(config.read_text().replace('    module_path: boot():/boot/kmodules/helpers/clock.kmod\n    module_cmdline: clock\n',''))
+    config=stage/'limine/limine.conf'
+    config.write_text(config.read_text().replace('    module_path: boot():/kmodules/helpers/clock.kmod\n    module_cmdline: clock\n',''))
 if config_error:
-    config=stage/'boot/limine/limine.conf'
-    entry='    module_path: boot():/boot/cloudberry.cnf\n    module_cmdline: cloudberry-config\n'
+    config=stage/'limine/limine.conf'
+    entry='    module_path: boot():/cloudberry.cnf\n    module_cmdline: cloudberry-config\n'
     if config_error=='missing': config.write_text(config.read_text().replace(entry,''))
     elif config_error=='duplicate': config.write_text(config.read_text()+entry)
     else:
-        data=stage/'boot/cloudberry.cnf'
+        data=stage/'cloudberry.cnf'
         data.write_text(data.read_text().replace('version=1','version=2'))
 iso = test / 'test.iso' 
 image_options=[]

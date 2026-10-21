@@ -1,0 +1,17 @@
+{
+  "name": "iso9660-fs",
+  "exports": [
+    {
+      "name": "iso9660_fs.init",
+      "symbol": "iso9660_fs_surface_init"
+    },
+    {
+      "name": "iso9660_fs.invoke",
+      "symbol": "iso9660_fs_surface_invoke"
+    },
+    {
+      "name": "iso9660_fs.fs_backend",
+      "symbol": "iso9660_fs_surface_backend"
+    }
+  ]
+}

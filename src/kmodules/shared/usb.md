@@ -158,3 +158,21 @@ References: [USB 2.0 specification](https://www.usb.org/document-library/usb-20-
 
 External hubs are covered by `test-usb-hub` and `test-usb-hub-boot`; see
 [hub class driver](usb-hub.md) for topology, teardown and qualification limits.
+
+
+Composite HID support now keeps data-transfer state and a lazy 4 KiB bounce
+buffer per claimed endpoint. EP0 retains its own buffer/state and serialized
+control/claim ownership. Idle interrupt-IN on one interface no longer blocks
+metadata, setup or transfers on its siblings. Waiters use stack registrations
+under the CPU lock and wake credits. Claim release refuses active endpoints;
+disconnect and shutdown wait for control plus all active data transfers before
+removal. Endpoint backing is released only after result reaping and proven host
+removal. Controller class logic and HID decoding do not live in USB core.
+
+The original 64-byte usb_io payload is retained. New callers may explicitly set
+USB_IO_CANCELLABLE and pass a usb_io_cancellable extension whose trusted flag
+lives until return. Queued endpoint acquisition checks it on wake; submission
+checks it before issuing DMA and immediately after the host assigns a transfer
+ID. This prevents a close racing submission from leaving an idle receive armed.
+Older zero-reserved requests do not read any extension pointer. The class I/O
+workers set the flag before cancellation and join before freeing it.

@@ -1,7 +1,8 @@
 # Filesystem provider
 
 `filesystem.elf` publishes `/@filesystem` and uses a catalog-bound `/@io` disk
-bridge to the selected ext4 mount. Public operations open directional stream
+bridge to the format-neutral mount manager. Ext4 supplies / and read-only
+ISO9660 supplies /boot when the boot disk identity is verified. Public operations open directional stream
 handles, stat, list one directory entry, remove a file and create a directory.
 Relative-path policy is a caller concern; the provider accepts bounded canonical
 absolute paths, rejecting traversal, duplicate separators and embedded NULs.
@@ -13,8 +14,9 @@ original authenticated application, not the filesystem provider. Its own stream
 manifest must authorize the endpoint direction. No raw mount cookies or paths
 in kernel memory are returned. Writes/removal under `/boot` and `/system` are
 refused except for the caller’s catalog-bound root app-data descendants, protecting
-the build-owned installation tree. This is boot-domain policy,
-not the future home/private-folder or administrator permission model.
+the build-owned installation tree. This installation policy is combined with kernel-owned UID/GID checks;
+UID 0 does not bypass the installation boundary. Automatic home/private-folder
+provisioning remains separate work.
 
 Kernel file workers execute bounded synchronous ext4 calls on CPU0; apps can run
 on any selected CPU and block through thread joins. Calls on one ext4 mount wait
@@ -37,3 +39,18 @@ original caller's own `/system/root/_apps/<appname>.data/`, resolved using its
 authenticated installation identity and the trusted catalog. Parent directories,
 indexes, executables and other apps' state remain protected against mutation.
 Hidden underscore names remain present in filesystem enumeration.
+
+The IO gateway now forwards to the independent `filesystem` kmodule. It routes
+mounts through registered format backends; the handler remains format-agnostic.
+Ext4 is the initial real backend, and bootstrap adopts its known driver volume at
+`/`. Mount lifecycle operations remain kernel-only; no user-facing mount policy
+or additional on-disk format is introduced by this split.
+
+The /system/config/identity subtree is an additional protected boundary for all
+public filesystem operations, including reads. Only the catalog-authenticated
+identity provider may access it; it may update its own account/journal files
+without gaining write authority over the rest of /system. This is installation
+policy, in addition to runtime UID/GID/mode enforcement.
+
+File streams recheck the current caller identity and on-disk permissions on each
+operation. See [filesystem authorization](../../kmodules/shared/filesystem.md).

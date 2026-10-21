@@ -56,6 +56,14 @@
     {
       "name": "process.stop",
       "symbol": "process_surface_stop"
+    },
+    {
+      "name": "process.sample",
+      "symbol": "process_surface_sample"
+    },
+    {
+      "name": "process.credentials",
+      "symbol": "process_surface_credentials"
     }
   ]
 }

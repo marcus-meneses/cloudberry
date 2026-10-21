@@ -2,7 +2,7 @@
 
 `installed.json` binds image paths, immutable manifest bytes, OS installation
 identities, roles and stack settings in a build-generated catalog outside app
-bundles. Keyboard, display, graphics, text, filesystem and application providers
+bundles. Keyboard, mouse, display, graphics, text, filesystem, identity and application providers
 are registered alongside ordinary apps. Callers cannot override those bindings.
 
 | Application | Role |
@@ -14,6 +14,8 @@ are registered alongside ordinary apps. Callers cannot override those bindings.
 | cat | Copies stdin or named files to stdout |
 | ls | Lists the supplied directory or startup cwd, in four output columns |
 | pwd | Writes startup cwd to stdout |
+| accounts | User/group management, non-echoed password changes and authenticated app execution through /@identity |
+| monitor | Read-only live process/handler monitor, CPU time and committed user pages; batch stdout snapshots |
 
 Only cd/clear/help/exit are terminal built-ins. Providers interpret their own
 configuration; neither bootstrap nor the terminal implements external utilities.
@@ -29,3 +31,7 @@ Guest filenames follow the [filesystem namespace](../maps/filesystem.md): flat
 `/system/apps/<appname>` plus manifest/resources sidecars, with root-session
 private data under `/system/root/_apps/<appname>.data`. `ls -a` includes hidden
 underscore-prefixed entries; default listings omit them.
+
+See [monitor](monitor/README.md) for monitoring fields and refresh controls.
+
+See [accounts](accounts/README.md) for management commands and identity inheritance.

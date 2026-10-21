@@ -4,7 +4,7 @@
 #include "threads.h"
 #include "../../kernel/cpu.h"
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
-struct inode {uint64_t number,size;uint32_t flags,generation;uint16_t mode;uint8_t map[60];};
+struct inode {uint64_t number,size;uint32_t flags,generation,uid,gid;uint16_t mode;uint8_t map[60];};
 struct volume {struct volume *next;struct block_device device;struct ext4_info info;uint64_t first_data,groups;uint32_t blocks_group,inodes_group,descriptor_bytes,seed,metadata;unsigned busy,disconnected;struct ext4_engine *engine;uint8_t scratch[4096],node[4096],data[4096];};
 struct fs_waiter {struct fs_waiter *next;uint64_t cookie,thread;};
 static struct {struct fs_waiter *waiters;const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;unsigned mounting;struct volume *first;kernel_surface_call cpu,thread,irq,alloc,free;} state;
@@ -64,7 +64,7 @@ static int inode_read(struct volume *v,uint64_t number,struct inode *out){
     uint64_t table_blocks=((uint64_t)v->inodes_group*v->info.inode_bytes+v->info.block_bytes-1)/v->info.block_bytes;
     if(!table || table>=v->info.blocks || table_blocks>v->info.blocks-table)return fail(v,EXT4_CORRUPT);
     if(!bytes(v,table*v->info.block_bytes+index*v->info.inode_bytes,raw,v->info.inode_bytes))return 0;
-    *out=(struct inode){.number=number,.mode=disk_u16(raw),.size=disk_u32(raw+4)|(uint64_t)disk_u32(raw+108)<<32,.flags=disk_u32(raw+32),.generation=disk_u32(raw+100)};disk_copy(out->map,raw+40,60);
+    *out=(struct inode){.number=number,.mode=disk_u16(raw),.uid=disk_u16(raw+2)|(uint32_t)disk_u16(raw+120)<<16,.gid=disk_u16(raw+24)|(uint32_t)disk_u16(raw+122)<<16,.size=disk_u32(raw+4)|(uint64_t)disk_u32(raw+108)<<32,.flags=disk_u32(raw+32),.generation=disk_u32(raw+100)};disk_copy(out->map,raw+40,60);
     if(v->info.inode_bytes>128 && disk_u16(raw+128)>v->info.inode_bytes-128)return fail(v,EXT4_CORRUPT);
     if((out->mode&0xf000)==0x8000 && out->size>UINT64_C(0x100000000)*v->info.block_bytes)return fail(v,EXT4_CORRUPT);
     if(v->metadata){uint32_t expected=disk_u16(raw+124);raw[124]=raw[125]=0;int high=v->info.inode_bytes>128 && disk_u16(raw+128)>=4;
@@ -194,8 +194,8 @@ struct kernel_surface_result ext4_fs_surface_unmount(MODULE_ARGS){
 }
 struct kernel_surface_result ext4_fs_surface_stat(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);
-    if(v->engine){int ok=c && ext4_engine_stat(v->engine,(void *)b,(void *)c);finish(v);return module_result(1,ok);}
-    struct inode i;int ok=c && lookup(v,(void *)b,&i);if(ok)*(struct ext4_stat *)c=(struct ext4_stat){i.number,i.size,i.mode,i.flags};finish(v);return module_result(1,ok);
+    if(v->engine){struct ext4_stat st;int ok=c && ext4_engine_stat(v->engine,(void *)b,&st);if(ok)disk_copy((void *)c,&st,d>=sizeof(st)?sizeof(st):24);finish(v);return module_result(1,ok);}
+    struct inode i;int ok=c && lookup(v,(void *)b,&i);if(ok){struct ext4_stat st={i.number,i.size,i.mode,i.flags,i.uid,i.gid};disk_copy((void *)c,&st,d>=sizeof(st)?sizeof(st):24);}finish(v);return module_result(1,ok);
 }
 struct kernel_surface_result ext4_fs_surface_read(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);
@@ -248,3 +248,5 @@ struct kernel_surface_result ext4_fs_surface_disconnect(MODULE_ARGS){
         flags=lock();struct volume **p=&state.first;while(*p!=v)p=&(*p)->next;*p=v->next;wake_volume(v->info.cookie);unlock(flags);CALL(state.free,state.heap,v,0);++removed;
     }return module_result(removed,ok);
 }
+
+#include "ext4-backend.inc"

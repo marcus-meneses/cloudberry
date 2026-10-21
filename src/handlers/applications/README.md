@@ -39,7 +39,7 @@ registered test launchers; no test autostart enters the candidate.
 
 ## Kernel mechanism boundary
 
-`io-process.c` belongs to the existing I/O kmodule. Its kernel-only catalog loader
+`kmodules/shared/applications.c` belongs to the independent applications kmodule. Its kernel-only catalog loader
 copies the OS registry once and its installed-image loader uses the record's
 path, manifest, identity, CPU and stack settings. Only the catalog-selected
 manager process can use process_launch/stop/reap/release through `/@io`; even a
@@ -68,7 +68,7 @@ remains available, but cannot bind the process-manager role.
 The trust root is the build-owned boot image/catalog. The filesystem handler
 protects its installed boot/system tree from application mutations, including on
 an explicitly writable development snapshot. This is not a signature
-verification chain, installer, user/session permission system or writable app
+verification chain, installer, complete login-session manager or writable app
 registry. Cwd is immutable startup metadata; there is no filesystem grant implied
 by it. Argv currently travels within one bounded handle message, retaining empty
 arguments, spaces and case; larger streamed launch packets are future transport
@@ -101,8 +101,21 @@ make -C src -j4 test-process-boot QEMU_ACCEL=kvm QEMU_CPUS=4 QEMU_IOMMU=amd
 ```
 
 
-The console milestone extends native boot packaging to six providers and the
+The console milestone extends native boot packaging to isolated resource providers and the
 ordinary terminal. It adds `list`, launch-bound stdio and kernel-selected ordinary
 process placement. The earlier native lifecycle result predates these extensions;
 new console/graphics correctness is covered by isolated TCG tests and still needs
 native KVM acceptance. See [console tests](../../tests/README.md#console-and-software-graphics).
+
+Read-only `processes` is distinct from `list`: it enumerates actual ordinary and
+privileged processes, rather than installed executables. Any admitted app whose
+manifest requests that operation may inspect copied records. The provider uses
+installation-bound IO `process_sample`; ordinary apps cannot invoke that private
+backend directly. The [monitor app](../../apps/monitor/README.md) uses this contract with
+no launch or stop permissions.
+
+The kernel application launcher now inherits the authenticated owner's UID/GID and
+supplementary groups into each READY child before execution, with independent
+storage. Installed executable traversal/execute bits are checked for that owner.
+An authenticated accounts launcher can start a different-user execution subtree;
+this never changes the invoking terminal or existing sibling processes.

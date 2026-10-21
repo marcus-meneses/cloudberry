@@ -4,7 +4,7 @@
 #define CB_KEYBOARD_NAME "/@keyboard"
 #define CB_KEYBOARD_INTERFACE_ID {{0x43,0x42,0x4b,0x45,0x59,0x31,0x46,0x3b,0x91,0xe1,0x40,0x0a,0x1c,0x87,0xc0,0x03}}
 enum {CB_KEYBOARD_MAJOR=1,CB_KEYBOARD_MINOR=0};
-enum {CB_KEYBOARD_READ=1,CB_KEYBOARD_STATE=2};
+enum {CB_KEYBOARD_READ=1,CB_KEYBOARD_STATE=2,CB_KEYBOARD_FOCUS_CLAIM=3,CB_KEYBOARD_FOCUS_RELEASE=4};
 enum {CB_KEY_DOWN=1,CB_KEY_UP,CB_KEY_REPEAT,CB_KEY_TEXT,CB_KEY_DEVICE_ADDED,CB_KEY_DEVICE_REMOVED,CB_KEY_RESET};
 enum {CB_KEY_SYNTHETIC=1};
 struct cb_keyboard_event {
@@ -25,6 +25,16 @@ struct cb_keyboard_batch {
     uint64_t provider_epoch,next_sequence;
     uint32_t count,flags;
 };
+/* Optional frame extension, version 1.1. Legacy 32-byte read/batch frames
+ * remain supported. Focus changes resynchronize cursors without replaying keys
+ * consumed while another process owned input. */
+struct cb_keyboard_read_focus {struct cb_keyboard_read base;uint64_t focus_generation;};
+struct cb_keyboard_batch_focus {struct cb_keyboard_batch base;uint64_t focus_generation;};
+enum {CB_KEYBOARD_FOCUS_SUSPENDED=1};
+/* Empty CLAIM/RELEASE payloads; identity comes from authenticated admission.
+ * CLAIM is exclusive, BUSY when already owned by another process. Owner exit
+ * releases automatically. No owner PID is accepted from app payloads. */
+struct cb_keyboard_focus {uint64_t provider_epoch,next_sequence,generation,owner;};
 struct cb_keyboard_pressed {uint64_t device_id;uint16_t usage_page,usage;uint32_t reserved;};
 /* Inline pressed-key array follows; modifiers are included as HID usages. */
 struct cb_keyboard_state {

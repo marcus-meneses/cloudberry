@@ -1,9 +1,9 @@
-#include "../kmodules/shared/io-process.h"
+#include "../kmodules/shared/applications.h"
 static int application_runtime(const struct kernel_surfaces *hub,uint64_t filesystem,struct probe_process *probe){
     kernel_surface_call launch=kernel_surface_find(hub,"bootstrap.launch"),info=kernel_surface_find(hub,"io.process_info"),clock=kernel_surface_find(hub,"clock.now_ns"),control=kernel_surface_find(hub,"threads.control"),stop=kernel_surface_find(hub,"process.stop"),pages=kernel_surface_find(hub,"mem.pages_info");
     kernel_surface_call profiling=kernel_surface_find(hub,"handles.profile");uint64_t heap_before=0,heap_after=0;
     if(profiling && CALL(profiling,HP_LIVE,&heap_before,0).status)return 0;
-    struct mem_pages_info before,after;struct io_process_info baseline,status;uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
+    struct mem_pages_info before,after;struct applications_info baseline,status;uint64_t deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
     if(CALL(pages,&before,0,0).status || CALL(info,&baseline,0,0).status || baseline.manager || baseline.children)return 0;
     struct kernel_surface_result manager=CALL(launch,filesystem,"applications",0);if(manager.status)return 0;
     for(;;){if(CALL(info,&status,0,0).status)return 0;if(status.launched>baseline.launched && !status.children)break;uint64_t time=CALL(clock,0,0,0).value;if(time>=deadline){text("FAIL application runtime timeout launched ");number(status.launched);text(" reaped ");number(status.reaped);text(" exit ");number(status.last_exit);text(" children ");number(status.children);text("\n");return 0;}if(CALL(control,THREAD_BLOCK_UNTIL,time+1000000,0).status)return 0;}

@@ -31,6 +31,10 @@ struct usb_io {
     void *buffer;
     uint8_t setup[8];
 };
+/* An explicit extension preserves the original usb_io prefix/size for existing
+ * modules. Only requests carrying this bit include the trusted flag pointer. */
+enum {USB_IO_CANCELLABLE=1};
+struct usb_io_cancellable {struct usb_io base;const uint32_t *cancelled;};
 struct usb_hub_config {struct usb_ref device;uint64_t owner;uint32_t interface,ports,multi_tt,think_time;};
 struct usb_downstream {struct usb_ref parent;uint64_t owner,generation;uint32_t port,speed,connected,reserved;};
 struct kernel_surface_result usb_surface_cancel(MODULE_ARGS);
@@ -50,7 +54,9 @@ struct kernel_surface_result usb_surface_downstream(MODULE_ARGS);
  * block on host IRQ completion. Interface claims scope class/vendor control
  * requests and endpoint access; device-wide standard mutations remain core-owned.
  * No caller buffer is retained on return, including timeout/recovery failure.
- * Operations serialize per device, refuse overlap, require a preemptible BSP
+ * EP0/control and claim changes serialize per device. Data transfers serialize
+ * per endpoint and may overlap sibling interfaces/EP0, using independent bounce
+ * buffers. Same-endpoint/control waiters block with wake credits; calls require a preemptible BSP
  * thread with IF enabled, and must not run in IRQ/deferred IRQ/critical contexts.
  * Snapshot and start/stop calls are also allowed in BSP bootstrap/dispatcher.
  * Raw live table traversal requires CPU-lock synchronization. usb-hub supplies

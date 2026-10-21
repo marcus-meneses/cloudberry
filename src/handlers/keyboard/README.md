@@ -10,23 +10,30 @@ supply compile-time types; they grant no resource access or direct hub calls.
 
 ## Ownership and delivery
 
-The kernel I/O manager owns narrowly scoped USB interface claims and interrupt
+The HID kmodule, reached through the IO gateway, owns narrowly scoped USB interface claims and interrupt
 transfers. Existing xHCI, USB core and USB-hub modules own transport, DMA safety,
 root/downstream enumeration and hotplug. The provider owns HID report decoding,
 pressed keys, Unicode layout interpretation, repeat and event history. No terminal
 keymap or character interpretation is involved. Glyph rendering remains separate.
 
-The first implementation negotiates the HID boot-keyboard protocol and SET_IDLE(0),
-then decodes its eight-byte reports: modifier bits plus six ordinary usages.
-[USB HID 1.11](https://www.usb.org/sites/default/files/documents/hid1_11.pdf)
-defines this format. `/@io` accepts only a boot-keyboard interface and reports
-attach, bytes, removal or transport failure. The provider receives these kernel
-notifications and client calls through the same blocking gate. It acknowledges
-each notification before another USB read. Client reads and the kernel worker
-sleep on wakes/deadlines; no application polls hardware. The interrupt-IN receive
-stays armed while idle, with notification-only waiting until input, disconnect
-or explicit cancellation. Control negotiation retains its one-second deadline.
-Idle time does not trigger recurring Stop Endpoint/Set Dequeue commands.
+The provider uses generic HID report transport. The kernel selects report
+protocol, retrieves the descriptor and owns each physical interface once.
+`report.c` builds keyboard fields with the common descriptor walker, decodes
+selector arrays and variable bitmaps (including NKRO), and retains pressed state
+across report IDs. Modifiers, repeats and layout-dependent text remain here.
+Malformed or rollover input resets keyboard state rather than retaining stuck keys.
+
+Application collections determine routing: separate keyboard/mouse report IDs
+reach their class provider; a single mixed report reaches both. Each decodes its
+own fields using offsets across the full report. A mouse consumer can share the
+interface without competing for a USB claim or changing the keyboard protocol.
+The current keyboard provider selects one supported interface at a time.
+
+Notifications and client calls arrive through the same blocking receive gate.
+The provider acknowledges copied reports before decoding; kernel mailboxes are
+independent per consumer. Receives remain armed while idle until input,
+disconnect or cancellation. No application polls hardware. The final physical
+consumer controls interface cleanup; closing one class leaves its sibling active.
 
 ## Operations and event contract
 
@@ -96,9 +103,9 @@ independent input delivery, structured arrows, USB unplug/replug, cleared presse
 state and quiescent decommission with process/stack cleanup. Fixture clients never
 enter candidate images. One/four-CPU TCG acceptance is recorded in the process docs.
 
-General report-descriptor interpretation/NKRO, multiple keyboards, multi-session
-routing, LED output, native KVM input acceptance and physical USB qualification
-remain open. Unsupported formats fail explicitly; this implementation does not
+Descriptor-defined keyboard arrays/bitmaps, NKRO and shared-interface routing
+are covered by `test-hid-demux`. Multiple keyboards, multi-session routing, LED
+output, additional HID usages and physical USB qualification remain open. Unsupported formats fail explicitly; this implementation does not
 claim general HID or USB input hardware support.
 
 Packaged definitions now live in `/system/config/keyboard/{ibm,abnt2}.keymap`
@@ -109,7 +116,7 @@ in the handler resources.
 
 ## Capture liveness
 
-The kernel I/O worker reports `CB_IO_ERROR/CB_PROVIDER_FAILED` before an
+The HID keyboard worker reports `CB_IO_ERROR/CB_PROVIDER_FAILED` before an
 unexpected exit. The terminal notification is one-way; a dying worker never waits for a failed
 provider to acknowledge it. The keyboard handler exits, withdrawing its publication; blocked callers receive provider failure
 instead of waiting on an apparently live handle with no capture worker. Normal
@@ -121,3 +128,26 @@ readers, permitting earlier capture rearming. Device-added negotiation still
 finishes before acknowledgement. One spare pending-read node is retained and
 reused; empty timed reads no longer map/unmap a private page on every request.
 The cache is released on normal handler shutdown and never crosses processes.
+
+
+`focus_claim`/`focus_release` (operations 3/4) arbitrate exclusive keyboard input
+using the authenticated caller PID; apps cannot supply another owner's identity.
+Claims return BUSY while another process owns focus; release is owner-only.
+The handler watches owner lifetime through installation-bound IO owner_watch and
+releases on owner death. That private IO method permits only installed graphics
+and keyboard providers, not ordinary apps.
+
+Optional 1.1 READ/BATCH frames append a focus generation to the original 32-byte
+prefix. A generation change returns INPUT_RESYNC with the focus boundary and
+FOCUS_SUSPENDED flag for other readers. Their resubmitted reads park, preserving
+normal deadlines; after release another resync skips owner-era input before
+resuming. The terminal uses this extension to pause its editor/cursor. Existing
+1.0 frames remain supported; suspended legacy readers wait and resync after
+release. Monitor acquires the handle and reads directly; stdin stays byte-only.
+
+STATE also refuses non-owner callers while exclusive focus is held, preventing
+pressed-key snapshots from bypassing non-echoed password input. Replay floors
+on focus changes prevent other readers from retrieving owner-era key events.
+
+The packaged default is `layout=abnt2`. IBM remains selectable with `layout=ibm`;
+both definitions continue to be supplied under /system/config/keyboard.

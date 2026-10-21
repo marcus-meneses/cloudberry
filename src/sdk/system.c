@@ -25,6 +25,11 @@ cb_status_t cb_system_collect(struct cb_request_id request,void *reply,uint64_t 
     struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_COLLECT,.input=(uintptr_t)&request,.input_bytes=sizeof(request),.output=(uintptr_t)reply,.output_capacity=capacity};cb_status_t status=cb_system_gate(&gate);if(bytes)*bytes=gate.result_bytes;return status;
 }
 cb_status_t cb_system_wait(const struct cb_wait_item *items,uint64_t count,uint64_t deadline,uint64_t *ready){
-    if(!items || !count || count>(CB_FRAME_LIMIT-512)/sizeof(*items) || !ready)return CB_BAD_REQUEST;
+    if((count && !items) || (!count && !deadline) || count>(CB_FRAME_LIMIT-512)/sizeof(*items) || !ready)return CB_BAD_REQUEST;
     struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_WAIT,.input=(uintptr_t)items,.input_bytes=count*sizeof(*items),.deadline_ns=deadline};cb_status_t status=cb_system_gate(&gate);if(!status)*ready=gate.value;return status;
+}
+
+cb_status_t cb_system_abandon(struct cb_request_id request,struct cb_abandon_result *result){
+    if(!result)return CB_BAD_REQUEST;
+    struct cb_system_gate gate={.bytes=sizeof(gate),.operation=CB_SYSTEM_ABANDON,.input=(uintptr_t)&request,.input_bytes=sizeof(request),.output=(uintptr_t)result,.output_capacity=sizeof(*result)};return cb_system_gate(&gate);
 }

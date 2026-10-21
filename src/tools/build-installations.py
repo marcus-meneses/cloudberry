@@ -10,12 +10,12 @@ def build(spec,root,output):
         if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]*',name) or name in names or len(identity)!=16 or not any(identity) or identity in identities or flags not in (1,3,4,8):raise ValueError('invalid/duplicate installation')
         names.add(name);identities.add(identity);managers+=flags==4
         path=pathlib.PurePosixPath(e['executable'])
-        if not path.is_absolute() or '..' in path.parts or not str(path).startswith(('/system/apps/','/system/handlers/','/boot/kmodules/drivers/')):raise ValueError('executable escapes installation tree')
-        if str(path).startswith('/system/'):
+        if not path.is_absolute() or '..' in path.parts or not str(path).startswith(('/system/apps/','/system/handlers/','/system/kmodules/drivers/')):raise ValueError('executable escapes installation tree')
+        if str(path).startswith(('/system/apps/','/system/handlers/')):
             expected=('/system/handlers/' if flags in (4,8) else '/system/apps/')+name
             if str(path)!=expected:raise ValueError('invalid flat executable name')
             program=pathlib.Path(root)/name/(name+'.elf')
-        else:program=pathlib.Path(root)/str(path).removeprefix('/boot/kmodules/drivers/')
+        else:program=pathlib.Path(root)/str(path).removeprefix('/system/kmodules/drivers/')
         if not program.is_file():raise ValueError('missing executable '+str(program))
         manifest_path=pathlib.PurePosixPath(e['manifest'])
         if manifest_path.is_absolute() or '..' in manifest_path.parts:raise ValueError('manifest escapes installation tree')

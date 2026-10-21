@@ -1,0 +1,33 @@
+{
+  "name": "hid",
+  "exports": [
+    {
+      "name": "hid.init",
+      "symbol": "hid_surface_init"
+    },
+    {
+      "name": "hid.invoke",
+      "symbol": "hid_surface_invoke"
+    },
+    {
+      "name": "hid.exit",
+      "symbol": "hid_surface_exit"
+    },
+    {
+      "name": "hid.info",
+      "symbol": "hid_surface_info"
+    },
+    {
+      "name": "hid.bind",
+      "symbol": "hid_surface_bind"
+    },
+    {
+      "name": "hid.report_worker",
+      "symbol": "hid_surface_report_worker"
+    },
+    {
+      "name": "hid.capture_worker",
+      "symbol": "hid_surface_capture_worker"
+    }
+  ]
+}

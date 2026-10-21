@@ -120,7 +120,12 @@ def verify(image, guid, size):
     block_size = 1024 << struct.unpack_from('<I', superblock, 24)[0]
     if blocks * block_size != size:
         raise ValueError('Filesystem size does not match partition')
-    return dict(image_bytes=pathlib.Path(image).stat().st_size, partitions=entries,
+    with pathlib.Path(image).open('rb') as disk:
+        disk.seek(16 * 2048); primary = disk.read(2048)
+    boot_bytes = struct.unpack_from('<I', primary, 80)[0] * 2048
+    if primary[1:6] != b'CD001' or boot_bytes != part['start'] * 512:
+        raise ValueError('ISO boot filesystem overlaps appended system volume')
+    return dict(boot_filesystem_bytes=boot_bytes, image_bytes=pathlib.Path(image).stat().st_size, partitions=entries,
                 drivers_partition=part, filesystem='ext4', filesystem_bytes=size,
                 filesystem_uuid=str(uuid.UUID(bytes=superblock[104:120])))
 
@@ -132,7 +137,7 @@ def build(stage, output, mib=512, drivers_source=None):
     if output.resolve().is_relative_to(stage):
         raise ValueError("Output image must be outside ISO staging")
     regular_output(output)
-    values = config_values(stage / 'boot/cloudberry.cnf')
+    values = config_values(stage / 'cloudberry.cnf')
     guid = uuid.UUID(values['drivers.partition_guid'])
     if guid.int == 0:
         raise ValueError('Nil drivers partition GUID')
@@ -151,7 +156,7 @@ def build(stage, output, mib=512, drivers_source=None):
     import importlib.util
     spec = importlib.util.spec_from_file_location('filesystem_tree', pathlib.Path(__file__).with_name('filesystem-tree.py'))
     tree = importlib.util.module_from_spec(spec); spec.loader.exec_module(tree)
-    if directory != '/boot/kmodules/drivers':
+    if directory != '/system/kmodules/drivers':
         raise ValueError('Driver directory must match the filesystem layout')
     tree.populate(root, drivers_source)
     fs = work / 'drivers.ext4'
@@ -176,13 +181,33 @@ def build(stage, output, mib=512, drivers_source=None):
     subprocess.run(['debugfs', '-w', '-f', str(ownership), str(fs)],
                    check=True, capture_output=True)
     subprocess.run(['xorriso', '-as', 'mkisofs', '-R', '-r', '-J',
-                    '--efi-boot', 'boot/limine/limine-uefi-cd.bin', '--efi-boot-part',
+                    '--efi-boot', 'limine/limine-uefi-cd.bin', '--efi-boot-part',
                     '--efi-boot-image', '--protective-msdos-label',
                     '-append_partition', '4', str(LINUX_DATA), str(fs), '-appended_part_as_gpt',
                     str(stage), '-o', str(output)], check=True)
     matches = [p for p in partitions(output) if p['type'] == str(LINUX_DATA)]
     if len(matches) != 1:
         raise ValueError('Expected one appended Linux filesystem partition')
+    # xorriso counts appended partitions in ISO volume space. Bound this
+    # read-only filesystem before ext4, so a malformed ISO extent can never
+    # expose system/identity data through the public boot mount.
+    boundary = matches[0]['start'] * 512
+    if boundary % 2048:
+        raise ValueError('ISO/ext4 boundary is not a logical block boundary')
+    with output.open('r+b') as disk:
+        terminated = False
+        for sector in range(16, 80):
+            disk.seek(sector * 2048); descriptor = bytearray(disk.read(2048))
+            if len(descriptor) != 2048 or descriptor[1:6] != b'CD001':
+                raise ValueError('Invalid ISO descriptor sequence')
+            if descriptor[0] == 255:
+                terminated = True; break
+            if descriptor[0] in (1, 2):
+                struct.pack_into('<I', descriptor, 80, boundary // 2048)
+                struct.pack_into('>I', descriptor, 84, boundary // 2048)
+                disk.seek(sector * 2048); disk.write(descriptor)
+        if not terminated:
+            raise ValueError('Missing ISO descriptor terminator')
     index = matches[0]['index']
     subprocess.run(['sgdisk', f'--partition-guid={index}:{guid}',
                     f'--change-name={index}:Cloudberry system', str(output)], check=True)

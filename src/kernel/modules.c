@@ -458,7 +458,7 @@ static bool startup_failure(const char *stage,const char *reason) {
 bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     const char *names[]={"mem.configure","mem.context","mem.init","mem.pages_init","scheduler.init",
-        "hwenum.enumerate","mmio.init","clock.init","apic.init","timer.init","event.init","smp.prepare","threads.init","smp.start","irq.init","pci.init","nvme.init","iommu.init","xhci.init","acpi.init","platform.init","usb.init","usb_hub.init","usb_storage.init","partition.init","ext4_fs.init","sata.init"};
+        "hwenum.enumerate","mmio.init","clock.init","apic.init","timer.init","event.init","smp.prepare","threads.init","smp.start","irq.init","pci.init","nvme.init","iommu.init","xhci.init","acpi.init","platform.init","usb.init","usb_hub.init","usb_storage.init","partition.init","ext4_fs.init","sata.init","iso9660_fs.init"};
     kernel_surface_call calls[sizeof(names)/sizeof(names[0])];
     for (size_t i=0;i<sizeof(names)/sizeof(names[0]);++i) {
         calls[i]=kernel_surface_find_version(hub,names[i],(i==16 || i==26)?2:1,0);
@@ -523,6 +523,7 @@ bool kernel_modules_start(struct boot_pages *pages, uint64_t rsdp_physical) {
     START("partition.init",calls[24]((uintptr_t)hub,heap,0,0,0,0));
     START("ext4_fs.init",calls[25]((uintptr_t)hub,heap,0,0,0,0));
     START("sata.init",calls[26]((uintptr_t)hub,heap,0,0,0,0));
+    START("iso9660_fs.init",calls[27]((uintptr_t)hub,heap,0,0,0,0));
     kernel_surface_call bootstrap=kernel_surface_find(hub,"bootstrap.init");if(!bootstrap)return startup_failure("bootstrap.init","missing");
     START("bootstrap.init",bootstrap((uintptr_t)hub,heap,0,0,0,0));
     kernel_surface_call io=kernel_surface_find(hub,"io.init");if(!io)return startup_failure("io.init","missing");

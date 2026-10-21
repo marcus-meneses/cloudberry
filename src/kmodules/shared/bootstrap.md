@@ -142,7 +142,7 @@ configuration directories. A provider `files` entry may use
 `logical-name=/absolute/source`; bootstrap preserves the logical startup name,
 validates both paths and copies bytes without interpreting their content.
 Unregistered, trusted low-level fixture bundles still use the configured
-`drivers.directory` under `/boot/kmodules/drivers`; no such fixtures enter the
+`drivers.directory` under `/system/kmodules/drivers`; no such fixtures enter the
 normal candidate. Ordinary applications reside in `/system/apps`. See the
 [filesystem map](../../maps/filesystem.md). All layout work happens in the host
 image builder.

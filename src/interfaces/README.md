@@ -192,8 +192,51 @@ are independent privileged processes in text → graphics → display order.
 `stream.h` defines directional pipe/file read/write capabilities. Launch ABI 1.1
 adds explicit stdin/stdout/stderr sources. Only the kernel translates these to
 new child-local capabilities after child-manifest validation; the SDK retrieves
-them with `cb_standard`. The new system gate returns zero for an absent binding.
+them with `cb_standard`. Reserved /@stdin, /@stdout and /@stderr names resolve the caller's bindings;
+named acquisitions return independently releasable directional stream handles.
+The old numeric gate remains ABI-compatible and returns zero for absent bindings.
 `filesystem.h` exposes canonical-path open/stat/list/remove/mkdir and returns
 caller-owned streams, preserving the same read/write contract across backing types.
 The C layouts contain no kernel or provider pointers. See [streams](../sdk/streams.md)
 and [graphics](../handlers/graphics/README.md) for bounds and lifetime rules.
+
+
+`mouse.h` defines the privileged `/@mouse` provider's copied READ/STATE contract:
+per-attachment identity, epoch/sequence replay, motion/buttons/wheel resolutions,
+state pagination and removal/reset/error events. Input report layouts are private
+to the provider and descriptor-driven; apps see normalized events. The appended
+HID operations in `io.h` are installation-bound transport facilities, not app input
+APIs. C/C++ layout checks cover these frames and preserve earlier operation IDs.
+
+Keyboard and mouse share generic HID interface transport. The HID kmodule owns
+one receive source per interface; collection/report-ID metadata routes copied
+reports to logical consumers, with mixed-class reports delivered to both.
+Private legacy keyboard-only IO numbers remain reserved. Public /@keyboard and
+/@mouse contracts are unchanged; class codecs share the common descriptor walker
+and own their own decoded state, text interpretation or pointer normalization.
+
+`applications.h` appends read-only `processes` (operation 7), distinct from the
+installed-program `list`. A query carries after/ceiling PIDs; each call returns
+one copied `cb_process_sample`, or zero result bytes at the end. A fixed ceiling
+bounds each sweep against concurrent launches; exits can remove entries between
+calls. Records contain scheduled CPU time/validity, timestamp, state, assigned
+CPU/count, committed user bytes, switches and a bounded display basename. No
+pointers or process-control rights are transferred. Private IO operation 25
+`process_sample` is restricted to the installed application manager.
+
+Keyboard focus adds owner-only claim/release operations and optional 1.1
+read/batch extensions with focus generations. The 1.0 keyboard prefix and
+operation numbers remain intact. Other readers park while an app owns focus;
+release or owner death resumes them at a barrier that discards owner-era keys.
+
+`identity.h` exposes /@identity metadata/listing and staged transactional account
+management. `identity-format.h` specifies explicit little-endian file codecs,
+generation and ID high-water headers. Users/groups download in bounded chunks;
+credential updates supply one derived salt/hash record without exporting hashes.
+See [identity storage and API](../handlers/identity/README.md).
+
+`credentials.h` defines copied kernel-owned UID/GID/group snapshots. Identity
+SELF/AUTHENTICATE/PASSWORD extend the existing interface without changing old
+operation numbers. IO credential replacement is restricted to the installed
+identity provider; ordinary IO callers can query only themselves. Manifest grants
+and user privileges intersect. File streams recheck current caller permissions.

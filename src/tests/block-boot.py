@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
-import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket
+import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket,struct
 p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--spaces-only',action='store_true');p.add_argument('--process-only',action='store_true');p.add_argument('--profile-handles',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
 if args.profile_handles and not 1<=args.cpus<=4:p.error('test-only handle profiling supports one to four CPUs')
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
@@ -16,12 +16,12 @@ def save(): (test/'result.json').write_text(json.dumps(result,indent=2)+'\n')
 save()
 try:
     stage=test/'stage';shutil.rmtree(stage,ignore_errors=True);shutil.copytree(build/'src-iso-root',stage)
-    shutil.copy2(build/('tests/src-process-kernel.elf' if args.process_only else 'tests/src-spaces-kernel.elf' if args.spaces_only else 'tests/src-bootstrap-kernel.elf' if args.bootstrap else 'tests/src-hub-kernel.elf' if args.hub_only else 'tests/src-block-kernel.elf'),stage/'boot/kernel.elf');shutil.copy2(build/'kmodules/probe.kmod',stage/'boot/kmodules/probe.kmod')
-    config=stage/"boot/cloudberry.cnf";config.write_text(config.read_text().replace("filesystem.writable=true","filesystem.writable=false"))
+    shutil.copy2(build/('tests/src-process-kernel.elf' if args.process_only else 'tests/src-spaces-kernel.elf' if args.spaces_only else 'tests/src-bootstrap-kernel.elf' if args.bootstrap else 'tests/src-hub-kernel.elf' if args.hub_only else 'tests/src-block-kernel.elf'),stage/'kernel.elf');shutil.copy2(build/'kmodules/probe.kmod',stage/'kmodules/probe.kmod')
+    config=stage/"cloudberry.cnf";config.write_text(config.read_text().replace("filesystem.writable=true","filesystem.writable=false"))
     if args.profile_handles:
         if not args.process_only:raise RuntimeError('handle profiling requires process test')
-        shutil.copy2(build/'tests/handles-profile.kmod',stage/'boot/kmodules/helpers/handles.kmod')
-    with (stage/'boot/limine/limine.conf').open('a') as f:f.write('    module_path: boot():/boot/kmodules/probe.kmod\n    module_cmdline: probe\n')
+        shutil.copy2(build/'tests/handles-profile.kmod',stage/'kmodules/helpers/handles.kmod')
+    with (stage/'limine/limine.conf').open('a') as f:f.write('    module_path: boot():/kmodules/probe.kmod\n    module_cmdline: probe\n')
     fixture=test/'drivers';fixture.mkdir(exist_ok=True);shutil.copytree(build/'src-handler-bundles',fixture,dirs_exist_ok=True);(fixture/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     if args.process_only:
         import importlib.util
@@ -41,9 +41,17 @@ try:
         shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard-fault',dirs_exist_ok=True)
         shutil.copy2(build/'tests/apps/keyboard-fault.elf',fixture/'keyboard-fault/keyboard.elf')
         definition=fixture/'keyboard-fault/provider.cnf';definition.write_text(definition.read_text().replace('636c6f756462657272792e6b62643100','01020304050607080910111213141517'))
+        # Prepack the fault provider's startup packet. The probe explicitly
+        # binds its PID before start; no test alias is authorized by production HID.
+        startup_files=[]
+        for startup_name in ('config.cnf','layouts/ibm.json','layouts/abnt2.json'):
+            data=(fixture/'keyboard-fault'/startup_name).read_bytes();encoded=startup_name.encode()
+            startup_files.append(struct.pack('<QQ',len(encoded),len(data))+encoded+data)
+        startup_body=b''.join(startup_files)
+        (fixture/'keyboard-fault/startup.bin').write_bytes(struct.pack('<IHHQQ',24,1,0,24+len(startup_body),len(startup_files))+startup_body)
         for policy in ('read','state','denied'):shutil.copy2(root/f'src/tests/apps/keyboard-{policy}.json',fixture/f'keyboard-{policy}.json')
     if args.disk_modules:
-        config=stage/'boot/cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
+        config=stage/'cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
         for name in ('future','future-fail'):shutil.copy2(build/f'kmodules/{name}.kmod',fixture/f'{name}.kmod')
         (fixture/'future.driver').write_text('version=1\nmodule=future\ninit=future.init\nstart=future.start\nrequires=clock.now_ns@1.0\npci.class=030000\n')
         (fixture/'future-fail.driver').write_text('version=1\nmodule=future-fail\ninit=future_fail.init\nrequires=future.value@1.2\nmatch=always\n')

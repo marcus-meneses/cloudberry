@@ -8,8 +8,11 @@
 #define IO_TIMEOUT UINT64_C(1000000000)
 struct usb_host;
 struct watcher {struct watcher *next;uint64_t thread;};
+struct device_waiter {struct device_waiter *next;uint64_t thread;};
+struct endpoint_io {struct endpoint_io *next;uint32_t endpoint,busy,cancelling;uint64_t pending,io_thread;unsigned char *buffer;};
 struct device {
     struct usb_device record;struct device *next,*parent;struct usb_host *host;
+    struct endpoint_io *channels;struct device_waiter *waiters;unsigned data_active;
     struct usb_configuration *configs;unsigned config_count,busy,active_endpoint,cancelling,present,notified_ready;
     uint64_t token,pending,attempt_generation,io_thread,cleanup_waiter,hub_owner;unsigned hub_ports,hub_interface;unsigned char *buffer;
 };
@@ -65,15 +68,18 @@ static struct device *find(const struct usb_ref *ref) {
     for(struct device *p=state.devices;p;p=p->next)if(p->record.identity.id==ref->id && p->record.identity.generation==ref->generation)return p;
     return NULL;
 }
+static void device_wake(struct device *dev){for(struct device_waiter *w=dev->waiters;w;w=w->next)CALL(state.thread,THREAD_WAKE,w->thread,0);}
 static struct device *acquire(const struct usb_ref *ref) {
     if(!foreground())return NULL;
-    uint64_t flags=lock();struct device *dev=find(ref);
-    if(!dev || dev->busy || dev->host->stop || dev->record.state!=USB_CONFIGURED)dev=NULL;
-    if(dev)dev->busy=1;
-    unlock(flags);return dev;
+    uint64_t flags=lock();struct device *dev=find(ref);struct device_waiter waiter={.thread=CALL(state.thread,THREAD_CURRENT,0,0).value};int linked=0;
+    for(;;){if(!dev || dev->host->stop || dev->record.state!=USB_CONFIGURED){if(linked){struct device_waiter **at=&dev->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;}unlock(flags);return NULL;}
+        if(!dev->busy)break;
+        if(!linked){waiter.next=dev->waiters;dev->waiters=&waiter;linked=1;}unlock(flags);int failed=CALL(state.thread,THREAD_BLOCK,0,0).status;flags=lock();if(failed){struct device_waiter **at=&dev->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;unlock(flags);return NULL;}
+    }
+    if(linked){struct device_waiter **at=&dev->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;}dev->busy=1;unlock(flags);return dev;
 }
 static void notify_changes(void);
-static void finish(struct device *dev) {uint64_t flags=lock();dev->busy=0;if(dev->record.state==USB_CONFIGURED && !dev->notified_ready){dev->notified_ready=1;notify_changes();}CALL(state.thread,THREAD_WAKE,dev->host->thread,0);if(dev->cleanup_waiter)CALL(state.thread,THREAD_WAKE,dev->cleanup_waiter,0);unlock(flags);}
+static void finish(struct device *dev) {uint64_t flags=lock();dev->busy=0;device_wake(dev);if(dev->record.state==USB_CONFIGURED && !dev->notified_ready){dev->notified_ready=1;notify_changes();}CALL(state.thread,THREAD_WAKE,dev->host->thread,0);if(dev->cleanup_waiter)CALL(state.thread,THREAD_WAKE,dev->cleanup_waiter,0);unlock(flags);}
 /* Called only under the short CPU lock, from foreground/deferred ownership
  * transitions. Clients receive wake credits, never synchronous callbacks. */
 static void notify_changes(void) {
@@ -84,7 +90,7 @@ static void set_state(struct device *dev,unsigned status,unsigned error) {
     uint64_t flags=lock();uint32_t present=status==USB_CONFIGURED?DEVICE_PRESENT|DEVICE_ENABLED|DEVICE_FUNCTIONING:status==USB_DETACHED || !dev->present?0:DEVICE_PRESENT;
     int changed=dev->record.state!=status || dev->record.error!=error || dev->record.identity.flags!=present;
     dev->record.state=status;dev->record.error=error;dev->record.identity.flags=present;
-    if(changed)notify_changes();
+    if(changed){device_wake(dev);notify_changes();}
     unlock(flags);
 }
 static void free_configs(struct device *dev) {
@@ -93,36 +99,41 @@ static void free_configs(struct device *dev) {
 }
 /* The transport retains only this module's permanent bounce buffer. Even when
  * cancellation cannot prove quiescence, no caller stack/buffer escapes return. */
-static int perform(struct device *dev,uint32_t endpoint,const uint8_t *setup,void *buffer,unsigned bytes,uint64_t deadline,struct host_transfer_result *out) {
-    *out=(struct host_transfer_result){.state=HOST_FAILED};if(bytes>4096 || (bytes && !buffer) || dev->pending)return 0;
+static int perform_channel(struct device *dev,struct endpoint_io *channel,uint32_t endpoint,const uint8_t *setup,void *buffer,unsigned bytes,uint64_t deadline,const uint32_t *cancelled,struct host_transfer_result *out) {
+    uint64_t *pending=channel?&channel->pending:&dev->pending,*io_thread=channel?&channel->io_thread:&dev->io_thread;
+    unsigned *cancelling=channel?&channel->cancelling:&dev->cancelling;unsigned char *bounce=channel?channel->buffer:dev->buffer;
+    *out=(struct host_transfer_result){.state=HOST_FAILED};if(bytes>4096 || (bytes && !buffer) || (*pending))return 0;
+    if(cancelled && __atomic_load_n(cancelled,__ATOMIC_ACQUIRE)){out->state=HOST_CANCELLED;return 0;}
     int input=endpoint?(endpoint&128):setup[0]&128;
-    if(bytes && !input)copy(dev->buffer,buffer,bytes);
-    struct host_transfer_request request={.device=dev->token,.endpoint=endpoint,.bytes=bytes,.buffer=dev->buffer};
+    if(bytes && !input)copy(bounce,buffer,bytes);
+    struct host_transfer_request request={.device=dev->token,.endpoint=endpoint,.bytes=bytes,.buffer=bounce};
     if(setup)copy(request.setup,setup,8);
     uint64_t time=now();if(time==UINT64_MAX || (deadline && deadline<=time))return 0;
     if(dev->host->stop)return 0;
     if(!deadline){if(time>UINT64_MAX-IO_TIMEOUT)return 0;deadline=time+IO_TIMEOUT;}
-    dev->active_endpoint=endpoint;
+    if(!channel)dev->active_endpoint=endpoint;
     struct kernel_surface_result submitted=CALL(state.transfer,dev->host->id,&request,0);if(submitted.status)return 0;
-    dev->pending=submitted.value;dev->io_thread=CALL(state.thread,THREAD_CURRENT,0,0).value;
+    (*pending)=submitted.value;(*io_thread)=CALL(state.thread,THREAD_CURRENT,0,0).value;
+    if(cancelled && __atomic_load_n(cancelled,__ATOMIC_ACQUIRE) && CALL(state.cancel,dev->host->id,dev->token,endpoint).status){set_state(dev,USB_FAILED,USB_QUIESCENCE);return 0;}
     if(dev->host->stop)CALL(state.thread,THREAD_WAKE,dev->host->thread,0);
-    struct kernel_surface_result waited=state.wait(dev->host->id,dev->pending,(uintptr_t)out,deadline,0,0);
+    struct kernel_surface_result waited=state.wait(dev->host->id,(*pending),(uintptr_t)out,deadline,0,0);
     /* Stop Endpoint may emit a Stopped transfer event before its command
      * completion. Do not reap that intermediate event while a shutdown cancel
      * is still establishing the final endpoint/result state. */
-    while(dev->cancelling)if(CALL(state.thread,THREAD_BLOCK,0,0).status)return 0;
+    while((*cancelling))if(CALL(state.thread,THREAD_BLOCK,0,0).status)return 0;
     if(waited.status) {
-        if(state.result(dev->host->id,dev->pending,(uintptr_t)out,0,0,0).status)return 0;
+        if(state.result(dev->host->id,(*pending),(uintptr_t)out,0,0,0).status)return 0;
         if(out->state==HOST_PENDING && CALL(state.cancel,dev->host->id,dev->token,endpoint).status) {set_state(dev,USB_FAILED,USB_QUIESCENCE);return 0;}
     }
-    if(state.result(dev->host->id,dev->pending,(uintptr_t)out,1,0,0).status || out->state==HOST_PENDING){set_state(dev,USB_FAILED,USB_QUIESCENCE);return 0;}
-    dev->pending=0;
+    if(state.result(dev->host->id,(*pending),(uintptr_t)out,1,0,0).status || out->state==HOST_PENDING){set_state(dev,USB_FAILED,USB_QUIESCENCE);return 0;}
+    (*pending)=0;
     if(out->state==HOST_FAILED && CALL(state.cancel,dev->host->id,dev->token,endpoint).status)set_state(dev,USB_FAILED,USB_QUIESCENCE);
     if(out->state==HOST_DISCONNECTED)set_state(dev,USB_DETACHED,0);
     if(out->state!=HOST_COMPLETE || out->bytes>bytes)return 0;
-    if(input && out->bytes)copy(buffer,dev->buffer,out->bytes);
+    if(input && out->bytes)copy(buffer,bounce,out->bytes);
     return 1;
 }
+static int perform(struct device *dev,uint32_t endpoint,const uint8_t *setup,void *buffer,unsigned bytes,uint64_t deadline,struct host_transfer_result *out){return perform_channel(dev,NULL,endpoint,setup,buffer,bytes,deadline,NULL,out);}
 static int descriptor(struct device *dev,unsigned type,unsigned index,void *buffer,unsigned bytes,unsigned *actual) {
     uint8_t setup[8]={0x80,6,index,type,0,0,bytes,bytes>>8};struct host_transfer_result result;
     int ok=perform(dev,0,setup,buffer,bytes,0,&result);if(ok)*actual=result.bytes;return ok;
@@ -135,10 +146,13 @@ static int cleanup(struct device *dev) {
         if(state.result(dev->host->id,dev->pending,(uintptr_t)&result,1,0,0).status)return 0;
         dev->pending=0;
     }
+    if(dev->data_active)return 0;
+    for(struct endpoint_io *io=dev->channels;io;io=io->next)if(io->pending){struct host_transfer_result result;if(state.result(dev->host->id,io->pending,(uintptr_t)&result,0,0,0).status || result.state==HOST_PENDING || state.result(dev->host->id,io->pending,(uintptr_t)&result,1,0,0).status)return 0;io->pending=0;}
     if(dev->token) {
         if(CALL(state.remove,dev->host->id,dev->token,0).status)return 0;
         dev->token=0;
     }
+    while(dev->channels){struct endpoint_io *io=dev->channels;dev->channels=io->next;release(NULL,io->buffer);release(NULL,io);}
     for(unsigned i=0;i<dev->config_count;++i)for(size_t j=0;j<dev->configs[i].interface_count;++j)dev->configs[i].interfaces[j].info.owner=0;
     return 1;
 }
@@ -222,7 +236,7 @@ static int detach_tree(struct device *root) {
     if(root->token && CALL(state.disconnect,root->host->id,root->token,0).status)return 0;
     for(int depth=5;depth>=0;--depth)for(struct device *dev=state.devices;dev;dev=dev->next)if(descendant(dev,root) && dev->record.depth==(unsigned)depth) {
         uint64_t flags=lock();dev->cleanup_waiter=current;unlock(flags);
-        while(dev->busy)if(CALL(state.thread,THREAD_BLOCK,0,0).status)return 0;
+        while(dev->busy || dev->data_active)if(CALL(state.thread,THREAD_BLOCK,0,0).status)return 0;
         flags=lock();dev->cleanup_waiter=0;unlock(flags);
         if(!cleanup(dev))return 0;
         dev->hub_owner=dev->hub_ports=0;
@@ -242,7 +256,7 @@ static int host_scan(struct usb_host *host,unsigned ports) {
         if(port.status&1) {
             if(!dev)dev=port_device(host,NULL,i);
             if(!dev)return 0;
-            if(port.generation!=dev->attempt_generation && !dev->busy && !dev->pending && !dev->token)enumerate(dev,port);
+            if(port.generation!=dev->attempt_generation && !dev->busy && !dev->data_active && !dev->pending && !dev->token)enumerate(dev,port);
         }
     }
     return 1;
@@ -273,7 +287,8 @@ close:
     for(struct device *dev=state.devices;dev;dev=dev->next)if(dev->host==host && !dev->parent && dev->token)CALL(state.disconnect,host->id,dev->token,0);
     for(int depth=5;depth>=0;--depth)for(struct device *dev=state.devices;dev;dev=dev->next)if(dev->host==host && dev->record.depth==(unsigned)depth) {
         dev->present=0;set_state(dev,USB_DETACHED,0);
-        while(dev->busy) {
+        while(dev->busy || dev->data_active) {
+            for(struct endpoint_io *io=dev->channels;io;io=io->next)if(io->pending){struct host_transfer_result result={0};if(!state.result(host->id,io->pending,(uintptr_t)&result,0,0,0).status && result.state==HOST_PENDING){uint64_t flags=lock();io->cancelling=1;unlock(flags);struct kernel_surface_result cancelled=CALL(state.cancel,host->id,dev->token,io->endpoint);flags=lock();io->cancelling=0;if(io->io_thread)CALL(state.thread,THREAD_WAKE,io->io_thread,0);unlock(flags);if(cancelled.status){ok=0;goto done;}}}
             struct host_transfer_result terminal={0};
             int pending=dev->pending && !state.result(host->id,dev->pending,(uintptr_t)&terminal,0,0,0).status && terminal.state==HOST_PENDING;
             if(pending) {
@@ -411,7 +426,7 @@ struct kernel_surface_result usb_surface_device(MODULE_ARGS) {
 }
 struct kernel_surface_result usb_surface_configuration(MODULE_ARGS) {
     MODULE_UNUSED();if(!bsp() || !e || (!c && d))return failure();uint64_t flags=lock();struct device *dev=find((const void *)a);
-    int ok=dev && !dev->busy && b<dev->config_count;
+    int ok=dev && dev->record.state==USB_CONFIGURED && b<dev->config_count;
     if(ok){*(size_t *)e=dev->configs[b].bytes;ok=d>=dev->configs[b].bytes;if(ok)copy((void *)c,dev->configs[b].raw,dev->configs[b].bytes);}
     unlock(flags);return module_result(1,ok);
 }
@@ -421,7 +436,7 @@ static struct usb_parsed_interface *interface_find(struct device *dev,unsigned n
 }
 struct kernel_surface_result usb_surface_interface(MODULE_ARGS) {
     MODULE_UNUSED();if(!bsp() || !c)return failure();uint64_t flags=lock();struct device *dev=find((const void *)a);
-    int ok=dev && !dev->busy && dev->config_count && b<dev->configs[0].interface_count;
+    int ok=dev && dev->record.state==USB_CONFIGURED && dev->config_count && b<dev->configs[0].interface_count;
     if(ok)*(struct usb_interface *)c=dev->configs[0].interfaces[b].info;
     unlock(flags);return module_result(1,ok);
 }
@@ -430,7 +445,7 @@ static struct usb_endpoint *endpoint_find(struct device *dev,struct usb_parsed_i
     for(unsigned i=0;i<interface->info.endpoints;++i){struct usb_endpoint *ep=&dev->configs[0].endpoints[interface->first+i];if(ep->address==address)return ep;}return NULL;
 }
 struct kernel_surface_result usb_surface_endpoint(MODULE_ARGS) {
-    MODULE_UNUSED();if(!bsp() || !d)return failure();uint64_t flags=lock();struct device *dev=find((const void *)a);struct usb_endpoint *ep=dev && !dev->busy?endpoint_find(dev,interface_find(dev,b),c):NULL;
+    MODULE_UNUSED();if(!bsp() || !d)return failure();uint64_t flags=lock();struct device *dev=find((const void *)a);struct usb_endpoint *ep=dev && dev->record.state==USB_CONFIGURED?endpoint_find(dev,interface_find(dev,b),c):NULL;
     if(ep)*(struct usb_endpoint *)d=*ep;
     unlock(flags);return module_result(1,ep!=NULL);
 }
@@ -439,7 +454,10 @@ struct kernel_surface_result usb_surface_claim(MODULE_ARGS) {
     struct usb_parsed_interface *interface=interface_find(dev,b);int ok=interface && (!interface->info.owner || interface->info.owner==c);
     if(ok)for(unsigned i=0;i<interface->info.endpoints;++i)if(!dev->configs[0].endpoints[interface->first+i].supported)ok=0;
     if(ok)for(unsigned i=0;i<interface->info.endpoints;++i) {
-        size_t index=interface->first+i;struct usb_endpoint *ep=&dev->configs[0].endpoints[index];if(dev->configs[0].configured[index])continue;
+        size_t index=interface->first+i;struct usb_endpoint *ep=&dev->configs[0].endpoints[index];
+        struct endpoint_io *channel=dev->channels;while(channel && channel->endpoint!=ep->address)channel=channel->next;
+        if(!channel){channel=allocate(NULL,sizeof(*channel));if(!channel){ok=0;break;}channel->buffer=allocate(NULL,4096);if(!channel->buffer){release(NULL,channel);ok=0;break;}channel->endpoint=ep->address;uint64_t flags=lock();channel->next=dev->channels;dev->channels=channel;unlock(flags);}
+        if(dev->configs[0].configured[index])continue;
         struct host_endpoint_request request={.device=dev->token,.address=ep->address,.type=ep->host_type,.max_packet=ep->max_packet,.interval=ep->interval,.max_burst=ep->max_burst,.max_esit=ep->max_esit};
         if(CALL(state.endpoint,dev->host->id,&request,0).status){ok=0;break;}dev->configs[0].configured[index]=1;
     }
@@ -449,12 +467,28 @@ struct kernel_surface_result usb_surface_claim(MODULE_ARGS) {
 struct kernel_surface_result usb_surface_release(MODULE_ARGS) {
     MODULE_UNUSED();struct device *dev=acquire((const void *)a);if(!dev)return failure();
     struct usb_parsed_interface *interface=interface_find(dev,b);int ok=interface && c && interface->info.owner==c;
+    if(ok)for(unsigned i=0;i<interface->info.endpoints;++i)for(struct endpoint_io *io=dev->channels;io;io=io->next)if(io->endpoint==dev->configs[0].endpoints[interface->first+i].address && io->busy)ok=0;
     if(ok)interface->info.owner=0;
     finish(dev);return module_result(1,ok);
 }
+static const uint32_t *cancel_flag(const struct usb_io *request){return (request->reserved&USB_IO_CANCELLABLE)?((const struct usb_io_cancellable *)request)->cancelled:NULL;}
+static int request_cancelled(const struct usb_io *request){const uint32_t *flag=cancel_flag(request);return flag && __atomic_load_n(flag,__ATOMIC_ACQUIRE);}
+static struct endpoint_io *data_acquire(const struct usb_io *request,struct device **device){
+    if(!foreground())return NULL;
+    uint64_t flags=lock();struct device *dev=find(&request->device);struct device_waiter waiter={.thread=CALL(state.thread,THREAD_CURRENT,0,0).value};int linked=0;struct endpoint_io *channel=NULL;
+    for(;;){if(!dev || dev->host->stop || dev->record.state!=USB_CONFIGURED || request_cancelled(request))break;
+        struct usb_parsed_interface *interface=interface_find(dev,request->interface);if(!interface || !request->owner || interface->info.owner!=request->owner || !endpoint_find(dev,interface,request->endpoint))break;
+        for(channel=dev->channels;channel && channel->endpoint!=request->endpoint;channel=channel->next){}
+        if(!channel)break;
+        if(!dev->busy && !channel->busy){channel->busy=1;++dev->data_active;*device=dev;goto acquired;}
+        if(!linked){waiter.next=dev->waiters;dev->waiters=&waiter;linked=1;}unlock(flags);int failed=CALL(state.thread,THREAD_BLOCK,0,0).status;flags=lock();if(failed)break;
+    }channel=NULL;
+acquired:if(linked){struct device_waiter **at=&dev->waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;}unlock(flags);return channel;
+}
 static struct kernel_surface_result io(const struct usb_io *request,struct host_transfer_result *out,int control) {
-    if(!request || !out || request->reserved || request->bytes>4096 || (request->bytes && !request->buffer))return failure();
-    struct device *dev=acquire(&request->device);if(!dev)return failure();
+    if(!request || !out || (request->reserved&~USB_IO_CANCELLABLE) || request->bytes>4096 || (request->bytes && !request->buffer))return failure();
+    struct device *dev=NULL;struct endpoint_io *channel=NULL;
+    if(control)dev=acquire(&request->device);else channel=data_acquire(request,&dev);if(!dev)return failure();
     struct usb_parsed_interface *interface=interface_find(dev,request->interface);int ok=interface && request->owner && interface->info.owner==request->owner;
     if(control) {
         unsigned recipient=request->setup[0]&31,type=(request->setup[0]>>5)&3,index=word(request->setup+4);
@@ -472,10 +506,10 @@ static struct kernel_surface_result io(const struct usb_io *request,struct host_
          * armed until an event, disconnect or explicit cancellation instead of
          * periodically stopping/restarting a healthy keyboard or hub. */
         if(!control && !deadline && (request->endpoint&128) && endpoint_find(dev,interface,request->endpoint)->transfer_type==3)deadline=UINT64_MAX;
-        ok=perform(dev,control?0:request->endpoint,control?request->setup:NULL,request->buffer,request->bytes,deadline,out);
+        ok=perform_channel(dev,channel,control?0:request->endpoint,control?request->setup:NULL,request->buffer,request->bytes,deadline,cancel_flag(request),out);
 
     }
-    finish(dev);return module_result(ok?out->bytes:0,ok);
+    if(control)finish(dev);else {uint64_t flags=lock();channel->busy=0;--dev->data_active;device_wake(dev);CALL(state.thread,THREAD_WAKE,dev->host->thread,0);if(dev->cleanup_waiter)CALL(state.thread,THREAD_WAKE,dev->cleanup_waiter,0);unlock(flags);}return module_result(ok?out->bytes:0,ok);
 }
 struct kernel_surface_result usb_surface_control(MODULE_ARGS) {MODULE_UNUSED();return io((const void *)a,(void *)b,1);}
 struct kernel_surface_result usb_surface_transfer(MODULE_ARGS) {MODULE_UNUSED();return io((const void *)a,(void *)b,0);}
@@ -515,11 +549,11 @@ struct kernel_surface_result usb_surface_cancel(MODULE_ARGS) {
     MODULE_UNUSED();const struct usb_io *r=(void *)a;if(!r || !foreground())return failure();
     struct device *dev=find(&r->device);struct usb_parsed_interface *interface=dev?interface_find(dev,r->interface):NULL;
     if(!dev || !interface || !r->owner || interface->info.owner!=r->owner || (r->endpoint && !endpoint_find(dev,interface,r->endpoint)))return failure();
-    uint64_t flags=lock();int ok=dev->pending && dev->active_endpoint==r->endpoint && !dev->cancelling;
-    if(ok)dev->cancelling=1;
-    unlock(flags);if(!ok)return failure();
-    struct kernel_surface_result result=CALL(state.cancel,dev->host->id,dev->token,r->endpoint);
-    flags=lock();dev->cancelling=0;if(dev->io_thread)CALL(state.thread,THREAD_WAKE,dev->io_thread,0);unlock(flags);return result;
+    uint64_t flags=lock();struct endpoint_io *channel=NULL;if(r->endpoint)for(channel=dev->channels;channel && channel->endpoint!=r->endpoint;channel=channel->next){}
+    uint64_t *pending=channel?&channel->pending:&dev->pending,*thread=channel?&channel->io_thread:&dev->io_thread;unsigned *cancelling=channel?&channel->cancelling:&dev->cancelling;
+    int ok=(!r->endpoint || channel) && *pending && !*cancelling;if(ok)*cancelling=1;
+    unlock(flags);if(!ok)return failure();struct kernel_surface_result result=CALL(state.cancel,dev->host->id,dev->token,r->endpoint);
+    flags=lock();*cancelling=0;if(*thread)CALL(state.thread,THREAD_WAKE,*thread,0);unlock(flags);return result;
 }
 
 struct kernel_surface_result usb_surface_ready(MODULE_ARGS){

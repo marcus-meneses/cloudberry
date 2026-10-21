@@ -20,7 +20,7 @@ keyboard handler now runs as an isolated disk-loaded process. See [mem spaces](k
 The [application handle contract](interfaces/README.md) now defines the C boundary
 and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
 publishing `/@keyboard`. Headers are compile-tested in C/C++20; the [C system library and handle broker](kmodules/shared/handles.md) implement initial boot-policy authorization and isolated request/reply.
-The provider decodes boot-keyboard reports with bundled IBM/ABNT2 layouts.
+The provider decodes descriptor-defined keyboard reports with bundled IBM/ABNT2 layouts.
 Bootstrap reads generic provider descriptors/startup files; keyboard interprets
 its own config.cnf. Lifecycle owners stop/reap explicitly, and status snapshots
 contain no reclaimable record pointers.
@@ -135,7 +135,8 @@ starts Limine, and GPT partition 4 is a separate 512 MiB ext4 filesystem named
 `Cloudberry system`. Xorriso also describes gap partitions around these regions.
 The ext4 root follows the [filesystem namespace](maps/filesystem.md): flat apps
 in `/system/apps`, providers in `/system/handlers`, root state in `/system/root`,
-and boot-completion kmodule directories. `/boot/kmodules/drivers` is reserved for
+and `/system/kmodules` for future disk-loaded modules. `/boot` is the read-only
+ISO9660 boot filesystem mount; its ext4 mountpoint starts empty. `/system/kmodules/drivers` is reserved for
 explicit future drivers; it contains no application bundles in candidate images. Limine 10 reads FAT/ISO9660, not ext4. The boot-loaded `usb-storage`,
 `partition` and `ext4-fs` modules provide guest access and explicitly requested
 journaled writes. Bootstrap selects the unique driver volume and can load
@@ -263,7 +264,7 @@ mutations still measured 57–79 ms in the accepted native profile. See the late
 [rendering evidence](ROADMAP.md#native-region-copy-follow-up--2026-10-19).
 
 The kernel foundation now includes storage selection, future disk-module loading
-and protected native processes. The disk-loaded `/@keyboard` and `/@applications` providers run through copied,
+and protected native processes. The disk-loaded `/@keyboard`, `/@mouse` and `/@applications` providers run through copied,
 manifest-authorized capability calls. The text → graphics → display chain supplies a shared boot console. Display currently
 uses Limine’s framebuffer behind its replaceable contract. The ordinary terminal
 launches installed utilities, routes stdin/stdout/stderr and supports `=>`, `->`,
@@ -280,7 +281,7 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
 | Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU/window/session model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
-| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, boot-keyboard HID provider implemented; general HID/UAS and physical qualification remain open |
+| USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, descriptor-driven keyboard/mouse providers with shared-interface demultiplexing implemented; broader HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations and an application-facing filesystem provider with file streams | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
 | Modules | Format3 images, dynamic ABI3 hub, stable entries, provider ownership and cooperative call/lease retirement | Current modules boot-pinned; explicit disk loading with versioned dependencies and hidden init/start; table withdrawal and executable reclamation remain future work |
 
@@ -415,12 +416,17 @@ src/
 │   ├── surfaces.h
 │   ├── spaces.c
 │   └── spaces.h
+├── common/
+│   ├── hid-report.c
+│   └── hid-report.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
+│   ├── identity/ (README.md, identity.c, auth.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
 │   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
 │   ├── filesystem/ (README.md, filesystem.c, manifest.json, provider.cnf)
 │   ├── graphics/ (README.md, graphics.c, glyphs.h, raster.c, raster.h, font.h, manifest.json, provider.cnf)
 │   ├── text/ (README.md, text.c, manifest.json, provider.cnf)
+│   ├── mouse/ (README.md, mouse.c, hid.c, hid.h, manifest.json, provider.cnf)
 │   └── keyboard/
 │       ├── README.md
 │       ├── config.cnf
@@ -428,6 +434,8 @@ src/
 │       ├── hid.c
 │       ├── hid.h
 │       ├── keyboard.c
+│       ├── report.c
+│       ├── report.h
 │       ├── layouts/
 │       │   ├── abnt2.json
 │       │   └── ibm.json
@@ -436,6 +444,9 @@ src/
 │   ├── README.md
 │   ├── admission.h
 │   ├── applications.h
+│   ├── credentials.h
+│   ├── identity.h
+│   ├── identity-format.h
 │   ├── installations.h
 │   ├── display.h
 │   ├── graphics.h
@@ -447,7 +458,8 @@ src/
 │   ├── memory.h
 │   ├── system.h
 │   ├── startup.h
-│   └── keyboard.h
+│   ├── keyboard.h
+│   └── mouse.h
 ├── kmodules/
 │   ├── amd/
 │   │   ├── cpu-amd.c
@@ -525,7 +537,9 @@ src/
 │   │   ├── event.h
 │   │   ├── event.json
 │   │   ├── event.md
-│   │   ├── ext4-fs.c
+│   │   ├── ext4-backend.inc
+│   │   ├── iso9660-fs.c / iso9660-fs.json / iso9660-fs.md
+│   ├── ext4-fs.c
 │   │   ├── ext4-fs.h
 │   │   ├── ext4-fs.json
 │   │   ├── ext4-fs.md
@@ -536,10 +550,19 @@ src/
 │   │   ├── handles.h
 │   │   ├── handles.json
 │   │   ├── handles.md
-│   │   ├── io-console.c
-│   │   ├── io-console.h
-│   │   ├── io-process.c
-│   │   ├── io-process.h
+│   │   ├── applications.c
+│   │   ├── applications.h
+│   │   ├── applications.json
+│   │   ├── display.c
+│   │   ├── display.json
+│   │   ├── filesystem.c
+│   │   ├── filesystem.h
+│   │   ├── filesystem.json
+│   │   ├── filesystem.md
+│   │   ├── hid.c
+│   │   ├── hid.json
+│   │   ├── hid-reports.c
+│   │   ├── hid-reports.h
 │   │   ├── io.c
 │   │   ├── io.h
 │   │   ├── io.json
@@ -628,6 +651,7 @@ src/
 │   │   ├── splash.md
 │   │   ├── threads-entry.S
 │   │   ├── threads.c
+│   │   ├── thread-account.h
 │   │   ├── threads.h
 │   │   ├── threads.json
 │   │   ├── threads.md
@@ -671,11 +695,13 @@ src/
 │   ├── README.md
 │   ├── installed.json
 │   ├── launch/ (launch.c, manifest.json)
-│   ├── terminal/ (README.md, terminal.c, parser.h, manifest.json)
+│   ├── terminal/ (README.md, terminal.c, parser.h, editor.h, editing.inc, manifest.json)
 │   ├── echo/ (echo.c, manifest.json)
 │   ├── cat/ (cat.c, manifest.json)
 │   ├── ls/ (ls.c, manifest.json)
 │   ├── pwd/ (pwd.c, manifest.json)
+│   ├── accounts/ (README.md, accounts.c, manifest.json)
+│   ├── monitor/ (README.md, monitor.c, model.h, manifest.json)
 │   └── true/ (true.c, manifest.json)
 ├── sdk/
 │   ├── service.h
@@ -692,11 +718,30 @@ src/
 │   ├── display-copy.c
 │   ├── streams.c
 │   ├── waitset.c
+│   ├── monitor-accounting.c
+│   ├── process-samples.c
+│   ├── io-credentials.c
+│   ├── process-credentials.c
+│   ├── iso9660.c
+│   ├── filesystem-permissions.c
+│   ├── password.py
+│   ├── identity-store.c
+│   ├── identity-transactions.c
+│   ├── identity.py
+│   ├── terminal-editor.c
+│   ├── mouse-hid.c
+│   ├── io-hid.c
+│   ├── hid-demux.c
+│   ├── hid-fixtures.h
+│   ├── filesystem-backends.c
+│   ├── usb-endpoints.c
 │   ├── apps/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
 │   │   ├── application-runtime.c
 │   │   ├── graphics-check.c
+│   │   ├── identity-check.c
+│   │   ├── mouse-check.c
 │   │   ├── handle-bench.c
 │   │   ├── handle-stress.c
 │   │   ├── stress-client.json
@@ -723,6 +768,7 @@ src/
 │   ├── bootstrap-load.c
 │   ├── block-boot.py
 │   ├── filesystem-tree.py
+│   ├── identity-image.py
 │   ├── boot-image.py
 │   ├── clock-boot.c
 │   ├── clock.c
@@ -826,6 +872,8 @@ src/
 │   ├── build-installations.py
 │   ├── build-initial.py
 │   ├── filesystem-tree.py
+│   ├── clean-tests.py
+│   ├── identity-db.py
 │   ├── stage-kmodules.py
 │   ├── build-boot-image.py
 │   ├── check-acpi-image.py
@@ -925,3 +973,39 @@ change bitmaps. Subtree disconnect revokes references before postorder slot
 cleanup. Isolated one/four-CPU tests cover child hotplug, pending grandchild I/O,
 upstream removal and reattachment, including both emulated IOMMUs. Native and
 physical hub/USB3 qualification remain pending.
+
+The IO gateway now dispatches through independently loaded `hid`, `display`,
+`filesystem` and `applications` boot kmodules. Userland resource contracts stay
+unchanged. The filesystem manager probes registered format backends per selected
+partition and routes mounts through a common contract; ext4 is the first real
+backend; read-only ISO9660 supplies /boot. See [filesystem contracts](kmodules/shared/filesystem.md) and
+[IO ownership](kmodules/shared/io.md).
+
+The ordinary installed [monitor app](apps/monitor/README.md) reads copied global process
+telemetry through manifest-authorized `/@applications.processes`, including
+privileged handlers. It reports scheduled process CPU time and committed user
+pages; it grants no process-control authority.
+
+Standard streams have caller-relative names `/@stdin`, `/@stdout`, `/@stderr`;
+acquisition duplicates the caller's launch-bound directional endpoint, and apps
+cannot publish these reserved names. `cb_standard` wraps named acquisition.
+Streams carry bytes independently of terminal presence. The keyboard provider
+owns exclusive focus; monitor reads /@keyboard directly while terminal readers
+park and resume without replaying application keys.
+
+The continuously running [identity provider](handlers/identity/README.md) owns
+protected binary users/groups/credentials storage, provisioned at image build.
+Its manifest-authorized management operations commit three-file transactions
+through a recoverable journal; credential records are never publicly listed.
+Kernel-owned process UID/GID and supplementary groups now inherit at launch.
+The identity provider verifies passwords, authorizes root/admin management and
+authenticates app execution through the ordinary [accounts app](apps/accounts/README.md).
+Filesystem calls enforce ownership/mode bits, including on existing file streams.
+Automatic homes, complete login sessions and live group revocation remain open.
+
+The default keyboard layout is ABNT2 (IBM remains bundled). Boot filesystem
+contents are accessible through /@filesystem at /boot: kernel.elf, cloudberry.cnf,
+kmodules, limine and EFI. The ISO root matches those paths without a nested boot/
+directory. Only a verified matching boot disk is mounted. ISO descriptor bounds
+exclude appended ext4 system data; the FAT EFI partition is not separately mounted.
+See [boot filesystem](kmodules/shared/iso9660-fs.md).

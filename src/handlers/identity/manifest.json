@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "owner_watch",
+        "credentials",
+        "identity_set",
+        "random",
+        "now_ns"
+      ]
+    },
+    {
+      "name": "/@filesystem",
+      "operations": [
+        "open",
+        "stat"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "/@identity",
+      "publish": true,
+      "operations": [
+        "info",
+        "users",
+        "groups",
+        "begin",
+        "stage",
+        "commit",
+        "abort",
+        "credential",
+        "self",
+        "authenticate",
+        "password"
+      ]
+    }
+  ]
+}

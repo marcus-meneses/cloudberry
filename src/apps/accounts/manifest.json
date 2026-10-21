@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "resources": [
+    {"name":"/@identity","operations":["info","users","groups","begin","stage","commit","abort","credential","self","authenticate","password"]},
+    {"name":"/@memory","scope":"self","operations":["allocate","free"]},
+    {"name":"/@keyboard","scope":"boot-input","operations":["read","focus_claim","focus_release"]},
+    {"name":"/@applications","operations":["launch","wait","release"]},
+    {"name":"/@streams","operations":["read","write"]}
+  ]
+}

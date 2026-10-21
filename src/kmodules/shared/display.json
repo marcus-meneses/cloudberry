@@ -1,0 +1,17 @@
+{
+  "name": "display",
+  "exports": [
+    {
+      "name": "display.init",
+      "symbol": "display_surface_init"
+    },
+    {
+      "name": "display.invoke",
+      "symbol": "display_surface_invoke"
+    },
+    {
+      "name": "display.bind",
+      "symbol": "display_surface_bind"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "applications",
+  "exports": [
+    {
+      "name": "applications.init",
+      "symbol": "applications_surface_init"
+    },
+    {
+      "name": "applications.invoke",
+      "symbol": "applications_surface_invoke"
+    },
+    {
+      "name": "applications.exit",
+      "symbol": "applications_surface_exit"
+    },
+    {
+      "name": "applications.data",
+      "symbol": "applications_surface_data"
+    },
+    {
+      "name": "applications.installations",
+      "symbol": "applications_surface_installations"
+    },
+    {
+      "name": "applications.installed_load",
+      "symbol": "applications_surface_installed_load"
+    },
+    {
+      "name": "applications.worker",
+      "symbol": "applications_surface_worker"
+    },
+    {
+      "name": "applications.info",
+      "symbol": "applications_surface_info"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
  * IDs are re-resolved after every wake: no reclaimable object pointer survives
  * the unlock/block interval. Existing scheduler wake credits close that race. */
 static struct request *owned_request(uint64_t pid,struct cb_request_id id){
-    for(struct request *r=state.requests;r;r=r->next)if(r->pid==pid && r->id.namespace_id==id.namespace_id && r->id.serial==id.serial)return r;
+    for(struct request *r=state.requests;r;r=r->next)if(!r->abandoned && r->pid==pid && r->id.namespace_id==id.namespace_id && r->id.serial==id.serial)return r;
     return NULL;
 }
 static void wait_request_changed(struct request *r){
@@ -35,7 +35,7 @@ static cb_status_t wait_scan(uint64_t pid,const struct cb_wait_item *items,size_
     return CB_OK;
 }
 static cb_status_t wait_any(struct policy *owner,const void *input,size_t bytes,uint64_t deadline,uint64_t *ready){
-    if(!bytes || bytes%sizeof(struct cb_wait_item))return CB_BAD_REQUEST;
+    if((!bytes && !deadline) || bytes%sizeof(struct cb_wait_item))return CB_BAD_REQUEST;
     struct handle_waiter waiter={.pid=owner->pid,.items=input,.count=bytes/sizeof(struct cb_wait_item)};
     uint64_t flags=lock();waiter.thread=CALL(state.control,THREAD_CURRENT,0,0).value;
     if(!waiter.thread){unlock(flags);return CB_BAD_REQUEST;}
@@ -56,5 +56,20 @@ static cb_status_t collect(struct policy *owner,struct cb_request_id id,unsigned
     if(r->failure){cb_status_t status=r->failure;unlock(flags);return status;}
     *bytes=r->reply_bytes;if(capacity<*bytes){unlock(flags);return CB_BUFFER_TOO_SMALL;}
     *out=allocate(*bytes);if(!*out){*bytes=0;unlock(flags);return CB_RESOURCE_FAILURE;}
-    copy_bytes(*out,r->reply,*bytes);struct cb_reply_header reply;copy_bytes(&reply,r->reply,sizeof(reply));unlock(flags);return reply.status;
+    copy_bytes(*out,r->reply,*bytes);unlock(flags);return CB_OK;
+}
+
+/* Remove queued work atomically with provider dispatch. Dispatched calls retain
+ * their owned payload/publication until a reply or provider death, then discard
+ * the result without allocating a new reply. The caller cannot reuse this ID. */
+static cb_status_t abandon(struct policy *owner,struct cb_request_id id,struct cb_abandon_result *result){
+    uint64_t flags=lock();struct request *r=owned_request(owner->pid,id);if(!r){unlock(flags);return CB_BAD_HANDLE;}
+    if(r->waiter){unlock(flags);return CB_BUSY;}
+    result->phase=r->completed || (!r->dispatched && r->done)?CB_REQUEST_COMPLETE:r->dispatched?CB_REQUEST_DISPATCHED:CB_REQUEST_QUEUED;
+    result->outcome=r->dispatched?CB_OUTCOME_UNKNOWN:CB_NOT_DISPATCHED;
+    if(r->reply){struct cb_reply_header h;copy_bytes(&h,r->reply,sizeof(h));result->outcome=h.outcome;}
+    wait_request_changed(r);
+    if(!r->dispatched || r->completed)drop_request(r);
+    else {r->abandoned=1;release(r->reply);r->reply=NULL;r->reply_bytes=0;r->done=0;r->failure=0;}
+    unlock(flags);return CB_OK;
 }

@@ -1,13 +1,18 @@
 # Filesystem namespace
 
 The image builder prepares this tree in the selected ext4 system volume. Boot
-never formats, migrates or creates installation directories. `/boot` here is the
-ext4 boot-completion directory; Limine's separate ISO9660/FAT boot partition
-contains the kernel, configuration and all existing foundational kmodules.
+never formats, migrates or creates installation directories. `/boot` is an empty
+mountpoint in ext4; startup mounts the verified disk's ISO9660 boot filesystem
+there read-only. Foundational modules remain boot-loaded. Future disk-loaded
+modules live under `/system/kmodules`, without a legacy boot-completion tree.
 
 ```text
 /
-├── boot/
+├── boot/                       # Read-only ISO9660 mount
+│   ├── kernel.elf
+│   ├── cloudberry.cnf
+│   ├── EFI/
+│   ├── limine/
 │   └── kmodules/
 │       ├── drivers/
 │       └── helpers/
@@ -27,6 +32,11 @@ contains the kernel, configuration and all existing foundational kmodules.
 │   │   └── helpers/
 │   ├── fonts/
 │   ├── config/
+│   │   ├── identity/
+│   │   │   ├── users.bin
+│   │   │   ├── groups.bin
+│   │   │   ├── credentials.bin
+│   │   │   └── transaction.bin
 │   │   └── keyboard/
 │   │       ├── config.cnf
 │   │       ├── ibm.keymap
@@ -43,7 +53,7 @@ contains the kernel, configuration and all existing foundational kmodules.
 └── tmp/
 ```
 
-Non-root accounts, once account provisioning exists, use:
+Once home provisioning is implemented, non-root accounts use:
 
 ```text
 /home/<user-name>/
@@ -64,8 +74,8 @@ its account area is `/system/root`, initial cwd `/`, and it has no own installed
 applications. Shared system executables live directly in `/system/apps`; private
 state (history, caches, preferences, databases, drafts) belongs in the running
 user's `<appname>.data`, including for system-provided applications. Users will
-install only for themselves. Account authentication, installers, home grants and
-per-user runtime catalogs are subsequent milestones, not supplied by this layout.
+install only for themselves. Account authentication and kernel credentials are implemented; installers,
+automatic homes/home grants and per-user catalogs remain subsequent milestones.
 
 Application filenames use catalog names without `.elf`; stable installation IDs
 remain in the authoritative catalog. Names are case-sensitive ASCII alphanumeric,
@@ -107,9 +117,8 @@ The compiler's bundle-directory staging remains an intermediate under `bin`; it
 is not copied into the guest as legacy bundle directories.
 
 Generated system inodes belong to guest UID/GID 0, independently of host ownership.
-Root account/config/data directories use mode 0700; `/tmp` uses 01777. These
-permissions are image metadata, not a claim of complete runtime POSIX access
-checks.
+Root account/config/data directories use mode 0700; `/tmp` uses 01777. Runtime filesystem calls enforce UID/GID mode bits and directory traversal;
+ACLs, setuid/setgid behavior and general POSIX compatibility remain unimplemented.
 
 The root `tmp` directory is reserved for temporary data. Rebuilding an image
 starts it empty; automatic cleanup on persistent installations and volume mount
@@ -117,3 +126,7 @@ policy are not implemented by the directory's existence.
 
 The ext4 formatter also supplies its filesystem-owned `/lost+found` recovery
 directory. It is not an application installation or a user home.
+
+Account metadata is provisioned under /system/config/identity at image-build time.
+Only the installed identity handler can access that subtree through public
+filesystem handles; management uses /@identity. See [identity](../handlers/identity/README.md).

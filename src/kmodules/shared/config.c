@@ -9,7 +9,7 @@ static const struct schema {char key[25],fallback[32];unsigned type,flags;uint64
     {.key="filesystem.writable",.fallback="false",.type=CONFIG_BOOL,.flags=DEFAULT},
     {.key="boot.show_inventory",.fallback="true",.type=CONFIG_BOOL,.flags=DEFAULT},
     {.key="drivers.modules",.fallback="",.type=CONFIG_STRING,.flags=DEFAULT},
-    {.key="drivers.directory",.fallback="/boot/kmodules/drivers",.type=CONFIG_STRING,.flags=DEFAULT},
+    {.key="drivers.directory",.fallback="/system/kmodules/drivers",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="storage.timeout_ms",.fallback="1000",.type=CONFIG_UINT,.flags=DEFAULT,.min=1,.max=UINT32_MAX},
     {.key="boot.providers",.fallback="keyboard",.type=CONFIG_STRING,.flags=DEFAULT},
     {.key="drivers.partition_guid",.type=CONFIG_GUID}

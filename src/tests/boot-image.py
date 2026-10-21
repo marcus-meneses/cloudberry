@@ -22,7 +22,7 @@ def check(image):
         temporary = pathlib.Path(temporary)
         config = temporary / 'cloudberry.cnf'
         subprocess.run(['xorriso', '-osirrox', 'on', '-indev', str(image), '-extract',
-                        '/boot/cloudberry.cnf', str(config)], check=True, capture_output=True)
+                        '/cloudberry.cnf', str(config)], check=True, capture_output=True)
         values = builder.config_values(config)
         guid = uuid.UUID(values['drivers.partition_guid'])
         partitions = builder.partitions(image)

@@ -66,8 +66,19 @@ static int installations(uint64_t filesystem){
     const struct config_value *base=config("config.drivers.directory",CONFIG_STRING);if(!base)return 0;
     size_t bytes=0;void *catalog=file(filesystem,"/system/state/installed.bin",&bytes);
     if(!catalog)return 1; /* Trusted low-level fixture/provider loading remains available. */
-    kernel_surface_call install=kernel_surface_find(apps.hub,"io.installations");
-    if(!install || !cb_install_valid(catalog,bytes) || CALL(install,filesystem,catalog,bytes).status){release(catalog);return 0;}apps.catalog=catalog;return 1;
+    kernel_surface_call install=kernel_surface_find(apps.hub,"applications.installations");
+    kernel_surface_call adopt=kernel_surface_find(apps.hub,"filesystem.adopt"),backend=kernel_surface_find(apps.hub,"ext4_fs.fs_backend");
+    struct kernel_surface_result mount=adopt && backend?adopt((uintptr_t)backend,filesystem,(uintptr_t)"/",0,0,0):module_result(0,0);
+    if(!install || !cb_install_valid(catalog,bytes) || mount.status){release(catalog);return 0;}
+    /* The selected system volume is not evidence of boot provenance by itself.
+     * Mount only when Limine's disk identity matches the retained parent. */
+    struct bootstrap_info volume;struct kernel_surface_result known=bootstrap_surface_info((uintptr_t)&volume,0,0,0,0,0);
+    if(!known.status && volume.state==BOOTSTRAP_READY && volume.origin==BOOTSTRAP_ORIGIN_MATCH){
+        kernel_surface_call attach=kernel_surface_find(apps.hub,"filesystem.mount");
+        struct kernel_surface_result boot=attach?attach((uintptr_t)&volume.disk,(uintptr_t)"/boot",0,0,0,0):module_result(0,0);
+        if(boot.status){release(catalog);return 0;}
+    }else {kernel_surface_call log=kernel_surface_find(apps.hub,"hardware.log");static const char message[]="bootstrap: boot filesystem not mounted; boot disk identity unverified\n";if(log)CALL(log,message,sizeof(message)-1,0);}
+    if(install(filesystem,(uintptr_t)catalog,bytes,mount.value,0,0).status){release(catalog);return 0;}apps.catalog=catalog;return 1;
 }
 static struct kernel_surface_result launch(uint64_t filesystem,const char *bundle){
     if(!installations(filesystem) || !bundle || !pd_path(bundle,1))return module_result(0,0);
@@ -89,7 +100,7 @@ static struct kernel_surface_result launch(uint64_t filesystem,const char *bundl
     error=4;struct cb_install_record installed;const unsigned char *installed_name=apps.catalog?cb_install_find(apps.catalog,bundle,length(bundle),NULL,&installed):NULL;
     if(installed_name){
         if((installed.flags!=CB_INSTALL_PROVIDER && installed.flags!=CB_INSTALL_MANAGER) || installed.cpu!=d.cpu || installed.stack_bytes!=d.stack_bytes || !cb_install_equal(installed.installation,d.identity,16) || installed.path_bytes!=length(program) || !cb_install_equal(installed_name+installed.name_bytes,program,installed.path_bytes) || installed.manifest_bytes!=manifest_bytes || !cb_install_equal(installed_name+installed.name_bytes+installed.path_bytes,manifest,manifest_bytes))goto done;
-        kernel_surface_call installed_load=kernel_surface_find(apps.hub,"io.installed_load");if(!installed_load)goto done;boot_trace("process",bundle);struct kernel_surface_result loaded=CALL(installed_load,bundle,packet,packet_bytes);boot_trace("process_done",bundle);pid=loaded.value;if(loaded.status)goto done;
+        kernel_surface_call installed_load=kernel_surface_find(apps.hub,"applications.installed_load");if(!installed_load)goto done;boot_trace("process",bundle);struct kernel_surface_result loaded=CALL(installed_load,bundle,packet,packet_bytes);boot_trace("process_done",bundle);pid=loaded.value;if(loaded.status)goto done;
     }else{
         struct process_request request={.abi=2,.cpu=d.cpu,.filesystem=filesystem,.path=program,.stack_bytes=d.stack_bytes,.startup=packet,.startup_bytes=packet_bytes};struct kernel_surface_result loaded=CALL(apps.load,&request,0,0);pid=loaded.value;if(loaded.status)goto done;
         error=5;struct handle_policy policy={.process=pid,.manifest=manifest,.bytes=manifest_bytes};copy(policy.identity.installation_id,d.identity,16);

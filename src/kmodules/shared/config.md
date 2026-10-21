@@ -23,7 +23,7 @@ is accepted. Type definitions, defaults and ranges belong to the module schema.
 | `version` | unsigned integer | Required; exactly `1` |
 | `filesystem.writable` | boolean | `false` schema fallback; boot file selects `true`; writable mounting also requires writable media |
 | `boot.show_inventory` | boolean | `true`; controls the core's hardware inventory dump |
-| `drivers.directory` | string | `/boot/kmodules/drivers`; selected module/handler bundle directory |
+| `drivers.directory` | string | `/system/kmodules/drivers`; selected module/handler bundle directory |
 | `drivers.modules` | string | Empty; explicit comma-separated future kmodule basenames |
 | `boot.providers` | string | `keyboard`; comma-separated provider bundle basenames in startup/readiness order; empty starts none |
 | `storage.timeout_ms` | unsigned integer | `1000`, range 1–4294967295; BOT command deadline in usb-storage; future consumers may also use it |

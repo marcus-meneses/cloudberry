@@ -17,7 +17,7 @@ shutil.copytree(build/'src-iso-root',stage)
 for name in ('nvme.img','sata.img'):
     with (test/name).open('wb') as output: output.truncate(1024**3)
 for scenario,vector in ((1,6),(2,14),(3,8)):
-    shutil.copyfile(build/f'tests/src-fault-{scenario}.elf',stage/'boot/kernel.elf')
+    shutil.copyfile(build/f'tests/src-fault-{scenario}.elf',stage/'kernel.elf')
     iso=test/f'fault-{scenario}.iso'
     subprocess.run([sys.executable,str(root/'src/tools/build-boot-image.py'),str(stage),str(iso)],
                    check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

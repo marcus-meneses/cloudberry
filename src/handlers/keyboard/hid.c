@@ -34,7 +34,11 @@ void keyboard_reset(struct keyboard_hid *s,keyboard_emit emit,void *context){uin
 int keyboard_report(struct keyboard_hid *s,const struct keyboard_layout *layout,const uint8_t report[8],keyboard_emit emit,void *context){
     if(report[1]){keyboard_reset(s,emit,context);return 0;}uint8_t next[256]={0};for(unsigned i=0;i<8;++i)next[224+i]=!!(report[0]&(1u<<i));
     for(unsigned i=2;i<8;++i){if((report[i]>0 && report[i]<4) || report[i]>=224){keyboard_reset(s,emit,context);return 0;}if(report[i])next[report[i]]=1;}
-    s->modifiers=report[0];for(unsigned order=0;order<2;++order)for(unsigned direction=0;direction<2;++direction)for(unsigned i=order?4:224;i<(order?224:232);++i){
+    return keyboard_pressed(s,layout,next,emit,context);
+}
+int keyboard_pressed(struct keyboard_hid *s,const struct keyboard_layout *layout,const uint8_t next[256],keyboard_emit emit,void *context){
+    s->modifiers=0;for(unsigned i=0;i<8;++i)if(next[224+i])s->modifiers|=1u<<i;
+for(unsigned order=0;order<2;++order)for(unsigned direction=0;direction<2;++direction)for(unsigned i=order?4:224;i<(order?224:232);++i){
         if(!direction && s->pressed[i] && !next[i]){s->pressed[i]=0;emit(context,CB_KEY_UP,i,0,s->modifiers,0,0);if(s->repeat_key==i)s->repeat_key=0;}
         else if(direction && !s->pressed[i] && next[i]){s->pressed[i]=1;uint64_t origin=emit(context,CB_KEY_DOWN,i,0,s->modifiers,0,0);s->origin[i]=origin;if(i==57)s->caps^=1;if(i<224){if(i!=57 && i!=71 && i!=83)s->repeat_key=i;text(s,layout,i,origin,0,emit,context);}}
     }

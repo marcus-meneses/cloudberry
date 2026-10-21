@@ -5,7 +5,7 @@ root=pathlib.Path(__file__).resolve().parents[2]
 build=root/'bin/tests/isolated/tests';build.mkdir(parents=True,exist_ok=True)
 exe=build/'src-storage-fs'
 with tempfile.TemporaryDirectory(prefix='ext4-',dir=build) as temporary:
-    work=pathlib.Path(temporary);source=work/'root';drivers=source/'boot/kmodules/drivers';drivers.mkdir(parents=True)
+    work=pathlib.Path(temporary);source=work/'root';drivers=source/'system/kmodules/drivers';drivers.mkdir(parents=True)
     (drivers/'probe.bin').write_bytes(bytes((i*37+11)%256 for i in range(16384)))
     with (drivers/'fragment.bin').open('wb') as f:
         for i in range(80):
@@ -24,5 +24,5 @@ with tempfile.TemporaryDirectory(prefix='ext4-',dir=build) as temporary:
         with disk.open('r+b') as out,fs.open('rb') as data:
             out.seek(1024**2)
             while chunk:=data.read(1024**2):out.write(chunk)
-        subprocess.run([str(exe),str(disk),guid.bytes_le.hex(),'/boot/kmodules/drivers'],check=True)
+        subprocess.run([str(exe),str(disk),guid.bytes_le.hex(),'/system/kmodules/drivers'],check=True)
 print('PASS ext4 block geometries: 1/2/4 KiB, generated independently by mke2fs')

@@ -29,6 +29,7 @@ HWENUM_MODULE := $(BUILD)/kmodules/hwenum.kmod
 INTHANDLE_MODULE := $(BUILD)/kmodules/inthandle.kmod
 EVENT_MODULE := $(BUILD)/kmodules/event.kmod
 IO_MODULE := $(BUILD)/kmodules/io.kmod
+IO_BACKENDS := $(addprefix $(BUILD)/kmodules/,hid.kmod display.kmod filesystem.kmod applications.kmod)
 HANDLES_MODULE := $(BUILD)/kmodules/handles.kmod
 PROCESS_MODULE := $(BUILD)/kmodules/process.kmod
 THREADS_MODULE := $(BUILD)/kmodules/threads.kmod
@@ -38,6 +39,7 @@ SATA_MODULE := $(BUILD)/kmodules/sata.kmod
 NVME_MODULE := $(BUILD)/kmodules/nvme.kmod
 USB_STORAGE_MODULE := $(BUILD)/kmodules/usb-storage.kmod
 PARTITION_MODULE := $(BUILD)/kmodules/partition.kmod
+ISO9660_FS_MODULE := $(BUILD)/kmodules/iso9660-fs.kmod
 EXT4_FS_MODULE := $(BUILD)/kmodules/ext4-fs.kmod
 BOOTSTRAP_MODULE := $(BUILD)/kmodules/bootstrap.kmod
 CONFIG_MODULE := $(BUILD)/kmodules/config.kmod
@@ -129,26 +131,26 @@ $(BUILD)/src-image-inputs: FORCE
 $(KERNEL): $(OBJECTS) boot/linker.ld $(BUILD)/src-kernel-inputs Makefile
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/filesystem-tree.py tools/stage-kmodules.py
+$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/filesystem-tree.py tools/stage-kmodules.py
 	rm -rf $(STAGE)
-	mkdir -p $(STAGE)/boot/limine $(STAGE)/boot/kmodules/drivers $(STAGE)/boot/kmodules/helpers $(STAGE)/EFI/BOOT
-	cp $(KERNEL) $(STAGE)/boot/kernel.elf
-	cp $(BUILD)/kmodules/xstate.kmod $(BACKENDS) $(STAGE)/boot/kmodules/
-	cp $(MEM_MODULE) $(STAGE)/boot/kmodules/mem.kmod
-	cp $(HWENUM_MODULE) $(STAGE)/boot/kmodules/hwenum.kmod
-	cp $(INTHANDLE_MODULE) $(STAGE)/boot/kmodules/inthandle.kmod
-	cp $(SCHEDULER_MODULE) $(STAGE)/boot/kmodules/scheduler.kmod
-	cp $(MMIO_MODULE) $(STAGE)/boot/kmodules/mmio.kmod
-	cp $(CLOCK_MODULE) $(STAGE)/boot/kmodules/clock.kmod
-	cp $(TIMER_MODULE) $(STAGE)/boot/kmodules/timer.kmod
-	cp $(APIC_MODULE) $(STAGE)/boot/kmodules/apic.kmod
-	cp $(IO_MODULE) $(HANDLES_MODULE) $(PROCESS_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/boot/kmodules/
-	cp $(EVENT_MODULE) $(STAGE)/boot/kmodules/event.kmod
-	cp $(SPLASH_MODULE) $(STAGE)/boot/kmodules/splash.kmod
-	python3 tools/stage-kmodules.py $(STAGE)/boot/kmodules
-	cp boot/cloudberry.cnf $(STAGE)/boot/cloudberry.cnf
-	cp boot/limine.conf $(STAGE)/boot/limine/limine.conf
-	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/boot/limine/
+	mkdir -p $(STAGE)/limine $(STAGE)/kmodules/drivers $(STAGE)/kmodules/helpers $(STAGE)/EFI/BOOT
+	cp $(KERNEL) $(STAGE)/kernel.elf
+	cp $(BUILD)/kmodules/xstate.kmod $(BACKENDS) $(STAGE)/kmodules/
+	cp $(MEM_MODULE) $(STAGE)/kmodules/mem.kmod
+	cp $(HWENUM_MODULE) $(STAGE)/kmodules/hwenum.kmod
+	cp $(INTHANDLE_MODULE) $(STAGE)/kmodules/inthandle.kmod
+	cp $(SCHEDULER_MODULE) $(STAGE)/kmodules/scheduler.kmod
+	cp $(MMIO_MODULE) $(STAGE)/kmodules/mmio.kmod
+	cp $(CLOCK_MODULE) $(STAGE)/kmodules/clock.kmod
+	cp $(TIMER_MODULE) $(STAGE)/kmodules/timer.kmod
+	cp $(APIC_MODULE) $(STAGE)/kmodules/apic.kmod
+	cp $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) $(STAGE)/kmodules/
+	cp $(EVENT_MODULE) $(STAGE)/kmodules/event.kmod
+	cp $(SPLASH_MODULE) $(STAGE)/kmodules/splash.kmod
+	python3 tools/stage-kmodules.py $(STAGE)/kmodules
+	cp boot/cloudberry.cnf $(STAGE)/cloudberry.cnf
+	cp boot/limine.conf $(STAGE)/limine/limine.conf
+	cp $(LIMINE_DIR)/limine-uefi-cd.bin $(STAGE)/limine/
 	cp $(LIMINE_DIR)/BOOTX64.EFI $(STAGE)/EFI/BOOT/
 	python3 tools/build-boot-image.py "$(STAGE)" "$@" --drivers-mib=$(BOOT_DRIVERS_MIB) $(if $(strip $(BOOT_DRIVERS_SOURCE)),--drivers-source="$(BOOT_DRIVERS_SOURCE)",)
 
@@ -170,6 +172,11 @@ debug: build
 clean:
 	rm -f $(BUILD)/src-*.o $(BUILD)/src-*.d $(BUILD)/src-logo.rgb $(KERNEL) $(ISO)
 	rm -rf $(BUILD)/kmodules $(STAGE) $(ISO).parts
+
+# Only disposable media inside workspace bin/tests; candidate and persistent disks stay outside.
+.PHONY: clean-tests
+clean-tests:
+	python3 tools/clean-tests.py
 
 # Native debug object for the standalone allocator; the loaded module uses PIC below.
 $(BUILD)/kmodules/mem.o: kmodules/shared/mem.c kmodules/shared/mem.h | check-tools
@@ -980,18 +987,30 @@ test-manifest:
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/manifest.c -o $(BUILD)/tests/manifest
 	$(BUILD)/tests/manifest
 
-$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-console-pic.o $(BUILD)/kmodules/io-process-pic.o $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
+$(BUILD)/kmodules/io.elf: $(BUILD)/kmodules/io-pic.o $(BUILD)/kmodules/io.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/kmodules/hid.elf: $(BUILD)/kmodules/hid-report-pic.o $(BUILD)/kmodules/hid-pic.o $(BUILD)/kmodules/hid-reports-pic.o $(BUILD)/kmodules/hid.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/display.elf: $(BUILD)/kmodules/display-pic.o $(BUILD)/kmodules/display.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/filesystem.elf: $(BUILD)/kmodules/filesystem-pic.o $(BUILD)/kmodules/filesystem.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+$(BUILD)/kmodules/applications.elf: $(BUILD)/kmodules/applications-pic.o $(BUILD)/kmodules/applications.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
 .PHONY: test-handles
 test-handles:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
 	$(BUILD)/tests/handles
 
-$(BUILD)/apps/keyboard.elf: interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
+$(BUILD)/apps/keyboard.elf: handlers/keyboard/report.c handlers/keyboard/report.h common/hid-report.c common/hid-report.h interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd)) $(foreach p,terminal echo cat ls pwd,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem)) $(foreach p,display graphics text filesystem,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/report.c common/hid-report.c sdk/system.c -o $@
+$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts)) $(foreach p,terminal echo cat ls pwd monitor accounts,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity)) $(foreach p,display graphics text filesystem mouse identity,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
@@ -1000,8 +1019,9 @@ $(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf
 	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
 	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
 	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
-	$(foreach p,display graphics text filesystem,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
-	$(foreach p,terminal echo cat ls pwd,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,display graphics text filesystem mouse identity,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	cp handlers/identity/crypto/vendor/LICENSE $(BUILD)/src-handler-bundles/identity/THIRD-PARTY-LICENSE.txt
+	$(foreach p,terminal echo cat ls pwd monitor accounts,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
 	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
 	python3 tools/build-initial.py terminal $(BUILD)/src-handler-bundles/applications/initial.bin
@@ -1013,16 +1033,16 @@ test-keyboard:
 	$(BUILD)/tests/keyboard handlers/keyboard/layouts/ibm.json handlers/keyboard/layouts/abnt2.json
 	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/keyboard-stream.c handlers/keyboard/hid.c -o $(BUILD)/tests/keyboard-stream
 	$(BUILD)/tests/keyboard-stream
-	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -Wl,--gc-sections tests/io-keyboard-failure.c -o $(BUILD)/tests/io-keyboard-failure
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -Wl,--gc-sections tests/io-keyboard-failure.c common/hid-report.c -o $(BUILD)/tests/io-keyboard-failure
 	$(BUILD)/tests/io-keyboard-failure
 
 $(BUILD)/tests/apps/keyboard-client.elf: tests/apps/keyboard-client.c sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-client.c sdk/system.c -o $@
 
-$(BUILD)/tests/apps/keyboard-fault.elf: interfaces/admission.h interfaces/startup.h tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
+$(BUILD)/tests/apps/keyboard-fault.elf: handlers/keyboard/report.c handlers/keyboard/report.h common/hid-report.c common/hid-report.h interfaces/admission.h interfaces/startup.h tests/apps/keyboard-fault.c handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h sdk/system.c sdk/system.h interfaces/keyboard.h sdk/application.ld
 	@mkdir -p $(@D)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-fault.c handlers/keyboard/hid.c sdk/system.c -o $@
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld tests/apps/keyboard-fault.c handlers/keyboard/hid.c handlers/keyboard/report.c common/hid-report.c sdk/system.c -o $@
 
 $(BUILD)/tests/apps/handle-bench.elf: tests/apps/handle-bench.c tests/handle-bench.h sdk/system.c sdk/system.h interfaces/handle.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
@@ -1081,23 +1101,25 @@ _test-process-boot: $(BUILD)/tests/apps/application-runtime.elf
 .PHONY: test-installations
 test-installations:
 	@mkdir -p $(BUILD)/tests
-	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/installation-contract.c kmodules/shared/io-console.c -o $(BUILD)/tests/installation-contract
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/installation-contract.c -o $(BUILD)/tests/installation-contract
 	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests
 
 # Application-facing rendering providers (independent replaceable contracts).
-CONSOLE_PROVIDERS := display graphics text filesystem
+CONSOLE_PROVIDERS := display graphics text filesystem mouse identity
 CONSOLE_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(CONSOLE_PROVIDERS)))
+IDENTITY_CRYPTO := handlers/identity/crypto/password.c handlers/identity/crypto/strings.c handlers/identity/crypto/vendor/source/sha256.c handlers/identity/crypto/vendor/source/utils.c
+IDENTITY_CRYPTO_FLAGS := -Ihandlers/identity/crypto/vendor/include -Ihandlers/identity/crypto/compat -fno-builtin
 define CONSOLE_RULE
 $(BUILD)/apps/$(1).elf: handlers/$(1)/$(1).c
 	@mkdir -p $$(@D)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) sdk/system.c -o $$@
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) $(if $(filter mouse,$(1)),handlers/mouse/hid.c common/hid-report.c) $(if $(filter identity,$(1)),handlers/identity/format.c handlers/identity/store.c $(IDENTITY_CRYPTO) $(IDENTITY_CRYPTO_FLAGS)) sdk/system.c -o $$@
 endef
 $(foreach p,$(CONSOLE_PROVIDERS),$(eval $(call CONSOLE_RULE,$(p))))
 $(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wildcard interfaces/*.h) handlers/graphics/font.h
 
 $(BUILD)/apps/graphics.elf: handlers/graphics/raster.c handlers/graphics/raster.h handlers/graphics/glyphs.h
 
-SHELL_APPS := terminal echo cat ls pwd
+SHELL_APPS := terminal echo cat ls pwd monitor accounts
 SHELL_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(SHELL_APPS)))
 define SHELL_RULE
 $(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/application.h sdk/system.c $(wildcard interfaces/*.h)
@@ -1105,7 +1127,7 @@ $(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/applicat
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< sdk/system.c -o $$@
 endef
 $(foreach p,$(SHELL_APPS),$(eval $(call SHELL_RULE,$(p))))
-$(BUILD)/apps/terminal.elf: apps/terminal/parser.h
+$(BUILD)/apps/terminal.elf: apps/terminal/parser.h apps/terminal/editor.h apps/terminal/editing.inc
 
 .PHONY: test-console-host
 test-console-host:
@@ -1166,3 +1188,94 @@ test-waitset:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/waitset.c -o $(BUILD)/tests/waitset
 	$(BUILD)/tests/waitset
+
+.PHONY: test-terminal-editor
+test-terminal-editor:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/terminal-editor.c -o $(BUILD)/tests/terminal-editor
+	$(BUILD)/tests/terminal-editor
+
+$(BUILD)/apps/mouse.elf: handlers/mouse/hid.c handlers/mouse/hid.h
+.PHONY: test-mouse-hid
+test-mouse-hid:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/mouse-hid.c handlers/mouse/hid.c common/hid-report.c -o $(BUILD)/tests/mouse-hid
+	$(BUILD)/tests/mouse-hid
+.PHONY: test-usb-endpoints
+test-usb-endpoints:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/usb-endpoints.c kmodules/shared/usb-descriptors.c -o $(BUILD)/tests/usb-endpoints
+	$(BUILD)/tests/usb-endpoints
+$(BUILD)/tests/apps/mouse-check.elf: tests/apps/mouse-check.c sdk/service.h sdk/stream.h sdk/system.c $(wildcard interfaces/*.h) sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+.PHONY: test-hid-io
+test-hid-io:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/io-hid.c common/hid-report.c -o $(BUILD)/tests/io-hid
+	$(BUILD)/tests/io-hid
+
+.PHONY: test-filesystem-backends
+test-filesystem-backends:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/filesystem-backends.c -o $(BUILD)/tests/filesystem-backends
+	$(BUILD)/tests/filesystem-backends
+
+$(BUILD)/kmodules/hid-report-pic.o: common/hid-report.c common/hid-report.h $(MODULE_HEADERS)
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+.PHONY: test-hid-demux
+test-hid-demux:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/hid-demux.c common/hid-report.c handlers/keyboard/report.c handlers/mouse/hid.c -o $(BUILD)/tests/hid-demux
+	$(BUILD)/tests/hid-demux
+
+$(BUILD)/apps/mouse.elf: common/hid-report.c common/hid-report.h
+
+$(BUILD)/apps/monitor.elf: apps/monitor/model.h interfaces/text.h interfaces/io.h
+
+.PHONY: test-monitor-accounting
+test-monitor-accounting:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/monitor-accounting.c -o $(BUILD)/tests/src-monitor-accounting
+	$(BUILD)/tests/src-monitor-accounting
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/process-samples.c -Wl,--gc-sections -o $(BUILD)/tests/src-process-samples
+	$(BUILD)/tests/src-process-samples
+
+$(BUILD)/apps/identity.elf: $(IDENTITY_CRYPTO) handlers/identity/auth.inc handlers/identity/crypto/password.h handlers/identity/format.c interfaces/identity-format.h handlers/identity/store.c handlers/identity/store.h
+
+.PHONY: test-identity
+test-identity:
+	@mkdir -p $(BUILD)/tests/identity
+	python3 tests/identity.py $(BUILD)/tests/identity
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/identity-store.c handlers/identity/format.c handlers/identity/store.c -o $(BUILD)/tests/identity-store
+	$(BUILD)/tests/identity-store $(BUILD)/tests/identity/system/config/identity
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/identity-transactions.c handlers/identity/format.c handlers/identity/store.c -Wl,--gc-sections -o $(BUILD)/tests/identity-transactions
+	$(BUILD)/tests/identity-transactions $(BUILD)/tests/identity/system/config/identity
+
+$(BUILD)/tests/apps/identity-check.elf: tests/apps/identity-check.c interfaces/identity-format.h $(wildcard interfaces/*.h) sdk/service.h sdk/stream.h sdk/system.h sdk/system.c sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+.PHONY: test-credentials
+test-credentials:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/process-credentials.c -Wl,--gc-sections -o $(BUILD)/tests/process-credentials
+	$(BUILD)/tests/process-credentials
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/io-credentials.c -Wl,--gc-sections -o $(BUILD)/tests/io-credentials
+	$(BUILD)/tests/io-credentials
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared handlers/identity/crypto/password.c handlers/identity/crypto/vendor/source/sha256.c handlers/identity/crypto/vendor/source/utils.c -Ihandlers/identity/crypto/vendor/include -o $(BUILD)/tests/password.so
+	python3 tests/password.py $(BUILD)/tests/password.so
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/filesystem-permissions.c -Wl,--gc-sections -o $(BUILD)/tests/filesystem-permissions
+	$(BUILD)/tests/filesystem-permissions
+
+$(BUILD)/kmodules/iso9660-fs.elf: $(BUILD)/kmodules/iso9660-fs-pic.o $(BUILD)/kmodules/iso9660-fs.exports.o kmodules/shared/module.ld
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+
+.PHONY: test-iso9660
+test-iso9660: $(ISO)
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/iso9660.c -o $(BUILD)/tests/iso9660
+	$(BUILD)/tests/iso9660 $(ISO)

@@ -83,3 +83,28 @@ requests are idempotent; running memory/stack state remains owned until normal
 exit and explicit reap. It never force-unwinds a kernel or provider thread.
 The kernel caller owns retry/restart policy and must reap an old process before
 loading a fresh identity; no automatic capability rebind is implied.
+
+`process.sample(query,out)` is the trusted read-only telemetry surface. It copies
+one PID-ordered record through a fixed sweep ceiling, excludes records being
+reaped, and reports thread accounting plus committed user page bytes. The
+applications backend exposes this only to the installed application manager;
+its userland provider publishes manifest-authorized `processes` for monitors.
+It does not grant launch/stop/reap rights or expose kernel pointers. Sweeps are
+bounded but are not atomic snapshots across process lifecycle changes.
+
+## User credentials
+
+`process.credentials` is a trusted kernel-only surface. Each process owns a
+UID/primary GID/generation header and dynamically allocated supplementary GIDs.
+Boot-loaded processes explicitly start as UID/GID 0. The application launcher
+copies the authenticated owner's snapshot into each READY child before start;
+child and parent allocations are independent. Failed inheritance prevents launch.
+Cleanup releases supplementary group storage.
+
+The installed identity provider alone can request replacement through IO after
+password verification. No ordinary process gate accepts a credential setter.
+Replacement affects the requesting process and future descendants, never its
+parent or existing children. Other callers may query only their own snapshot.
+The filesystem and identity provider read this kernel-owned identity for policy.
+Processes retain supplementary group snapshots until authentication/replacement
+or exit; database edits do not silently rewrite running identities.

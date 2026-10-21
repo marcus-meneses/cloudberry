@@ -6,7 +6,7 @@
 #define CB_REQUIRE(x) do {if(!(x))cb_exit(__LINE__);}while(0)
 static inline size_t cb_length(const char *s){size_t n=0;while(s[n])++n;return n;}
 static inline void cb_copy(void *d,const void *s,size_t n){cb_startup_copy(d,s,n);}
-struct cb_client {unsigned char frame[CB_FRAME_LIMIT],result[CB_FRAME_LIMIT];uint64_t bytes,attempt;struct cb_request_id pending;cb_handle_t pending_handle;};
+struct cb_client {unsigned char frame[CB_FRAME_LIMIT],result[CB_FRAME_LIMIT];uint64_t bytes,attempt;struct cb_request_id pending;cb_handle_t pending_handle;unsigned collected;};
 static inline cb_status_t cb_invoke(struct cb_client *c,cb_handle_t handle,struct cb_interface_id interface,unsigned op,const void *p,size_t n,uint64_t deadline){
     if(n>CB_FRAME_LIMIT-sizeof(struct cb_call_header)-512)return CB_BAD_REQUEST;
     struct cb_call_header h=cb_call(handle,interface,op,n);h.deadline_ns=deadline;if(c->pending.serial){struct cb_call_header previous;cb_copy(&previous,c->frame,sizeof(previous));if(c->pending_handle!=handle || previous.operation!=op || previous.payload_bytes!=n)return CB_BUSY;for(size_t i=0;i<sizeof(interface);++i)if(previous.interface.bytes[i]!=interface.bytes[i])return CB_BUSY;for(size_t i=0;i<n;++i)if(c->frame[sizeof(h)+i]!=((const unsigned char *)p)[i])return CB_BUSY;h.request=c->pending;h.attempt=c->attempt+1;c->attempt=h.attempt;}cb_copy(c->frame,&h,sizeof(h));cb_copy(c->frame+sizeof(h),p,n);
@@ -23,15 +23,25 @@ static inline cb_status_t cb_submit(struct cb_client *c,cb_handle_t handle,struc
     if(n>CB_FRAME_LIMIT-sizeof(struct cb_call_header)-512)return CB_BAD_REQUEST;
     struct cb_call_header h=cb_call(handle,interface,op,n);cb_copy(c->frame,&h,sizeof(h));cb_copy(c->frame+sizeof(h),p,n);
     struct cb_request_id id={0};cb_status_t status=cb_system_submit(c->frame,sizeof(h)+n,&id);
-    if(!status){c->pending=id;c->pending_handle=handle;c->attempt=0;}return status;
+    if(!status){c->pending=id;c->pending_handle=handle;c->attempt=0;c->bytes=0;c->collected=0;}return status;
 }
 static inline cb_status_t cb_collect(struct cb_client *c){
+    c->collected=0;c->bytes=0;
     if(!c->pending.serial)return CB_BAD_REQUEST;
     cb_status_t status=cb_system_collect(c->pending,c->result,sizeof(c->result),&c->bytes);
-    if(status==CB_WOULD_BLOCK || status==CB_BUFFER_TOO_SMALL || c->bytes<sizeof(struct cb_reply_header))return status;
+    if(status!=CB_OK)return status;
+    if(c->bytes<sizeof(struct cb_reply_header))return CB_BAD_REQUEST;
+    struct cb_reply_header reply;cb_copy(&reply,c->result,sizeof(reply));
+    if(c->bytes<sizeof(reply) || reply.version.bytes!=sizeof(reply) || reply.version.major!=1 || reply.request.namespace_id!=c->pending.namespace_id || reply.request.serial!=c->pending.serial || reply.status>=CB_STATUS_COUNT || !cb_frame_fits(sizeof(reply),reply.result_bytes,reply.error_bytes,c->bytes) || sizeof(reply)+reply.result_bytes+reply.error_bytes!=c->bytes)return CB_BAD_REQUEST;
+    c->collected=1;status=reply.status;
     cb_status_t forgotten=cb_system_request_release(c->pending);
     if(forgotten==CB_OK)c->pending=(struct cb_request_id){0};
     return forgotten!=CB_OK?forgotten:status;
+}
+static inline cb_status_t cb_abandon(struct cb_client *c,struct cb_abandon_result *result){
+    if(!c->pending.serial)return CB_BAD_REQUEST;
+    cb_status_t status=cb_system_abandon(c->pending,result);
+    if(!status){c->pending=(struct cb_request_id){0};c->pending_handle=0;c->bytes=0;c->collected=0;}return status;
 }
 static inline void *cb_result(struct cb_client *c){return c->result+sizeof(struct cb_reply_header);}
 static inline cb_handle_t cb_acquire(const char *name,struct cb_interface_id id){cb_handle_t h=0;CB_REQUIRE(cb_system_get_handle(name,cb_length(name),&id,1,0,&h)==CB_OK);return h;}

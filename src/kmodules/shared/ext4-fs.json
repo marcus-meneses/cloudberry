@@ -19,7 +19,11 @@
     },
     {
       "name": "ext4_fs.stat",
-      "symbol": "ext4_fs_surface_stat"
+      "symbol": "ext4_fs_surface_stat",
+      "version": [
+        1,
+        1
+      ]
     },
     {
       "name": "ext4_fs.read",
@@ -48,6 +52,14 @@
     {
       "name": "ext4_fs.disconnect",
       "symbol": "ext4_fs_surface_disconnect"
+    },
+    {
+      "name": "ext4_fs.fs_backend",
+      "symbol": "ext4_fs_surface_backend"
+    },
+    {
+      "name": "ext4_fs.backend_invoke",
+      "symbol": "ext4_fs_surface_backend_invoke"
     }
   ]
 }

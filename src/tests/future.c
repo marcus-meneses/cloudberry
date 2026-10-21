@@ -27,7 +27,7 @@ struct kernel_surface_result future_test(MODULE_ARGS){
     kernel_surface_call alloc=kernel_surface_find(hub,"mem.calloc"),free=kernel_surface_find(hub,"mem.free"),stat=kernel_surface_find(hub,"ext4_fs.stat"),read=kernel_surface_find(hub,"ext4_fs.read"),load=kernel_surface_find(hub,"kernel.module_load"),owner=kernel_surface_find(hub,"hub.owner_control");
 #define CHECK(x) do{if(!(x)){line=__LINE__;goto done;}}while(0)
     struct bootstrap_info info;CHECK(!CALL(kernel_surface_find(hub,"bootstrap.info"),&info,0,0).status);
-    const char *path="/boot/kmodules/drivers/future-fail.kmod";struct ext4_stat st;CHECK(!CALL(stat,info.filesystem.cookie,path,&st).status);
+    const char *path="/system/kmodules/drivers/future-fail.kmod";struct ext4_stat st;CHECK(!CALL(stat,info.filesystem.cookie,path,&st).status);
     struct kernel_surface_result memory=CALL(alloc,copied.heap,1,st.bytes);CHECK(!memory.status);image=(void *)memory.value;
     CHECK(!read(info.filesystem.cookie,(uintptr_t)path,0,(uintptr_t)image,st.bytes,0).status);
     struct module_requirement wrong={.name="future.value",.major=1,.minor=3};struct module_load_request request={.abi=1,.image=image,.bytes=st.bytes,.name="future-copy",.init="future_fail.init",.requirements=&wrong,.requirement_count=1};struct module_load_result result;

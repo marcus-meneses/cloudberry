@@ -5,7 +5,7 @@ It derives columns and rows from actual pixel dimensions with 8×16 cells:
 1280×800 yields 160×50. No fixed terminal column count is required.
 
 Operations report dimensions/cursor, clear, write a UTF-8 byte sequence, or draw
-an absolute positioned cell. UTF-8 decoding and control characters (newline, CR,
+an absolute positioned cell, or set the sequential cursor within the grid. UTF-8 decoding and control characters (newline, CR,
 backspace) belong here. Invalid sequences become replacement characters. The
 terminal encodes keyboard text events as UTF-8 and does not interpret a codepage.
 The graphics font currently renders printable ASCII and substitutes other glyphs.
@@ -25,3 +25,9 @@ graphics/display round trip per character within a multi-character text write.
 
 Isolated one/four-CPU console acceptance uses this provider for keyboard echo,
 stdout/stderr, cwd prompts and error output at the actual 160×50 boot grid.
+
+The appended `cursor` operation takes `cb_text_cursor {column,row}`. It validates
+both coordinates before changing state, resets any incomplete UTF-8 sequence and
+does not draw or scroll. Existing operation numbers and CELL semantics are
+unchanged. This primitive supports application-owned editing; text contains no
+command history, filesystem completion or terminal key bindings.

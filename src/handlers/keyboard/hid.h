@@ -7,6 +7,7 @@ struct keyboard_hid {uint8_t pressed[256],modifiers,caps;uint16_t repeat_key;uin
 typedef uint64_t (*keyboard_emit)(void *,uint32_t,uint16_t,uint32_t,uint32_t,uint64_t,uint32_t);
 int keyboard_layout_parse(struct keyboard_layout *,const void *,size_t);
 int keyboard_report(struct keyboard_hid *,const struct keyboard_layout *,const uint8_t report[8],keyboard_emit,void *);
+int keyboard_pressed(struct keyboard_hid *,const struct keyboard_layout *,const uint8_t pressed[256],keyboard_emit,void *);
 void keyboard_repeat(struct keyboard_hid *,const struct keyboard_layout *,keyboard_emit,void *);
 void keyboard_reset(struct keyboard_hid *,keyboard_emit,void *);
 int keyboard_config_layout(const void *,size_t,const char **,size_t *);

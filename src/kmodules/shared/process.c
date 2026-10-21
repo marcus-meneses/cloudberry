@@ -1,4 +1,5 @@
 #include "process.h"
+#include "../../interfaces/applications.h"
 #include "../../interfaces/system.h"
 #include "process-elf.h"
 #include "threads.h"
@@ -8,7 +9,7 @@
 #include "../../kernel/cpu.h"
 struct page {struct page *next;struct mem_pages frame;uint64_t address;uint32_t flags,mapped;};
 struct allocation {struct allocation *next;uint64_t address,bytes;};
-struct process {struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
+struct process {struct cb_credentials credentials;uint64_t *groups;struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom,user_pages;char name[256];uint32_t name_bytes,name_truncated;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct process *head;
     kernel_surface_call alloc,free,pages_alloc,pages_free,stack_alloc,stack_free,space_create,space_destroy,space_map,create,control,entry_stack,stat,read,cpu;} state;
 struct kernel_surface_result process_surface_check(MODULE_ARGS);
@@ -27,14 +28,14 @@ static int add_page(struct process *p,uint64_t address,uint32_t flags,const void
     page->address=address;page->flags=flags;
     const unsigned char *s=source;unsigned char *d=(void *)page->frame.address;for(size_t i=0;i<bytes;++i)d[i]=s[i];
     struct kernel_surface_result r=state.space_map(p->info.address_space,p->info.id,address,page->frame.physical,flags,0);
-    page->mapped=!r.status;uint64_t flags_saved=lock();page->next=p->pages;p->pages=page;unlock(flags_saved);return !r.status;
+    page->mapped=!r.status;uint64_t flags_saved=lock();page->next=p->pages;p->pages=page;++p->user_pages;unlock(flags_saved);return !r.status;
 }
 static int cleanup(struct process *p){
     if(p->info.address_space && CALL(state.space_destroy,p->info.address_space,p->info.id,0).status)return 0;
     p->info.address_space=0;
-    while(p->pages){struct page *page=p->pages;if(CALL(state.pages_free,page->frame.id,p->info.id,0).status)return 0;p->pages=page->next;release(page);}
+    while(p->pages){struct page *page=p->pages;if(CALL(state.pages_free,page->frame.id,p->info.id,0).status)return 0;uint64_t flags=lock();p->pages=page->next;--p->user_pages;unlock(flags);release(page);}
     if(p->trap.id && CALL(state.stack_free,p->trap.id,p->info.id,0).status)return 0;
-    p->trap.id=0;while(p->allocations){struct allocation *record=p->allocations;p->allocations=record->next;release(record);}return 1;
+    p->trap.id=0;release(p->groups);p->groups=NULL;while(p->allocations){struct allocation *record=p->allocations;p->allocations=record->next;release(record);}return 1;
 }
 static struct kernel_surface_result load_failure(struct process *p){
     if(!cleanup(p)){p->info.state=PROCESS_CLEANUP;uint64_t flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,0);}
@@ -72,12 +73,15 @@ struct kernel_surface_result process_surface_load(MODULE_ARGS){
     struct kernel_surface_result got=state.read(r->filesystem,(uintptr_t)r->path,0,(uintptr_t)image,st.bytes,0);
     if(got.status || got.value!=st.bytes){release(image);return module_result(0,0);}
     struct process *p=allocate(sizeof(*p));if(!p){release(image);return module_result(0,0);}
+    const char *label=r->path;for(const char *at=r->path;*at;++at)if(*at=='/')label=at+1;
+    while(label[p->name_bytes] && p->name_bytes<sizeof(p->name)-1){p->name[p->name_bytes]=label[p->name_bytes];++p->name_bytes;}p->name_truncated=label[p->name_bytes]!=0;
     uint64_t flags=lock();if(state.serial==UINT64_MAX){unlock(flags);release(p);release(image);return module_result(0,0);}p->info.id=++state.serial;p->info.cpu=r->cpu;p->info.state=PROCESS_LOADING;unlock(flags);
     struct mem_space_info space;int ok=!CALL(state.space_create,p->info.id,&space,0).status;if(ok)p->info.address_space=space.id;
     if(ok)ok=elf_load(p,image,st.bytes,r->stack_bytes?r->stack_bytes:65536);
     release(image);
     if(ok)ok=!CALL(state.stack_alloc,65536,p->info.id,&p->trap).status;
     if(!ok)return load_failure(p);
+    p->credentials.generation=1; /* Explicit root bootstrap identity. */
     p->argument=r->argument;
     if(r->abi==2){
         if(!r->startup || !r->startup_bytes || r->startup_bytes>SIZE_MAX-4095){return load_failure(p);}
@@ -183,7 +187,7 @@ struct kernel_surface_result process_surface_memory_free(MODULE_ARGS){
     kernel_surface_call unmap=kernel_surface_find(state.hub,"mem.space_unmap");
     for(uint64_t off=0;off<record->bytes;off+=4096){uint64_t va=b+off;flags=lock();struct page **link=&p->pages;while(*link && (*link)->address!=va)link=&(*link)->next;struct page *page=*link;unlock(flags);if(!page)continue;
         if(page->mapped && CALL(unmap,p->info.address_space,a,va).status)return module_result(0,0);
-        flags=lock();link=&p->pages;while(*link!=page)link=&(*link)->next;*link=page->next;unlock(flags);
+        flags=lock();link=&p->pages;while(*link!=page)link=&(*link)->next;*link=page->next;--p->user_pages;unlock(flags);
         if(CALL(state.pages_free,page->frame.id,a,0).status)__asm__ volatile("ud2");
         release(page);
     }
@@ -200,4 +204,29 @@ struct kernel_surface_result process_surface_memory_alloc(MODULE_ARGS){
     record->address=address;record->bytes=0;flags=lock();record->next=p->allocations;p->allocations=record;unlock(flags);
     for(uint64_t off=0;off<bytes;off+=4096){record->bytes=off+4096;if(!add_page(p,address+off,MEM_SPACE_WRITE,NULL,0)){(void)process_surface_memory_free(a,address,0,0,0,0);return module_result(0,0);}}
     p->memory_next=address+bytes;return module_result(address,1);
+}
+
+struct kernel_surface_result process_surface_sample(MODULE_ARGS){
+    MODULE_UNUSED();if(!a || !b || !state.hub)return module_result(0,0);struct cb_process_query query=*(const struct cb_process_query *)a;uint64_t flags=lock();uint64_t ceiling=query.ceiling?query.ceiling:state.serial;
+    struct process *selected=NULL;for(struct process *p=state.head;p;p=p->next)if(p->info.id>query.after && p->info.id<=ceiling && p->info.state!=PROCESS_REAPING && (!selected || p->info.id<selected->info.id))selected=p;
+    if(!selected){unlock(flags);return module_result(0,1);}struct cb_process_sample out={.process=selected->info.id,.thread=selected->info.thread,.ceiling=ceiling,.user_bytes=selected->user_pages*4096,.state=selected->info.state,.cpu=selected->info.cpu,.name_bytes=selected->name_bytes,.flags=selected->name_truncated?CB_PROCESS_NAME_TRUNCATED:0};
+    if(selected->info.stop_requested)out.flags|=CB_PROCESS_STOP_REQUESTED;
+    for(unsigned i=0;i<out.name_bytes;++i)out.name[i]=selected->name[i];
+    struct thread_account_info time;if(!CALL(state.control,THREAD_ACCOUNTING,out.thread,&time).status){out.timestamp_ns=time.timestamp_ns;out.cpu_ns=time.runtime_ns;out.thread_state=time.state;out.cpus=time.cpus;if(time.flags)out.flags|=CB_PROCESS_CPU_VALID;}
+    if(out.thread){struct thread_info thread;if(!CALL(state.control,THREAD_INFO,out.thread,&thread).status)out.switches=thread.switches;}
+    *(struct cb_process_sample *)b=out;unlock(flags);return module_result(1,1);
+}
+
+struct kernel_surface_result process_surface_credentials(MODULE_ARGS){
+    MODULE_UNUSED();if(!state.hub)return module_result(0,0);uint64_t flags=lock();struct process *p=find(a);
+    if(!p || p->info.state==PROCESS_REAPING || p->info.state==PROCESS_CLEANUP){unlock(flags);return module_result(0,0);}
+    if(b==0){size_t bytes=sizeof(p->credentials)+p->credentials.groups*8;if(!c || d<sizeof(p->credentials)){unlock(flags);return module_result(bytes,0);}*(struct cb_credentials *)c=p->credentials;if(d>=bytes)for(size_t i=0;i<p->credentials.groups;++i)((uint64_t *)(c+sizeof(p->credentials)))[i]=p->groups[i];unlock(flags);return module_result(bytes,1);}
+    if(b==3){int yes=p->credentials.gid==c;for(size_t i=0;i<p->credentials.groups;++i)if(p->groups[i]==c)yes=1;unlock(flags);return module_result(yes,1);}
+    struct cb_credentials value;const uint64_t *groups;
+    if(b==2){struct process *parent=find(c);if(!parent || p->info.state!=PROCESS_READY || p->info.thread){unlock(flags);return module_result(0,0);}value=parent->credentials;groups=parent->groups;}
+    else if(b==1 && (p->info.state==PROCESS_READY || p->info.state==PROCESS_RUNNING) && c && d>=sizeof(value)){value=*(const struct cb_credentials *)c;if(value.groups>(SIZE_MAX-sizeof(value))/8 || d!=sizeof(value)+value.groups*8){unlock(flags);return module_result(0,0);}groups=(const void *)(c+sizeof(value));}
+    else {unlock(flags);return module_result(0,0);}
+    if(p->credentials.generation==UINT64_MAX){unlock(flags);return module_result(0,0);}
+    uint64_t *copy=value.groups?allocate(value.groups*8):NULL;if(value.groups && !copy){unlock(flags);return module_result(0,0);}for(size_t i=0;i<value.groups;++i)copy[i]=groups[i];
+    uint64_t *old=p->groups;value.generation=p->credentials.generation+1;p->credentials=value;p->groups=copy;unlock(flags);release(old);return module_result(1,1);
 }

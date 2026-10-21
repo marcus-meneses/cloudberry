@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "hid",
+      "operations": [
+        "hid_subscribe",
+        "hid_list",
+        "hid_open",
+        "hid_descriptor",
+        "hid_start",
+        "hid_ack",
+        "hid_close",
+        "hid_get_feature",
+        "hid_set_feature",
+        "now_ns"
+      ]
+    },
+    {
+      "name": "/@mouse",
+      "scope": "boot-input",
+      "publish": true,
+      "operations": [
+        "read",
+        "state"
+      ]
+    }
+  ]
+}

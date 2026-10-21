@@ -10,10 +10,6 @@
       "symbol": "io_surface_invoke"
     },
     {
-      "name": "io.worker",
-      "symbol": "io_surface_worker"
-    },
-    {
       "name": "io.exit",
       "symbol": "io_surface_exit"
     },
@@ -22,16 +18,16 @@
       "symbol": "io_surface_info"
     },
     {
+      "name": "io.bind",
+      "symbol": "io_surface_bind"
+    },
+    {
       "name": "io.installations",
       "symbol": "io_surface_installations"
     },
     {
       "name": "io.installed_load",
       "symbol": "io_surface_installed_load"
-    },
-    {
-      "name": "io.process_worker",
-      "symbol": "io_surface_process_worker"
     },
     {
       "name": "io.process_info",

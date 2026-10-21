@@ -121,7 +121,7 @@ int ext4_engine_unmount(struct ext4_engine *ctx){
 int ext4_engine_stat(struct ext4_engine *ctx,const char *path,struct ext4_stat *out){
     char *full=path_for(ctx,path);if(!full)return 0;struct ext4_inode inode;uint32_t number;int r=ext4_raw_inode_fill(full,&number,&inode);ext4_user_free(full);
     if(!done(ctx,r))return 0;
-    const uint8_t *p=(void *)&inode;*out=(struct ext4_stat){.inode=number,.bytes=disk_u32(p+4)|(uint64_t)disk_u32(p+108)<<32,.mode=disk_u16(p),.flags=disk_u32(p+32)};return 1;
+    const uint8_t *p=(void *)&inode;*out=(struct ext4_stat){.inode=number,.bytes=disk_u32(p+4)|(uint64_t)disk_u32(p+108)<<32,.mode=disk_u16(p),.flags=disk_u32(p+32),.uid=disk_u16(p+2)|(uint32_t)disk_u16(p+120)<<16,.gid=disk_u16(p+24)|(uint32_t)disk_u16(p+122)<<16};return 1;
 }
 struct kernel_surface_result ext4_engine_read(struct ext4_engine *ctx,const char *path,uint64_t offset,void *buffer,size_t bytes){
     char *full=path_for(ctx,path);if(!full)return module_result(0,0);ext4_file file;size_t count=0;int r=ext4_fopen2(&file,full,O_RDONLY);ext4_user_free(full);
@@ -155,6 +155,8 @@ int ext4_engine_mutate(struct ext4_engine *ctx,unsigned operation,const char *pa
     if(operation==EXT4_MUTATE_CREATE || operation==EXT4_MUTATE_MKDIR){r=parent_exists(full);if(!r && !ext4_inode_exist(full,EXT4_DE_UNKNOWN))r=EEXIST;if(r){ext4_user_free(full);return done(ctx,r);}}
     if(operation==EXT4_MUTATE_TRUNCATE && size>UINT64_C(0x100000000)*ctx->disk.lg_bsize){ext4_user_free(full);ctx->error=EXT4_ARGUMENT;return 0;}
     switch(operation){
+    case EXT4_MUTATE_OWNER:r=ext4_owner_set(full,(uint32_t)size,(uint32_t)(size>>32));break;
+    case EXT4_MUTATE_MODE:r=ext4_mode_set(full,(uint32_t)size&0777);break;
     case EXT4_MUTATE_CREATE:{ext4_file file;r=ext4_fopen2(&file,full,O_WRONLY|O_CREAT|O_EXCL);if(!r)r=ext4_fclose(&file);break;}
     case EXT4_MUTATE_TRUNCATE:{ext4_file file;r=ext4_fopen2(&file,full,O_WRONLY);if(!r){r=size>file.fsize?grow_to(&file,size):ext4_ftruncate(&file,size);int closed=ext4_fclose(&file);if(!r)r=closed;}break;}
     case EXT4_MUTATE_REMOVE:r=ext4_inode_exist(full,EXT4_DE_REG_FILE);if(!r)r=ext4_fremove_atomic(full);break;

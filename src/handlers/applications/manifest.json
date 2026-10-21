@@ -1,1 +1,37 @@
-{"version": 1, "resources": [{"name": "/@memory", "scope": "self", "operations": ["allocate", "free"]}, {"name": "/@io", "scope": "process-manager", "operations": ["process_launch", "process_stop", "process_reap", "process_release"]}, {"name": "/@applications", "publish": true, "operations": ["launch", "info", "wait", "stop", "release", "list"]}]}
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "process-manager",
+      "operations": [
+        "process_launch",
+        "process_stop",
+        "process_reap",
+        "process_release",
+        "process_sample"
+      ]
+    },
+    {
+      "name": "/@applications",
+      "publish": true,
+      "operations": [
+        "launch",
+        "info",
+        "wait",
+        "stop",
+        "release",
+        "list",
+        "processes"
+      ]
+    }
+  ]
+}

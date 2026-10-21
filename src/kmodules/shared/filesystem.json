@@ -1,0 +1,49 @@
+{
+  "name": "filesystem",
+  "exports": [
+    {
+      "name": "filesystem.init",
+      "symbol": "filesystem_surface_init"
+    },
+    {
+      "name": "filesystem.invoke",
+      "symbol": "filesystem_surface_invoke"
+    },
+    {
+      "name": "filesystem.bind",
+      "symbol": "filesystem_surface_bind"
+    },
+    {
+      "name": "filesystem.register",
+      "symbol": "filesystem_surface_register"
+    },
+    {
+      "name": "filesystem.mount",
+      "symbol": "filesystem_surface_mount"
+    },
+    {
+      "name": "filesystem.adopt",
+      "symbol": "filesystem_surface_adopt"
+    },
+    {
+      "name": "filesystem.unmount",
+      "symbol": "filesystem_surface_unmount"
+    },
+    {
+      "name": "filesystem.file",
+      "symbol": "filesystem_surface_file",
+      "version": [
+        2,
+        0
+      ]
+    },
+    {
+      "name": "filesystem.retain",
+      "symbol": "filesystem_surface_retain"
+    },
+    {
+      "name": "filesystem.release",
+      "symbol": "filesystem_surface_release"
+    }
+  ]
+}

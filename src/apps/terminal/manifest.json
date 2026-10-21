@@ -23,7 +23,8 @@
         "info",
         "clear",
         "write",
-        "cell"
+        "cell",
+        "cursor"
       ]
     },
     {
@@ -51,6 +52,13 @@
         "open",
         "stat",
         "list"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "now_ns"
       ]
     }
   ]

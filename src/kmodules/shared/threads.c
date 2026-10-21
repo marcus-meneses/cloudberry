@@ -1,10 +1,11 @@
 #include "threads.h"
+#include "thread-account.h"
 #include "xstate.h"
 #include "mem-pages.h"
 #include "timer.h"
 #include "../../kernel/cpu.h"
 struct context {uintptr_t rsp,xstate;uint64_t space,owner;uintptr_t entry_stack;};
-struct thread {struct thread *next;uint64_t joining;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;kernel_surface_call entry;uintptr_t args[6];};
+struct thread {struct thread *next;uint64_t joining;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;struct thread_account account;kernel_surface_call entry;uintptr_t args[6];};
 struct local {struct context dispatcher;struct thread *current;uint64_t dispatching;struct thread_timing timing;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;size_t count;uint64_t serial;struct thread *head,*tail;struct local *cpus;struct xstate_info xstate;kernel_surface_call fp_init,fp_save,fp_restore,aligned,cpu,alloc,free,stack_alloc,stack_free,arm,now,space_pin,space_switch,user_stack;} state;
 extern void threads_switch(struct context *,const struct context *) __attribute__((visibility("hidden")));
@@ -128,12 +129,14 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         if(now.status || now.value>UINT64_MAX-2000000 || call(state.arm,now.value+2000000,0,0).status) {__atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);set_status(t,THREAD_RUNNABLE);cpu->dispatching=0;call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");return module_result(0,0);}
         if(t->ready_valid && now.value>=t->ready_ns) {uint64_t wait=now.value-t->ready_ns;++cpu->timing.samples;cpu->timing.total_wait_ns+=wait;if(wait>cpu->timing.max_wait_ns)cpu->timing.max_wait_ns=wait;}
         else ++cpu->timing.clock_failures;
+        uint64_t accounting=enter();thread_account_begin(&t->account,now.value,!now.status);leave(accounting);
         call(state.cpu,CPU_IRQ_END,512,0);
         switch_context(&cpu->dispatcher,&t->context);
         call(state.cpu,CPU_IRQ_BEGIN,512,(uintptr_t)threads_surface_run);
         struct kernel_surface_result ready_time=call(state.now,0,0,0);
         t->ready_ns=ready_time.value;t->ready_valid=!ready_time.status;
         uint64_t transition=enter();
+        thread_account_end(&t->account,ready_time.value,!ready_time.status);
         __atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);
         finish_suspend(t,ready_time.value,!ready_time.status);
         leave(transition);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");++done;
@@ -167,6 +170,11 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
         leave(flags);return module_result(deadline,1);
     }
     if(a==THREAD_READY) {struct kernel_surface_result time=call(state.now,0,0,0);if(time.status){leave(flags);return time;}wake_due(time.value);size_t count=0;for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==current_cpu() && status(t)==THREAD_RUNNABLE)++count;leave(flags);return module_result(count,1);}
+    if(a==THREAD_ACCOUNTING && c){
+        struct kernel_surface_result now=call(state.now,0,0,0);struct thread_account_info out={.timestamp_ns=now.value,.cpus=state.count,.flags=!now.status};
+        if(b){struct thread *sample=state.head;while(sample && sample->info.id!=b)sample=sample->next;if(!sample){leave(flags);return module_result(0,0);}out.runtime_ns=thread_account_value(&sample->account,now.value,!now.status);out.state=status(sample);out.cpu=sample->info.cpu;out.flags=out.flags && !sample->account.invalid && (!sample->account.active || now.value>=sample->account.start);}
+        *(struct thread_account_info *)c=out;leave(flags);return module_result(1,1);
+    }
     struct thread *t=state.head,*prev=NULL;while(t && t->info.id!=b){prev=t;t=t->next;}
     if(!t) {leave(flags);return module_result(0,0);}int ok=0;
     if(a==THREAD_INFO && c) {*(struct thread_info *)c=(struct thread_info){t->info.id,t->info.process_id,t->info.cpu,status(t),t->info.switches,t->info.result};ok=1;}

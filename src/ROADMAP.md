@@ -1367,3 +1367,317 @@ pass. Focused four-CPU TCG guest `fe5b611412514103aad9a50207be9447` passes
 delayed stdout/stderr without keypress, silent child completion, stdin/Ctrl-D,
 pipeline completion and idle keyboard resume using a disposable fixture image.
 No native acceptance or filesystem performance work was performed.
+
+
+## Collection status and abandonment — 2026-10-19
+
+1. Collection now separates transport status from provider status. The raw gate
+   returns OK when a validated reply is copied; the SDK reports its operation
+   status with an explicit collected flag. Completed WOULD_BLOCK/BUFFER_TOO_SMALL
+   replies release their request normally. Buffer/allocation failures retain it.
+   Production broker/SDK tests cover both collisions and successful cleanup.
+2. An appended ABANDON gate atomically removes queued work, reports dispatch
+   phase and known/unknown outcome, and relinquishes dispatched work without
+   promising rollback. Late replies discard the retained record without allocation;
+   provider death also releases it. Active synchronous waiters are protected.
+   Tests cover foreign IDs, insufficient output space, OOM without side effects,
+   queued removal, late completion under OOM, completed outcomes and provider death.
+   The terminal abandons its prefetched keyboard call before a normal exit.
+
+Both items pass the focused host suite. Native full-console/long-duration and
+filesystem latency work remain deferred.
+
+
+## Terminal editing — 2026-10-19
+
+3. The terminal now keeps session-only history in a growing private-memory list,
+   recalls it with Up/Down and restores the unfinished draft. UTF-8-aware
+   insertion/overwrite, arrows, Home/End, Backspace/Delete and a reversed cursor
+   cell are implemented. Long lines retain their full transport-bounded contents
+   in a horizontal input viewport. Tab uses the existing filesystem handle to
+   complete cwd-relative/absolute names, preserve quoting through literal escaping,
+   add directory slashes, extend common prefixes and list ambiguous matches in
+   four columns. Hidden entries require an explicit underscore prefix. Child
+   output preserves the unfinished input. Text receives only the appended bounded
+   cursor-positioning primitive; editing/completion/history remain application code.
+
+Host editor/contract/handle checks pass. Focused four-CPU TCG guest
+`fb6560966c12462594c72eebcca804de` passes editing and completion, draft recall,
+and delayed-output/stdin/pipeline/idle wait-any regressions using disposable media.
+Candidate built. History is not persisted, the cursor does not require a blink
+polling timer, and synchronous rendering/directory calls can still delay UI work.
+Native long-duration acceptance and disk latency optimization stay deferred.
+
+
+## Overwrite cursor indication — 2026-10-19
+
+Insert now toggles between the default steady reversed cursor (insertion) and a
+blinking reversed cursor (overwrite), as requested. Only active overwrite input
+arms a 500 ms deadline on the existing wait-any call; keyboard reads remain
+pending and provider-owned. A lazily acquired clock capability supplies deadlines.
+Blink transitions repaint one positioned text cell, restoring the covered
+character on the off phase. Editing resets the visible phase. Returning to
+insertion mode removes the blink deadline; no periodic keyboard polling is added.
+
+Build and the focused disposable four-CPU TCG cursor check pass:
+`548a6f985ce94f5dab305648a5fe0ddd`. Captured framebuffer samples show steady
+insertion, visible/hidden overwrite phases without character damage, steady
+insertion after toggling back, and correct overwrite/insert command output.
+
+## Descriptor-driven USB mouse — 2026-10-19
+
+The installed privileged mouse handler now publishes `/@mouse` with manifest-bound
+READ/STATE operations. It discovers HID interfaces, parses their report descriptors
+in userland and normalizes axes/buttons/wheels/report IDs. Multiple interface
+attachments keep independent identity/state. Reads block with replay cursors and
+work with wait-any; removal releases held buttons and tears down capture safely.
+Standard Resolution Multiplier feature reports use read/modify/write with unrelated
+bits preserved. State pagination and owned lists avoid a device-count ceiling.
+
+The HID kmodule (extracted from IO in the following milestone) supplies generic, catalog-bound HID transport: descriptor and
+feature control, claimed endpoints, preallocated acknowledged report mailboxes,
+USB change notifications and owned BSP workers. Capture length comes from the
+largest declared input report rather than assuming one USB packet. USB now has
+independent per-endpoint transfer state/bounce buffers alongside serialized EP0;
+metadata and sibling interfaces remain usable during idle interrupt-IN. Teardown
+waits for all active endpoints. An explicit cancellable-request extension preserves
+the original usb_io prefix and closes the queued/submission cancellation race.
+
+The isolated boot test caught a flat-PIC pointer initialization issue when the
+kernel I/O operation list grew: the compiler generated absolute table pointers.
+Publication now builds relocated pointers from a contiguous character table at
+runtime. Boot and device testing pass after the correction. No developer disk
+or host boot configuration was modified.
+
+Validation: build; HID parser and transport/ownership/OOM checks; overlapping
+composite endpoint/control and cancellation checks; existing USB/keyboard tests;
+installation privilege checks; C/C++ contracts. Final disposable four-CPU TCG
+run `ae8a70f9b3954c4e86c6b25ef66606b2` passes motion/buttons/wheel, second-device
+attachment, held-button removal, reconnect with a fresh identity, wait-any and
+continued terminal keyboard use. Earlier full mouse replay
+`0785baaf302245f7aa46de7cf4fc0e4c` also passed before the final lifecycle changes.
+Test clients remain outside the candidate catalog.
+
+Limits remain explicit in handlers/mouse/README.md: existing 4 KiB transport
+frames, 32-bit interpreted fields, 64 button bits, unsupported long/alternative
+HID items, vendor-specific features and Bluetooth. An interface exclusively owned
+by the boot-keyboard provider is respected; shared keyboard/mouse collections on
+that same interface need shared HID demultiplexing. Separate interfaces can run
+concurrently. This milestone provides input; cursor drawing is separate. Physical
+mouse passthrough and physical controller qualification remain pending. Native
+long-duration acceptance and filesystem latency optimization remain deferred.
+
+### Independent IO backends and filesystem format boundary
+
+Split the former IO implementation into Limine-loaded `hid`, `display`,
+`filesystem` and `applications` kmodules. IO routes copied requests through hub
+surfaces, forwards cleanup and retains narrow clock/owner-watch gateways. Provider
+binding and installation loading use hub calls; worker/state ownership moves to
+the relevant backend. Existing public IO/resource contracts remain unchanged.
+
+The filesystem manager discovers registered format-query surfaces, probes each
+selected partition, rejects ambiguous matches and retains a backend per mount.
+Dynamic mounts route by longest component prefix. Open streams retain mount IDs;
+file workers call the common filesystem contract rather than ext4 directly.
+Backends remain pinned until reboot; mount teardown refuses references/active
+calls/children and preserves failed unmounts. Ext4 supplies the first real adapter.
+Two-format host fixtures are test-only. Bootstrap still explicitly mounts its
+known ext4 volume and adopts it as `/`; automatic mounting policy, additional
+formats and shared keyboard/mouse HID demultiplexing remain future work.
+
+Validation: candidate build passes; focused installation, HID transport, renderer,
+stream and two-format mount-manager checks pass; legacy process probe compiles
+against the extracted applications contract. Disposable four-CPU TCG terminal
+run `2f1c2c66895c4db89c16a576ef86cb82` passes recreate/append redirection, pipelines,
+file reads, protected writes, graphics/app execution and private data access.
+Final extracted-module mouse/hotplug run
+`4c4217af08aa4002a9845d7db22e0092` passes. Developer disks were not attached.
+
+### Shared HID interface demultiplexing
+
+HID now owns one physical claim, descriptor, report buffer and capture worker per
+interface. Installed keyboard and mouse providers attach logical class consumers
+with their own copied mailboxes and ACKs. Collection/report-ID routing can fan one
+mixed report out to both consumers. All recipients are posted before waiting;
+a slow consumer applies bounded physical-endpoint backpressure. Closing one class
+preserves the other; final close cancels/drains and retains uncertain DMA ownership.
+Lifecycle waits use wake credits and stack wait records; callback references keep
+links alive during posting. Worker failure is latched so a pending notification
+cannot hide it from the next ACK.
+
+Keyboard now uses report protocol and descriptor-defined arrays/bitmaps, including
+NKRO and state retained across report IDs, behind its unchanged /@keyboard handle.
+Kernel routing and both userland codecs use common/hid-report.c; class-specific
+interpretation remains in the handlers. Old private boot-keyboard IO operation
+numbers are reserved, not reused. Keyboard still selects one interface at a time;
+physical combined-receiver qualification is not claimed by host/QEMU tests.
+
+Added the production startup graph to maps/startup.md, showing boot handoff,
+kmodule initialization, asynchronous storage selection, provider binding and the
+shared input path. This supersedes the earlier pending-demultiplexer notes.
+
+Validation: candidate build; common parser/codecs, shared transport/lifecycle,
+keyboard stream/failure, mouse descriptors, installations and C/C++ interfaces
+pass. Fault-injection fixtures compile with explicit pre-start test-only PID
+binding, without a production fixture-name bypass. Four-CPU disposable TCG runs
+`c30e6d4a58b14268bd2830c0f44baf18` (mouse hotplug plus keyboard) and
+`000efe50f5fc438fbc95da805c54e18a` (editing/completion/history and wake-driven
+streams) pass. Combined-interface IDs and mixed reports use host transport
+fixtures; native physical combined receivers remain unvalidated.
+
+### Built-in process monitor
+
+`monitor` is an ordinary installed system app. Manifest-authorized read-only
+`/@applications.processes` returns bounded copied PID sweeps, including privileged
+handlers. Kernel `process.sample` and manager-only IO `process_sample` bridge to
+thread runtime accounting and committed user-page counters. Existing process
+control permissions and operation numbers remain intact. Kernel worker threads
+are outside this process-only view.
+
+The monitor reports state, assigned CPU, per-core CPU%, committed USER KiB and
+cumulative CPU time, with dynamic row storage, CPU sorting, display-derived
+pagination and changed-row rendering through text -> graphics -> display.
+Default refresh is 1 second; Escape quits and Up/Down change pages immediately. `-b`, `-n COUNT`
+and `-d SECONDS` support stdout snapshots and terminal redirection. An invalid or
+first CPU sample shows --. There is no kill control or invented whole-system
+CPU/load figure. Live mode claims /@keyboard focus and reads device events
+directly. Standard streams remain independent byte transports.
+
+Validation: candidate build; C/C++ interface checks; production accounting and
+CPU-percentage helpers (blocked time, regression, overflow); process record
+pagination/memory fields/lifecycle changes; installation authority denial; broker
+wait/reply capacity regression. Four-CPU disposable TCG guest
+`5fffaa68c96045dd9a2d7d75082161fe` passes two batch snapshots, all provider rows,
+live measured CPU refresh and subsequent pwd (initial version, before the
+monitor rename and event-input controls). Developer persistent
+disks were not attached. Native KVM monitoring acceptance remains unrun here.
+
+
+### Direct keyboard ownership and named independent standard streams
+
+Monitor acquires /@keyboard and claims focus directly. Keyboard focus uses
+admission-authenticated identity, exclusive claim/release and owner-lifetime
+watching. Other readers park; optional 1.1 read/batch focus generations notify
+the terminal to stop editing/blinking and establish a barrier before resuming.
+The existing 1.0 frame prefixes remain supported. Escape and arrow keys never
+travel through stdin. Terminal resumes its cwd prompt after screen clearing.
+
+Removed the temporary stream input_mode operation and its terminal forwarding.
+Stdin/stdout/stderr are byte stream endpoints supplied by any launcher. Reserved
+caller-relative /@stdin, /@stdout and /@stderr names acquire independently owned
+copies of those bindings; no global stream is shared and apps cannot publish
+those names. cb_standard wraps named acquisition. The numeric gate remains ABI
+compatible. Headless timer-only waits accept a deadline without a stream.
+
+Validation: candidate build, production keyboard stream/focus tests, C/C++ ABI,
+stream ownership/alias tests and wait-any tests pass. Four-CPU disposable TCG
+monitor acceptance `3d0b6c852a344a1cb17f0b8c0d612494` passes direct input, live
+CPU data, arrows, immediate Escape, cleared prompt, pwd and subsequent cat input.
+Headless acceptance `801e272a9c414b729c3305ee0a500418` passes binary stdin/stdout
+through cat with no terminal, monitor without stdin, and automatic focus release
+after a faulted owner followed by successful reclaim/release. Test apps remain
+outside candidate media and developer persistent disks were not attached.
+
+### Persistent binary identity storage
+
+Added a continuously running privileged /@identity provider, started after
+filesystem and before applications. Build-time provisioning creates protected
+users.bin, groups.bin and credentials.bin under /system/config/identity, plus a
+private transaction.bin replay journal. Root UID/GID 0 and the admin/users groups
+(GIDs 1/2) are seeded; the root boot secret is random and only a salted derived
+hash is persisted. No account provisioning or directory migration runs at boot.
+
+Explicit little-endian headers/records have versions, lengths, CRCs, a shared
+transaction generation and persistent next-ID high-water marks. Account/group
+renames preserve IDs; deleted IDs cannot be reintroduced. Public users/groups
+listing is chunked. Credentials are never listed: a management transaction may
+replace/delete one derived hash while retaining all other records internally.
+Immutable manifest grants authorize each operation; owner-exit notifications
+release abandoned staging. Read-only media allows listing but rejects commits.
+
+Commits persist a complete three-file journal before applying snapshots; recovery
+replays committed snapshots and rejects incoherent/corrupt sets. Uncertain I/O
+failures stop further access until recovery instead of retrying mutations.
+Public filesystem access to the subtree is denied except to the catalog-bound
+identity installation; the handler gains no write access elsewhere in /system.
+
+Validation: candidate build; C/C++ identity ABI; provisioning/private modes;
+production format/root/high-water validation; fault injection at all five write
+steps and read-only behavior; installation identity/path authorization and
+filesystem boundary checks. Four-CPU isolated TCG acceptance
+792595344ee743d7bb7fefccce15e714 passes create/delete and credential mutations,
+incomplete/reused-ID rejection, generation checks and denied direct reads.
+Post-stop ext4 inspection confirms coherent generation 3, root-only remaining
+users/credentials, UID high-water 2, three initial groups and an empty journal.
+Fixtures and account mutations remain in a copied test image.
+
+The subsequent identity execution milestone below closes password verification,
+trusted process credentials, root/admin management and filesystem mode checks.
+Automatic homes and user app-data provisioning remain separate.
+
+### Identity execution and administration
+
+Kernel-owned process credentials contain UID, primary GID, a local generation and
+dynamically allocated supplementary GIDs. Children inherit independent snapshots
+before start. Only the catalog-bound identity provider may replace a verified
+caller through IO; no ordinary setter or payload admin flag exists. Boot remains
+root. Account/group edits govern later authentication, not existing snapshots.
+
+Identity management checks root/admin credentials on each dispatch in addition
+to immutable manifest grants; root credential updates require UID 0. PASSWORD
+and AUTHENTICATE keep hashes private, accept 1..64 Unicode scalars and derive
+PBKDF2-HMAC-SHA256 with checked hardware salt entropy. Failed verification has a
+one-second global admission delay. No secure-attention UI or crypto audit is
+claimed. SHA-256 provenance/license and KDF host vectors are retained.
+
+The filesystem manager enforces traversal, owner/group/other modes and sticky
+unlink; caller-owned creates use 0600/0700 and explicit ownership. File stream
+operations recheck the actual caller. Per-mount sleeping serialization keeps the
+check and operation together without holding CPU locks over I/O. Installed
+executables also require traversal/execute access. Format-neutral backend/file
+contracts are version 2; the old ext4 stat prefix remains capacity-compatible.
+
+The ordinary installed accounts app supplies listings, user/group edits,
+non-echoed password changes and authenticated child execution. Root terminal
+identity stays unchanged. This is an execution-subtree transition, not a complete
+login-session manager. Automatic home provisioning, user installation policy,
+ACL/setuid features, live group revocation and nested terminal routing remain open.
+
+Validation: focused credential/IO-authority/permission tests, password derivation
+against hashlib, storage/recovery and C/C++/installation/backend checks. Four-CPU
+TCG identity acceptance 7da655ca0a734896bead951d7f2a6221 passes authentication,
+child inheritance, non-admin/wrong-current-password denial and old-stream access loss; post-stop ext4
+inspection verifies generation 4 and UID/mode metadata. Four-CPU accounts acceptance
+f539047405654914bd8657e7f7bda9f5 passes actual user/group commands, secret entry,
+authenticated child identity and supplementary-admin management. These are isolated
+copied images, not physical or native KVM acceptance.
+
+### Separate boot filesystem and system kmodules
+
+Retired ext4 /boot as a completion tree. Generated ext4 contains an empty /boot
+mountpoint and /system/kmodules/{drivers,helpers}; driver selection, installation
+fixtures and tests use the new system directory without aliases or boot migrations.
+Foundational modules remain Limine-loaded. ISO staging now places kernel/config,
+kmodules, limine and EFI at the filesystem root, matching mounted /boot paths.
+The packaged keyboard default is ABNT2; IBM remains bundled/selectable.
+
+Added the boot-loaded iso9660-fs helper behind the same ABI2 filesystem backend
+contract as ext4. It reads primary/Joliet directories and files, validates metadata
+and extent bounds, retains parent descriptors, and rejects mutations. The builder
+bounds ISO volume space before appended ext4; boot reads cannot expose identity
+or application data. Mount-path traversal also checks ancestors across mounts.
+
+Bootstrap mounts the ISO9660 filesystem at /boot only with a verified matching
+Limine parent-disk GUID. Unknown/different origin leaves an empty mountpoint and
+a diagnostic. Independent boot/system disks, a FAT backend, Rock Ridge symlink
+semantics, multi-extent/interleaved files and writes remain unsupported. The FAT
+EFI partition still starts Limine; it is not the filesystem mounted by this backend.
+
+Validation: real-image UBSan backend tests cover 512/4096-byte sectors, nested and
+UTF-8 Joliet lookup, listing/EOF, malformed metadata/extents, OOM, I/O failure,
+read-only behavior and retained parent release. Namespace, installation, keyboard,
+credential/mount-ancestor checks and host GPT/ext4 image verification pass.
+Four-CPU TCG guest 085b6015a700463699f988fed305d6c9 passes public /boot reads,
+foundational module listing, new system module directory, default ABNT2, protected
+boot writes and subsequent terminal input. Reports remain; disposable VM media
+was removed automatically. Native KVM acceptance is not claimed for this change.

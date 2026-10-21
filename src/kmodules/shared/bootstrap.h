@@ -17,7 +17,8 @@ struct bootstrap_info {
  * select() is the synchronous worker operation, one initial selection only.
  * info(out) copies status. The selected disk/slice/mount are bootstrap-owned;
  * consumers use the filesystem cookie and must not close these objects.
- * Read-only mount; no formatting/replay/writes or automatic replacement mount.
+ * System mount follows filesystem.writable and transport capabilities; writable
+ * ext4 may replay its journal. No formatting/migration/automatic replacement.
  * GUID selection and boot-origin correlation are distinct, explicit results. */
 struct kernel_surface_result bootstrap_surface_init(MODULE_ARGS);
 struct kernel_surface_result bootstrap_surface_start(MODULE_ARGS);

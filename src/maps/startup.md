@@ -1,5 +1,64 @@
 # Startup memory ownership (x86-64, hub ABI 3.0)
 
+
+## Startup graph
+
+The graph follows the production bootstrap. Indented branches show facilities
+made available at that phase; device discovery and workers can continue
+asynchronously after their initialization calls return.
+
+```text
+UEFI firmware
+└── Limine (boot media)
+    ├── kernel + cloudberry.cnf + foundational kmodule images
+    └── kmain: validate handoff, reserve usable boot pages, publish hub
+        ├── inthandle: essential fault handling
+        ├── splash: validate UEFI framebuffer and draw centered logo
+        ├── select Intel/AMD CPU backend; load remaining boot modules
+        ├── initialize kernel facilities
+            ├── mem / address spaces / config
+            ├── scheduler / hwenum / MMIO / clock / APIC / xstate
+            ├── SMP preparation / timer / threads / process / handles / event
+            ├── start APs; initialize IRQ / IOMMU / PCI / ACPI / platform
+            ├── NVMe / xHCI / USB / USB hubs / USB storage
+            ├── partition / ext4-fs / iso9660-fs / SATA
+            ├── bootstrap (prepare storage and provider startup facilities)
+            └── IO gateway initializes independent backends through hub
+                ├── applications: catalog admission and process lifecycle
+                ├── HID: shared interface ownership and class report routing
+                ├── display: temporary framebuffer backend
+                └── filesystem: discover registered format backends
+        └── start USB workers; enter managed SMP event loops
+            ├── IRQ delivery → deferred device work → sleeping-thread wakes
+            ├── bootstrap storage worker
+            │   ├── wait for initial USB/hub discovery
+            │   ├── find configured partition GUID over USB / NVMe / SATA
+            │   ├── mount known ext4 driver volume; check boot origin
+            │   └── load selected future modules from /system/kmodules/drivers
+            └── provider startup worker (waits for volume readiness)
+                ├── adopt ext4 at /; mount verified ISO9660 boot filesystem at /boot; admit catalog
+                ├── bind provider PIDs to kernel backends before execution
+                ├── launch configured providers in readiness order
+                │   ├── keyboard → /@io → HID → shared USB interface
+                │   ├── mouse    → /@io → HID → same or separate interface
+                │   ├── display  → /@io → display kmodule
+                │   ├── graphics → /@display
+                │   ├── text     → /@graphics
+                │   ├── filesystem → /@io → filesystem → format backend
+                │   ├── identity → /@filesystem → protected binary account database
+                │   └── applications → /@io → applications kmodule
+                └── applications launches initial ordinary terminal
+                    ├── /@keyboard and /@text
+                    ├── /@filesystem and /@applications
+                    └── stdin / stdout / stderr stream handles
+```
+
+Kmodules use hub surfaces; resource handlers run in isolated processes and expose application handles.
+The keyboard and mouse handlers decode their own classes. A shared interface
+has one kernel capture worker; report IDs and application-collection membership
+route copied reports to the appropriate handlers, including both for mixed reports.
+
+
 Limine supplies four-level paging, its initial stack, a physical memory map,
 HHDM, modules, framebuffer, physical RSDP and an MP response. Original kernel/modules, bootloader
 memory, ACPI regions and framebuffer remain occupied. Only original map type 0
@@ -83,7 +142,7 @@ initialization owns controller masks/enable and spurious delivery; timer owns
 its vector/calibration and one-shots. Event binds scheduler/timer dependencies.
 No writable/executable leaf mapping is created, though HHDM writable aliases
 remain; this is not protection against malicious kernel code. Mapping failures
-halt boot. Explicitly selected future format3 modules can load from the read-only
+halt boot. Explicitly selected future format3 modules can load from the selected
 ext4 driver volume at runtime, with hidden init/start, versioned dependency leases
 and cooperative retirement. All existing modules remain Limine-loaded. Executable
 mapping reclamation and published-table withdrawal remain future work; retired
@@ -92,7 +151,8 @@ images are retained rather than reused unsafely. See [module loading](../kmodule
 Calls use the System V x86-64 ABI: six word arguments in RDI/RSI/RDX/RCX/R8/R9,
 value in RAX and status in RDX (0 success, 1 failure). They use the caller stack.
 The kernel gate validates the selected binding and calls the module's uniform
-adapter. There is no process isolation or user-pointer validation.
+adapter. Kmodules share kernel trust. The separate process/handle gates validate
+user mappings and copy payloads across isolated address spaces.
 Foreground mutable mechanisms are serialized by the ordered global/clock CPU locks. Thread
 contexts execute independently and preempt only outside critical sections. IRQ
 callbacks use preallocated notifications, acknowledge the APIC and may return
@@ -101,7 +161,8 @@ a running thread to its dispatcher. GS:0 identifies the current CPU.
 Normal boot installs inthandle, draws the logo, creates the hardware snapshot,
 prints hub entries and hardware descriptors, then transfers through smp.run to event.run on a managed BSP stack. The event
 kmodule enables IRQs, dispatches ready callbacks, arms one-shot deadlines and
-sleeps with HLT. Empty queues stop the timer; external device inputs stay masked.
+sleeps with HLT. Empty queues stop the timer; device owners enable their owned routes and deferred
+notifications wake sleeping workers.
 Scheduler task records/copied payloads use that shared heap and remain owned
 until results are reaped or their owning process is removed. Its run surface executes queued work on the caller
 stack; it does not create threads. Separate threads/smp modules provide saved contexts
@@ -226,7 +287,7 @@ freed after loading. The bootstrap module does not interpret handler configurati
 
 
 Application runtime adds an immutable copied OS installation catalog owned by the
-I/O kmodule, selected at first trusted provider launch. Each managed child has
+applications kmodule, selected at first trusted provider launch. Each managed child has
 one dynamically allocated I/O descriptor, preallocated completion/owner-exit
 mailboxes and a kernel wait worker with an owned stack until completion is
 consumed. Reaping execution frees the child mappings/stacks and worker; retaining
@@ -253,3 +314,23 @@ Ordinary process CPUs are selected by the kernel, while hardware providers retai
 required BSP affinity. This does not add thread migration. File streams retain
 copied paths/offsets and join BSP workers for ext4 operations; same-mount callers
 wait by cookie without retaining a volume pointer while blocked.
+
+The filesystem manager separately allocates its backend registry and mount
+records/path strings. It pins registered backend query/invocation owners until
+reboot. A mount retains its backend cookie and tracks active calls and open stream
+references; open stream objects retain mount IDs rather than ext4 cookies.
+Bootstrap adopts its existing ext4 mount at `/`; the boot owner retains unmount
+responsibility. Display shadow and HID transfer state belong to their own modules.
+
+Identity startup loads existing binary records; only the image builder provisions
+them. Applications starts root with explicit kernel-owned credentials. Ordinary
+launch inherits the caller's credentials before start. The installed identity
+provider may replace a verified caller's identity through its restricted IO
+surface; runtime filesystem operations enforce that identity alongside manifest
+and installation policy. No account or directory migration runs at boot.
+
+The Limine filesystem stores kernel/config/modules at its root; public paths are
+/boot/kernel.elf, /boot/cloudberry.cnf and /boot/kmodules. The host source boot/
+directory remains source/configuration, not an ext4 completion directory. ext4
+contains only an empty /boot mountpoint and /system/kmodules/{drivers,helpers}.
+Boot mounting requires verified parent-disk identity; FAT ESP mounting is separate.
