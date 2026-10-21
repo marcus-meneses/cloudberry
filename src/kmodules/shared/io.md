@@ -123,11 +123,26 @@ this never changes the invoking terminal or existing sibling processes.
 ## Credential authority and entropy
 
 `credentials` queries the calling process when PID is zero. Ordinary callers
-cannot query other PIDs. Only the catalog-bound identity provider may query a
-caller and use `identity_set` (target PID plus copied credential snapshot).
+cannot query other PIDs. The catalog-bound identity and sessions providers may
+query a caller; only identity may use `identity_set` (target PID plus copied credential snapshot).
 The IO gateway forwards to process.credentials, never trusting an app admin flag.
 
 `random` requests up to 64 bytes from capability-checked x86 RDRAND, with bounded
 retries and explicit UNAVAILABLE on absent/failed hardware entropy. Identity uses
 this for password salts. No timer/pointer fallback or general entropy-pool claim
 is made. This mechanism targets the existing modern Intel/AMD platform contract.
+
+
+`session` operations 4/5 are sessions-provider-only UID revoke/status mechanics.
+The privileged sessions handler owns administrative authorization and subtree
+policy; the kernel selects actual credential snapshots, marks them closed, blocks
+credential replacement/inheritance and invokes existing resource-revocation paths.
+Root UID 0 is never selected by the revoke mechanism.
+
+`console_access` is restricted by rendering layer to the bound text, graphics or
+display installation. Its copied `{process,layer,reserved}` request identifies the
+broker-authenticated incoming actor, not an app-selected privilege. Kernel focus,
+open-session and launch-ancestry checks authorize screen work. Trusted upstream
+renderer exemptions preserve text -> graphics -> display composition. Focus is
+rechecked after collecting ancestry/session facts. Decisions cover admission of
+one operation; already admitted drawing may complete across focus transitions.

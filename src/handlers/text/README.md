@@ -14,7 +14,7 @@ Sequential output wraps and destructively scrolls; scrolling uses an overlap-saf
 graphics blit and clears the bottom row. Positioned cells leave the sequential
 cursor unchanged. The retained cell grid is allocated through private memory.
 This is one shared boot console, without terminal escape sequences, independent
-windows or user sessions. Text services do not launch apps or parse commands.
+windows. Foreground session authorization is enforced. Text services do not launch apps or parse commands.
 
 Writes collect at most 256 positioned glyphs per graphics request and flush at
 request completion, batch capacity, or before scrolling. Cell operations still
@@ -31,3 +31,10 @@ both coordinates before changing state, resets any incomplete UTF-8 sequence and
 does not draw or scroll. Existing operation numbers and CELL semantics are
 unchanged. This primitive supports application-owned editing; text contains no
 command history, filesystem completion or terminal key bindings.
+
+Screen access now follows kernel-owned keyboard focus and session membership.
+The frontend checks the authenticated caller before mutating screen state;
+background sessions cannot bypass this by acquiring a lower rendering layer.
+See [session console policy](../sessions/README.md#foreground-console-boundary).
+Already authorized operations may finish during a focus transition. This remains
+one console, without a secure compositor or secure-attention authentication UI.

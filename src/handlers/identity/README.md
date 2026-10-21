@@ -88,6 +88,10 @@ parents, siblings and already running children remain unchanged. Boot processes
 explicitly start as root. Group edits/account disable/delete govern subsequent
 authentication; existing credential snapshots remain until replacement or exit.
 There is no implicit session-wide identity switch or forced session termination.
+Administrators may explicitly revoke existing authority through `/@sessions`
+(`accounts revoke USER`, or `disable`/`passwd USER --end-sessions`). Database
+commits and revocation are separate operations; a revocation error does not undo
+an already committed account/password update.
 The public credential snapshot and authentication group list must fit a copied
 handle frame; oversized results fail explicitly. Kernel group storage is dynamic.
 

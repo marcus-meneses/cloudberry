@@ -2,6 +2,10 @@
 #include "../../sdk/stream.h"
 #include "../../interfaces/identity.h"
 #include "../../interfaces/identity-format.h"
+#include "../../interfaces/sessions.h"
+#include "../../interfaces/text.h"
+#include "../../interfaces/graphics.h"
+#include "../../interfaces/display.h"
 static struct cb_client client;
 static cb_handle_t identity,memory;
 static __attribute__((noreturn)) void fail(unsigned line){char message[48]="IDENTITY FAIL ";size_t n=14;char digits[10];unsigned count=0;do{digits[count++]='0'+line%10;line/=10;}while(line);while(count)message[n++]=digits[--count];message[n++]='\n';cb_write_all(&client,cb_standard(1),message,n);cb_exit(1);}
@@ -25,6 +29,23 @@ static void stage(uint64_t tx,const struct id_blob *b){unsigned char frame[sizeo
 static void child(const struct cb_application_start *start){
     CB_REQUIRE(call(CB_IDENTITY_SELF,NULL,0)==CB_OK);struct cb_credentials who;cb_copy(&who,cb_result(&client),sizeof(who));
     const char *mode=cb_application_argument(start,1);
+    if(mode && mode[0]=='r'){
+        struct {struct cb_identity_password request;char password;} auth={.request={.uid=1,.password_bytes=1},.password='x'};
+        CB_REQUIRE(call(CB_IDENTITY_AUTHENTICATE,&auth,sizeof(auth.request)+1)==CB_OK);
+        cb_handle_t sessions=cb_acquire(CB_SESSIONS_NAME,(struct cb_interface_id)CB_SESSIONS_INTERFACE_ID);uint64_t uid=1;
+        CB_REQUIRE(cb_invoke(&client,sessions,(struct cb_interface_id)CB_SESSIONS_INTERFACE_ID,CB_SESSIONS_REVOKE_UID,&uid,8,0)==CB_DENIED);
+        CB_REQUIRE(cb_invoke(&client,sessions,(struct cb_interface_id)CB_SESSIONS_INTERFACE_ID,CB_SESSIONS_BEGIN,NULL,0,0)==CB_OK);
+        cb_handle_t text=cb_acquire(CB_TEXT_NAME,(struct cb_interface_id)CB_TEXT_INTERFACE_ID),gfx=cb_acquire(CB_GRAPHICS_NAME,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID),display=cb_acquire(CB_DISPLAY_NAME,(struct cb_interface_id)CB_DISPLAY_INTERFACE_ID);
+        CB_REQUIRE(cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_CLEAR,NULL,0,0)==CB_DENIED);
+        struct cb_rectangle rect={.width=8,.height=16,.color=0xffffff};
+        CB_REQUIRE(cb_invoke(&client,gfx,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID,CB_GRAPHICS_FILL,&rect,sizeof(rect),0)==CB_DENIED);
+        CB_REQUIRE(cb_invoke(&client,display,(struct cb_interface_id)CB_DISPLAY_INTERFACE_ID,CB_DISPLAY_FILL,&rect,sizeof(rect),0)==CB_DENIED);
+        struct cb_graphics_create create={8,16};CB_REQUIRE(cb_invoke(&client,gfx,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID,CB_GRAPHICS_SURFACE_CREATE,&create,sizeof(create),0)==CB_OK);uint64_t surface;cb_copy(&surface,cb_result(&client),8);
+        struct cb_graphics_blit blit={.surface=surface,.source=0,.width=8,.height=16,.opacity=255};CB_REQUIRE(cb_invoke(&client,gfx,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID,CB_GRAPHICS_BLIT,&blit,sizeof(blit),0)==CB_DENIED);
+        CB_REQUIRE(cb_invoke(&client,gfx,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID,CB_GRAPHICS_SURFACE_RELEASE,&surface,8,0)==CB_OK);
+        CB_REQUIRE(cb_write_all(&client,cb_standard(1),"R",1)==CB_OK);
+        unsigned char byte;size_t bytes;cb_status_t revoked=cb_stream_read(&client,cb_standard(0),&byte,1,&bytes,0);cb_exit(revoked==CB_REVOKED?0:1);
+    }
     if(mode && mode[0]=='g'){CB_REQUIRE(who.uid==1 && who.gid==2);cb_exit(0);}
     CB_REQUIRE(!who.uid);cb_handle_t fs=cb_acquire(CB_FILESYSTEM_NAME,(struct cb_interface_id)CB_FILESYSTEM_INTERFACE_ID);
     CB_REQUIRE(cb_fs_call(&client,fs,CB_FILESYSTEM_OPEN,"/tmp/root-private.bin",CB_FILE_RECREATE,0)==CB_OK);cb_handle_t opened;cb_copy(&opened,cb_result(&client),8);
@@ -70,6 +91,19 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_WAIT,&ref,sizeof(ref),0)==CB_OK);struct cb_application_status child_status;cb_copy(&child_status,cb_result(&client),sizeof(child_status));
     CB_REQUIRE(child_status.state==CB_APPLICATION_EXITED && !child_status.exit_code);
     CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_RELEASE,&ref,sizeof(ref),0)==CB_OK);
+    /* Keep a different-UID child alive behind independent byte streams. */
+    cb_handle_t streams=cb_acquire(CB_STREAM_NAME,(struct cb_interface_id)CB_STREAM_INTERFACE_ID),sessions=cb_acquire(CB_SESSIONS_NAME,(struct cb_interface_id)CB_SESSIONS_INTERFACE_ID);struct cb_stream_pair ready,park;
+    CB_REQUIRE(cb_invoke(&client,streams,(struct cb_interface_id)CB_STREAM_INTERFACE_ID,CB_STREAM_PIPE,NULL,0,0)==CB_OK);cb_copy(&ready,cb_result(&client),sizeof(ready));
+    CB_REQUIRE(cb_invoke(&client,streams,(struct cb_interface_id)CB_STREAM_INTERFACE_ID,CB_STREAM_PIPE,NULL,0,0)==CB_OK);cb_copy(&park,cb_result(&client),sizeof(park));
+    static const char revoke_args[]="identity-check\0revoke\0";request.base.arguments_bytes=sizeof(revoke_args)-1;request.streams[0]=park.reader;request.streams[1]=ready.writer;request.streams[2]=0;
+    at=sizeof(request);cb_copy(frame,&request,at);cb_copy(frame+at,name,sizeof(name)-1);at+=sizeof(name)-1;cb_copy(frame+at,revoke_args,sizeof(revoke_args)-1);at+=sizeof(revoke_args)-1;frame[at++]='/';
+    CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_LAUNCH,frame,at,0)==CB_OK);cb_copy(&ref,cb_result(&client),sizeof(ref));
+    CB_REQUIRE(cb_system_release(park.reader)==CB_OK && cb_system_release(ready.writer)==CB_OK);char signal;size_t received=0;CB_REQUIRE(cb_stream_read(&client,ready.reader,&signal,1,&received,0)==CB_OK && received==1 && signal=='R');
+    uint64_t target=1;CB_REQUIRE(cb_invoke(&client,sessions,(struct cb_interface_id)CB_SESSIONS_INTERFACE_ID,CB_SESSIONS_REVOKE_UID,&target,8,0)==CB_OK);struct cb_session_status revoked;cb_copy(&revoked,cb_result(&client),sizeof(revoked));CB_REQUIRE(revoked.closing && !revoked.close_error);
+    CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_WAIT,&ref,sizeof(ref),0)==CB_OK);cb_copy(&child_status,cb_result(&client),sizeof(child_status));CB_REQUIRE(child_status.state==CB_APPLICATION_EXITED && !child_status.exit_code);
+    CB_REQUIRE(cb_invoke(&client,apps,(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,CB_APPLICATION_RELEASE,&ref,sizeof(ref),0)==CB_OK);
+    CB_REQUIRE(cb_system_release(ready.reader)==CB_OK && cb_system_release(park.writer)==CB_OK);
+    CB_REQUIRE(call(CB_IDENTITY_SELF,NULL,0)==CB_OK);struct cb_credentials preserved;cb_copy(&preserved,cb_result(&client),sizeof(preserved));CB_REQUIRE(!preserved.uid);
     seal(&base,current.generation+1,current.next_uid);tx=begin(current.generation,base.bytes);stage(tx,&base);credential=(struct cb_identity_credential){.transaction=tx,.uid=initial.next_uid};
     CB_REQUIRE(call(CB_IDENTITY_CREDENTIAL,&credential,sizeof(credential))==CB_OK && call(CB_IDENTITY_COMMIT,&tx,8)==CB_OK);current=info();
     CB_REQUIRE(current.users==1 && current.generation==initial.generation+3 && current.next_uid==initial.next_uid+1);

@@ -42,11 +42,11 @@ UEFI firmware
                 │   ├── keyboard → /@io → HID → shared USB interface
                 │   ├── mouse    → /@io → HID → same or separate interface
                 │   ├── display  → /@io → display kmodule
-                │   ├── graphics → /@display
-                │   ├── text     → /@graphics
+                │   ├── graphics → /@display + /@io console authorization/owner watches
+                │   ├── text     → /@graphics + /@io console authorization
                 │   ├── filesystem → /@io → filesystem → format backend
                 │   ├── identity → /@filesystem → protected binary account database
-                │   ├── sessions → /@io → process membership and owner notifications
+                │   ├── sessions → /@io → membership, credential queries and owner notifications
                 │   └── applications → /@io → applications kmodule
                 └── applications launches initial ordinary terminal
                     ├── /@keyboard and /@text
@@ -359,3 +359,16 @@ Image construction writes a build-owned content manifest, boot config build ID a
 matching system marker. Startup compares the marker before loading disk modules
 or providers. The offline updater verifies managed files, merges persistent data
 into a new image and leaves both inputs intact. It never executes in the guest.
+
+Administrative session close/retry accepts an explicit nonzero SID; account-wide
+revocation selects a nonzero UID snapshot and closes matching session subtrees.
+The sessions provider checks root/admin credentials before invoking trusted
+kernel mechanics. Close status retains the original failure and available drain
+counts. Revocation never reclaims executable mappings while a process is running.
+
+The keyboard focus publication also supplies rendering authority: text, graphics
+and display validate each incoming screen actor through installation-bound IO.
+Foreground-session ancestry permits the focused app and its output-draining
+ancestors; other sessions cannot draw through a lower rendering layer. Only the
+bound upstream renderers have chain exemptions. Owned offscreen graphics do not
+require foreground access; copying pixels from the screen does.

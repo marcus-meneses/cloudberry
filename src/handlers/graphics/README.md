@@ -1,7 +1,7 @@
 # Graphics provider
 
 `graphics.elf` publishes `/@graphics` and acquires `/@display`, private `/@memory`,
-and a narrowly bound `/@io` owner-exit notification operation. Rendering is a
+and narrowly bound `/@io` owner-exit and console-authorization operations. Rendering is a
 software backend, separate from display hardware. The wire contract is
 `interfaces/graphics.h`; the independently host-tested raster core is `raster.c`.
 
@@ -76,3 +76,15 @@ unsupported copies fall back to pixels. Failed copies are never retried as copie
 the destination becomes pending pixel damage, preserving authoritative backing
 pixels even if a backend partially performed an overlapping copy. Transforms,
 alpha composition and multiple deferred changes retain the general fallback.
+
+Screen access now follows kernel-owned keyboard focus and session membership.
+The frontend checks the authenticated caller before mutating screen state;
+background sessions cannot bypass this by acquiring a lower rendering layer.
+See [session console policy](../sessions/README.md#foreground-console-boundary).
+Already authorized operations may finish during a focus transition. This remains
+one console, without a secure compositor or secure-attention authentication UI.
+
+Screen pixels and damage remain shared, but transform/clip/composition state is
+private to the authenticated drawing process. Switching callers restores that
+caller's state (identity/full clip/SOURCE by default), including the text renderer.
+Contexts register owner-exit cleanup and do not leak state into the next app.

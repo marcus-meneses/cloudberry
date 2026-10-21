@@ -11,6 +11,9 @@ static uint32_t bitmap_pixels[CB_FRAME_LIMIT/4];
 static cb_handle_t display,memory,io;
 static struct surface screen,*surfaces;
 static uint64_t serial;
+struct screen_context {struct screen_context *next;uint64_t owner,token;struct gfx_rect clip;int32_t matrix[6];unsigned mode;};
+static struct screen_context *contexts;
+
 static struct {unsigned active;struct cb_display_copy box;struct gfx_rect damage;} pending_copy;
 static void *allocate(size_t bytes){struct cb_memory_request r={.bytes=bytes};if(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_ALLOCATE,&r,sizeof(r),0))return NULL;struct cb_memory_result a;cb_copy(&a,cb_result(&client),sizeof(a));return (void *)(uintptr_t)a.address;}
 static void release(void *p){struct cb_memory_request r={.address=(uintptr_t)p};CB_REQUIRE(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_FREE,&r,sizeof(r),0)==CB_OK);}
@@ -52,7 +55,28 @@ static cb_status_t present(void){
     gfx_reset_damage(s);return CB_OK;
 }
 static int covers(struct gfx_rect outer,struct gfx_rect inner){return outer.x<=inner.x && outer.y<=inner.y && (int64_t)outer.x+outer.width>=(int64_t)inner.x+inner.width && (int64_t)outer.y+outer.height>=(int64_t)inner.y+inner.height;}
+static void select_context(uint64_t owner){
+    struct gfx_surface *r=&screen.raster;struct screen_context *c=contexts;while(c && c->owner!=owner)c=c->next;
+    r->clip=c?c->clip:(struct gfx_rect){0,0,r->width,r->height};r->mode=c?c->mode:GFX_SOURCE;
+    for(unsigned i=0;i<6;++i)r->matrix[i]=c?c->matrix[i]:(i==0 || i==3?65536:0);
+}
+static cb_status_t save_context(uint64_t owner){
+    struct screen_context *c=contexts;while(c && c->owner!=owner)c=c->next;
+    if(!c){if(serial==UINT64_MAX)return CB_RESOURCE_FAILURE;c=allocate(sizeof(*c));if(!c)return CB_RESOURCE_FAILURE;c->owner=owner;c->token=++serial;
+        struct cb_io_owner_watch watch={owner,c->token,1};cb_status_t status=cb_invoke(&client,io,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),0);if(status){release(c);return status;}c->next=contexts;contexts=c;}
+    c->clip=screen.raster.clip;c->mode=screen.raster.mode;cb_copy(c->matrix,screen.raster.matrix,sizeof(c->matrix));return CB_OK;
+}
+static void drop_context(struct screen_context *c){struct cb_io_owner_watch watch={c->owner,c->token,0};CB_REQUIRE(cb_invoke(&client,io,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),0)==CB_OK);struct screen_context **at=&contexts;while(*at!=c)at=&(*at)->next;*at=c->next;release(c);}
+static int screen_access(unsigned op,const unsigned char *payload,size_t bytes){
+    if(op==CB_GRAPHICS_INFO || op==CB_GRAPHICS_SURFACE_CREATE)return 0;
+    if(op==CB_GRAPHICS_FILL || op==CB_GRAPHICS_GLYPH || op==CB_GRAPHICS_GLYPHS)return 1;
+    if(bytes<8)return 0;
+    uint64_t id;cb_copy(&id,payload,8);if(!id)return 1;
+    if(op==CB_GRAPHICS_BLIT && bytes==sizeof(struct cb_graphics_blit)){struct cb_graphics_blit b;cb_copy(&b,payload,sizeof(b));if(!b.source)return 1;}
+    return 0;
+}
 static cb_status_t operation(uint64_t owner,unsigned op,const unsigned char *p,size_t bytes,void *out,size_t *n){
+    if(screen_access(op,p,bytes)){struct cb_io_console_access access={owner,CB_CONSOLE_GRAPHICS,0};cb_status_t status=cb_invoke(&client,io,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_CONSOLE_ACCESS,&access,sizeof(access),0);if(status)return status;select_context(owner);}
     if(op==CB_GRAPHICS_INFO && !bytes){struct cb_graphics_info info={screen.raster.width,screen.raster.height,0,(uint64_t)screen.raster.width*screen.raster.height*4};for(struct surface *it=surfaces;it;it=it->next){++info.surfaces;info.pixel_bytes+=(uint64_t)it->raster.width*it->raster.height*4;}cb_copy(out,&info,sizeof(info));*n=sizeof(info);return CB_OK;}
     if(op==CB_GRAPHICS_FILL && bytes==sizeof(struct cb_rectangle)){struct cb_rectangle r;cb_copy(&r,p,sizeof(r));if(r.reserved || r.color>0xffffff || r.x>32767 || r.y>32767 || r.width>32767 || r.height>32767)return CB_BAD_REQUEST;struct gfx_surface *s=&screen.raster;struct gfx_rect rect={r.x,r.y,r.width,r.height};
         if(gfx_fill_rect(s,rect,r.color|0xff000000)){
@@ -69,7 +93,7 @@ static cb_status_t operation(uint64_t owner,unsigned op,const unsigned char *p,s
     if(op==CB_GRAPHICS_SURFACE_RELEASE && bytes==8){if(!id)return CB_DENIED;destroy(s);return CB_OK;}
     if(op==CB_GRAPHICS_SURFACE_INFO && bytes==8){struct gfx_surface snapshot=s->raster;if(s==&screen && pending_copy.active)gfx_damage(&snapshot,pending_copy.damage);struct gfx_surface *r=&snapshot;struct cb_graphics_surface_info info={id,r->generation,r->width,r->height,r->damage.x,r->damage.y,r->damage.width,r->damage.height,r->dirty,0};cb_copy(out,&info,sizeof(info));*n=sizeof(info);return CB_OK;}
     if(op==CB_GRAPHICS_PRESENT && bytes==8)return id?CB_DENIED:present();
-    if(op==CB_GRAPHICS_STATE && bytes==sizeof(struct cb_graphics_state)){struct cb_graphics_state state;cb_copy(&state,p,sizeof(state));if(state.reserved || state.composition>GFX_SOURCE_OVER || state.clip_width<0 || state.clip_height<0 || !gfx_transform(&s->raster,state.matrix))return CB_BAD_REQUEST;gfx_clip(&s->raster,(struct gfx_rect){state.clip_x,state.clip_y,state.clip_width,state.clip_height});s->raster.mode=state.composition;return CB_OK;}
+    if(op==CB_GRAPHICS_STATE && bytes==sizeof(struct cb_graphics_state)){struct cb_graphics_state state;cb_copy(&state,p,sizeof(state));if(state.reserved || state.composition>GFX_SOURCE_OVER || state.clip_width<0 || state.clip_height<0 || !gfx_transform(&s->raster,state.matrix))return CB_BAD_REQUEST;gfx_clip(&s->raster,(struct gfx_rect){state.clip_x,state.clip_y,state.clip_width,state.clip_height});s->raster.mode=state.composition;return s==&screen?save_context(owner):CB_OK;}
     if(op>=CB_GRAPHICS_LINE && op<=CB_GRAPHICS_PATH && bytes>=sizeof(struct cb_graphics_draw)){struct cb_graphics_draw d;cb_copy(&d,p,sizeof(d));if(d.fill>1 || (op!=CB_GRAPHICS_PATH && bytes!=sizeof(d)))return CB_BAD_REQUEST;struct gfx_point points[4];for(unsigned i=0;i<4;++i){if(d.x[i]<-32768 || d.x[i]>32767 || d.y[i]<-32768 || d.y[i]>32767){if(op!=CB_GRAPHICS_ARC || i!=2)return CB_BAD_REQUEST;}points[i]=(struct gfx_point){d.x[i],d.y[i]};}
         struct gfx_rect rect={d.x[0],d.y[0],d.x[1],d.y[1]};
         if(op==CB_GRAPHICS_LINE)gfx_line(&s->raster,points[0],points[1],d.color);
@@ -99,7 +123,7 @@ static cb_status_t operation(uint64_t owner,unsigned op,const unsigned char *p,s
 __attribute__((noreturn)) void _start(const struct cb_startup *startup){
     (void)startup;io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);display=cb_acquire(CB_DISPLAY_NAME,(struct cb_interface_id)CB_DISPLAY_INTERFACE_ID);memory=cb_acquire(CB_MEMORY_NAME,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID);CB_REQUIRE(cb_invoke(&client,display,(struct cb_interface_id)CB_DISPLAY_INTERFACE_ID,CB_DISPLAY_INFO,NULL,0,0)==CB_OK);struct cb_display_info info;cb_copy(&info,cb_result(&client),sizeof(info));CB_REQUIRE(info.width && info.height && info.width<=32767 && info.height<=32767);uint32_t *buffer=allocate((size_t)info.width*info.height*4);CB_REQUIRE(buffer);gfx_init(&screen.raster,buffer,info.width,info.height);gfx_damage(&screen.raster,(struct gfx_rect){0,0,info.width,info.height});
     static const char *names[]={"info","fill","glyph","surface_create","surface_release","surface_info","state","line","rectangle","ellipse","arc","bezier","path","bitmap","blit","present","glyphs"};cb_handle_t pub=cb_publish(&client,CB_GRAPHICS_NAME,(struct cb_interface_id)CB_GRAPHICS_INTERFACE_ID,names,17);
-    for(;;){uint64_t bytes;CB_REQUIRE(cb_system_receive(input,sizeof(input),&bytes,0)==CB_OK && bytes>=sizeof(struct cb_delivery_header));struct cb_delivery_header d;cb_copy(&d,input,sizeof(d));if(d.call.flags&CB_CALL_SYSTEM_EVENT){if(d.call.operation==CB_IO_OWNER_EXIT && d.call.payload_bytes==8){struct surface *s=surfaces;while(s){struct surface *next=s->next;if(s->id==d.call.handle)destroy(s);s=next;}continue;}if(d.call.operation==CB_HANDLE_RELEASE){while(surfaces)destroy(surfaces);release(screen.raster.pixels);cb_system_release(pub);cb_system_release(display);cb_system_release(memory);cb_exit(0);}continue;}
+    for(;;){uint64_t bytes;CB_REQUIRE(cb_system_receive(input,sizeof(input),&bytes,0)==CB_OK && bytes>=sizeof(struct cb_delivery_header));struct cb_delivery_header d;cb_copy(&d,input,sizeof(d));if(d.call.flags&CB_CALL_SYSTEM_EVENT){if(d.call.operation==CB_IO_OWNER_EXIT && d.call.payload_bytes==8){struct surface *s=surfaces;while(s){struct surface *next=s->next;if(s->id==d.call.handle)destroy(s);s=next;}struct screen_context *c=contexts;while(c){struct screen_context *next=c->next;if(c->token==d.call.handle)drop_context(c);c=next;}continue;}if(d.call.operation==CB_HANDLE_RELEASE){while(surfaces)destroy(surfaces);while(contexts)drop_context(contexts);release(screen.raster.pixels);cb_system_release(pub);cb_system_release(display);cb_system_release(memory);cb_exit(0);}continue;}
         struct cb_admission caller;CB_REQUIRE(d.context_bytes<=bytes-sizeof(d) && d.call.payload_bytes==bytes-sizeof(d)-d.context_bytes);cb_status_t status=CB_DENIED;size_t n=0;unsigned char out[sizeof(struct cb_graphics_surface_info)];if(d.call.handle==pub && cb_admission_parse(input+sizeof(d),d.context_bytes,&caller))status=operation(caller.process,d.call.operation,input+sizeof(d)+d.context_bytes,d.call.payload_bytes,out,&n);CB_REQUIRE(cb_respond(&reply,&d,status,out,n)==CB_OK);
     }
 }

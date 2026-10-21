@@ -1307,3 +1307,11 @@ test-iso9660: $(ISO)
 $(BUILD)/tests/apps/private-check.elf: tests/apps/private-check.c $(wildcard interfaces/*.h) sdk/service.h sdk/stream.h sdk/system.c sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+.PHONY: test-session-policy
+test-session-policy:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/sessions.c -Wl,--gc-sections -o $(BUILD)/tests/session-policy
+	$(BUILD)/tests/session-policy
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/graphics-access.c -Wl,--gc-sections -o $(BUILD)/tests/graphics-access
+	$(BUILD)/tests/graphics-access

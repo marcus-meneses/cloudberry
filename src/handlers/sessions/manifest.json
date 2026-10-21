@@ -6,7 +6,8 @@
       "scope": "self",
       "operations": [
         "session",
-        "owner_watch"
+        "owner_watch",
+        "credentials"
       ]
     },
     {
@@ -24,7 +25,8 @@
         "self",
         "begin",
         "end",
-        "status"
+        "status",
+        "revoke_uid"
       ]
     }
   ]

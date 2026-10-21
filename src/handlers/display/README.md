@@ -34,3 +34,10 @@ before such a paint, one readback initializes it. The shadow is retained for the
 resident I/O backend's lifetime, uses mem.pages_alloc through the hub and costs
 width×height×4 bytes rounded to pages (3.90625 MiB at 1280×800). Failure to allocate
 it leaves fills/blits working and reports copy unavailable for graphics fallback.
+
+Screen access now follows kernel-owned keyboard focus and session membership.
+The frontend checks the authenticated caller before mutating screen state;
+background sessions cannot bypass this by acquiring a lower rendering layer.
+See [session console policy](../sessions/README.md#foreground-console-boundary).
+Already authorized operations may finish during a focus transition. This remains
+one console, without a secure compositor or secure-attention authentication UI.

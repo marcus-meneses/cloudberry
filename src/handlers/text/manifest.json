@@ -29,6 +29,13 @@
         "cell",
         "cursor"
       ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "console_access"
+      ]
     }
   ]
 }

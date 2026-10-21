@@ -8,8 +8,9 @@ nested interactive login and separate persistent development media are implement
 See the closure at the end for validation. Earlier sections record chronological
 milestones and their limitations at that time; current contracts live beside code.
 
-Next bounded gaps: a guest installer/user application installation, live
-credential/group revocation and secure display/input ownership. Explicit offline
+Next bounded gap: a dedicated guest installer/user application installation.
+Explicit account revocation and foreground console authorization are implemented;
+secure-attention UI and a full compositor remain separate work. Explicit offline
 updates, app-specific data authorization and session resource revocation are closed.
 Session stop remains cooperative; forced termination and a secure compositor are
 not provided by this milestone. Hardware/native KVM validation remains separate.
@@ -1774,3 +1775,46 @@ file reads and new handle acquisition/invocation return REVOKED, releases existi
 resources successfully, and exits; its parent remains live. Host tests cover stop
 failures versus pending drain, malformed atomic home frames and OOM rollback.
 The final candidate build and GPT/ext4 checks pass. Disposable media were removed.
+
+
+### Session close, account revocation and foreground console (2026-10-21)
+
+1. Close failures are retained in status and returned as errors with available
+   drain data. Missing records are handled; successful administrative retries clear
+   retained errors. `accounts end-session SID` permits targeted administrative
+   close/retry, including non-boot root sessions; SID 0 stays protected. Already exited processes do not acquire false stop failures.
+2. Explicit root/admin `revoke_uid` closes matching session subtrees and all live
+   matching-UID processes, including boot-session authenticated processes. UID 0
+   is protected. `accounts revoke`, `disable --end-sessions` and password changes
+   with `--end-sessions` expose the policy. Database updates remain independent
+   transactions; existing credential snapshots are otherwise preserved.
+3. Screen mutations and screen-source blits require foreground session/lineage
+   authority at each public rendering frontend. Trusted upstream renderer bindings
+   preserve the exchangeable text/graphics/display chain. Offscreen surfaces remain
+   owner-local. Admitted operations may finish across a focus change.
+
+Tests remain isolated from candidate and persistent developer disks. Host policy
+checks cover close failures/retries, UID selection, administrative authority,
+foreground denial, trusted-chain exemptions and screen readback classification.
+Four-CPU TCG nested login/private-data/monitor/logout acceptance passed in
+`console/3d6d522736e8413e89c02b5673955dc1`. The dedicated identity acceptance
+passed in `console/db1a8dbda7d34d789860439eeac00ef6`, including a live
+different-UID child, denied text/graphics/display access and screen readback,
+allowed owned offscreen allocation, blocked-input revocation and parent survival.
+Reports are under `bin/tests`; successful disposable media was cleaned. No forced termination,
+compositor, guest installer or automatic live group rewriting is introduced.
+
+
+Final account-management acceptance passed on four-CPU TCG in
+`console/91b837cbb5a844f086fe80fb61c052de`: authenticated execution, admin group
+management, explicit UID revocation, disable-and-end-sessions, re-enable and
+account/group deletion. The focused runner now applies the unrelated large-pipe
+post-check only to full console runs (accounts/boot-filesystem modes excluded).
+`make build`, `test-session-policy`, `test-credentials`, `test-handles`,
+`test-manifest` and `test-provider-definition` passed. The candidate was rebuilt;
+latest native KVM/physical-hardware acceptance remains separate.
+
+Console handoff closure: screen transform/clip/composition is now per drawing
+process, with owner-exit cleanup and default state for new callers. Administrative
+self-session close accepts revoked stdout after successful closure. Host screen
+authority/state and session policy checks pass.

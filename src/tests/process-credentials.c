@@ -3,12 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 #include "../kmodules/shared/process.c"
-static unsigned live;static int deny;
+static unsigned live;static int deny,fail_files;
 static struct kernel_surface_result allocator(MODULE_ARGS){MODULE_UNUSED();void *p=deny?NULL:calloc(b,c);if(p)++live;return module_result((uintptr_t)p,p!=NULL);}
 static struct kernel_surface_result disposer(MODULE_ARGS){MODULE_UNUSED();if(b){assert(live);--live;free((void *)b);}return module_result(1,1);}
 static struct kernel_surface_result cpu(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
+static struct kernel_surface_result revoke_files(MODULE_ARGS){MODULE_UNUSED();return module_result(1,!fail_files);}
 int main(void){
-    struct process root={.info={.id=1,.state=PROCESS_READY},.credentials={.generation=1}},child={.info={.id=2,.state=PROCESS_READY},.credentials={.generation=1}};root.next=&child;state.head=&root;struct {struct kernel_surfaces header;struct kernel_surface methods[2];} hub={0};hub.header.count=2;hub.header.methods_address=(uintptr_t)hub.methods;strcpy(hub.methods[0].name,"handles.revoke");hub.methods[0].call=cpu;strcpy(hub.methods[1].name,"filesystem.revoke");hub.methods[1].call=cpu;state.hub=&hub.header;state.alloc=allocator;state.free=disposer;state.cpu=cpu;
+    struct process root={.info={.id=1,.state=PROCESS_READY},.credentials={.generation=1}},child={.info={.id=2,.state=PROCESS_READY},.credentials={.generation=1}};root.next=&child;state.head=&root;struct {struct kernel_surfaces header;struct kernel_surface methods[2];} hub={0};hub.header.count=2;hub.header.methods_address=(uintptr_t)hub.methods;strcpy(hub.methods[0].name,"handles.revoke");hub.methods[0].call=cpu;strcpy(hub.methods[1].name,"filesystem.revoke");hub.methods[1].call=revoke_files;state.hub=&hub.header;state.alloc=allocator;state.free=disposer;state.cpu=cpu;
     struct {struct cb_credentials h;uint64_t groups[2];} input={.h={.uid=42,.gid=2,.groups=2},.groups={1,8}},output={0};
     assert(!process_surface_credentials(1,1,(uintptr_t)&input,sizeof(input),0,0).status);
     assert(!process_surface_credentials(2,2,1,0,0,0).status && live==2 && root.groups!=child.groups);
@@ -34,5 +35,15 @@ int main(void){
     child.info.state=PROCESS_RUNNING;struct kernel_surface_result closed=process_surface_session(1,2,1,0,0,0);assert(!closed.status && closed.value==1);
     struct cb_session_status drain;assert(!process_surface_session(1,3,(uintptr_t)&drain,sizeof(drain),0,0).status && drain.closing && drain.running==1 && drain.stop_failures==1);
     child.info.state=PROCESS_EXITED;assert(!process_surface_session(1,2,1,0,0,0).status);assert(!process_surface_session(1,3,(uintptr_t)&drain,sizeof(drain),0,0).status && !drain.running && !drain.stop_failures);
+    /* UID revocation also reaches authenticated processes in boot session 0,
+     * without closing unrelated boot processes or changing credential snapshots. */
+    root.session_closed=child.session_closed=0;root.session=child.session=0;root.credentials.uid=99;child.credentials.uid=42;
+    root.info.state=child.info.state=PROCESS_READY;
+    assert(!process_surface_session(99,4,0,0,0,0).status && root.session_closed && !child.session_closed);
+    assert(root.credentials.uid==99 && child.credentials.uid==42);
+    assert(process_surface_credentials(1,1,(uintptr_t)&drop,sizeof(drop),0,0).status);
+    assert(!process_surface_session(99,5,(uintptr_t)&drain,sizeof(drain),0,0).status && drain.session.uid==99 && drain.members==1 && drain.closing);
+    fail_files=1;assert(process_surface_session(99,4,0,0,0,0).value==1 && root.session_stop_failed);fail_files=0;assert(!process_surface_session(99,4,0,0,0,0).value && !root.session_stop_failed);
+    assert(process_surface_session(0,4,0,0,0,0).status && !child.session_closed);
     release(root.home);release(child.home);release(root.groups);release(child.groups);assert(!live);puts("PASS process credentials: independent inheritance, group checks, replacement, invalid length, OOM and lifecycle denial");
 }

@@ -136,3 +136,14 @@ membership closed, calls handles.revoke/filesystem.revoke and records failed sto
 requests. Operation 3 returns a copied cb_session_status, including pending members
 and failures. Closing by SID continues to work after owner reap. No code, stack or
 active request payload is reclaimed by revocation.
+
+Explicit revocation adds trusted `process.session(UID,4,excludePID)` and
+`process.session(UID,5,out,capacity)` for nonzero UID selection and copied status.
+Operation 4 marks matching credential snapshots closed under the process lock,
+then uses existing handle/filesystem revocation and cooperative stop mechanisms.
+It does not close every member of session 0. Operation 5 reports matching UID
+members/running/failures in the existing 64-byte status structure. The sessions
+handler separately closes recorded descendant session subtrees. UID 0 cannot be
+the account-revocation target. Closed processes cannot replace their credentials
+or home, including a previously dispatched authentication transition. Finished
+processes are skipped during retries; failures remain distinct from a live drain.

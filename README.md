@@ -733,6 +733,8 @@ src/
 │   ├── filesystem-permissions.c
 │   ├── password.py
 │   ├── identity-store.c
+│   ├── sessions.c
+│   ├── graphics-access.c
 │   ├── identity-transactions.c
 │   ├── identity.py
 │   ├── terminal-editor.c
@@ -1014,8 +1016,9 @@ The identity provider verifies passwords, authorizes root/admin management and
 authenticates app execution through the ordinary [accounts app](apps/accounts/README.md).
 Filesystem calls enforce ownership/mode bits, including on existing file streams.
 Explicit home provisioning and nested interactive sessions are implemented;
-per-user installers and live group revocation remain open; app-specific home data
-authorization and session-wide resource revocation are implemented.
+per-user installers remain open. App-specific home data authorization, session-wide
+resource revocation and explicit administrator account revocation are implemented.
+Group edits retain snapshots unless an administrator explicitly revokes them.
 
 The default keyboard layout is ABNT2 (IBM remains bundled). Boot filesystem
 contents are accessible through /@filesystem at /boot: kernel.elf, cloudberry.cnf,
@@ -1104,3 +1107,19 @@ from one build, checked through a content manifest. Boot only compares a 64-byte
 build ID with the mounted system before loading disk modules/providers; all
 initialization, repair/import decisions and updates stay outside startup.
 See [development image workflow](src/tools/development-images.md).
+
+
+## Foreground authority and explicit account revocation
+
+Session close errors are preserved in copied drain status, with explicit
+administrator retry. `accounts revoke USER`, `accounts disable USER --end-sessions`
+and `accounts passwd USER --end-sessions` revoke live non-root authority; ordinary
+account/group/password edits keep existing credential snapshots. These operations
+retain cooperative shutdown and never reclaim a running context forcibly.
+
+Text -> graphics -> display now checks foreground session/launch-lineage authority
+before screen mutations, using kernel focus facts through installation-bound IO.
+Owned offscreen graphics remain usable in the background; screen readback does not.
+This is one shared console, without a secure compositor or secure-attention UI.
+See the sessions provider contract for precise admission and retry semantics.
+Focused host checks: `make -C src test-session-policy test-credentials test-handles`.

@@ -48,3 +48,22 @@ removes its credential and supplementary memberships, but retains existing files
 Built-in root/admin/users invariants are checked by the handler. Membership
 changes take effect on subsequent authentication; running processes retain their
 credential snapshots. Errors print CB status and never retry uncertain commits.
+
+Explicit administrator revocation:
+
+- `accounts end-session SID`: close/retry one session as root/admin; boot SID 0
+  is protected, including when retrying a non-boot root session.
+- `accounts revoke USER`: revoke current processes/sessions; repeat to retry a
+  failed cooperative stop. The account remains enabled.
+- `accounts disable USER --end-sessions`: commit the disabled account, then revoke
+  its running authority. A close error does not roll back the account transaction;
+  retry with `accounts revoke USER`.
+- `accounts passwd USER --end-sessions`: update the password, then explicitly revoke
+  current authority. Without the option, existing sessions keep their snapshots.
+
+Root/admin credentials are checked by the sessions handler, independently of app
+manifest grants. UID 0 is protected. Revoking the caller's own UID also revokes
+its stdout; the app exits without attempting another output operation. Group
+edits retain snapshots; use `accounts revoke USER` when immediate withdrawal is
+required. An unresponsive process may continue executing with its resources
+revoked; these commands do not force-kill it.

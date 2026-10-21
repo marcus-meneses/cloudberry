@@ -55,7 +55,8 @@
       "operations": [
         "self",
         "begin",
-        "end"
+        "end",
+        "revoke_uid"
       ]
     }
   ]
