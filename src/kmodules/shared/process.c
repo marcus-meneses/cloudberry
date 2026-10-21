@@ -1,4 +1,5 @@
 #include "process.h"
+#include "../../interfaces/sessions.h"
 #include "../../interfaces/applications.h"
 #include "../../interfaces/system.h"
 #include "process-elf.h"
@@ -9,7 +10,7 @@
 #include "../../kernel/cpu.h"
 struct page {struct page *next;struct mem_pages frame;uint64_t address;uint32_t flags,mapped;};
 struct allocation {struct allocation *next;uint64_t address,bytes;};
-struct process {struct cb_credentials credentials;uint64_t *groups;struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom,user_pages;char name[256];uint32_t name_bytes,name_truncated;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
+struct process {uint64_t parent,session,session_parent,session_closed;struct cb_credentials credentials;uint64_t *groups;struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom,user_pages;char name[256];uint32_t name_bytes,name_truncated;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct process *head;
     kernel_surface_call alloc,free,pages_alloc,pages_free,stack_alloc,stack_free,space_create,space_destroy,space_map,create,control,entry_stack,stat,read,cpu;} state;
 struct kernel_surface_result process_surface_check(MODULE_ARGS);
@@ -93,7 +94,7 @@ struct kernel_surface_result process_surface_load(MODULE_ARGS){
     p->info.state=PROCESS_READY;flags=lock();p->next=state.head;state.head=p;unlock(flags);return module_result(p->info.id,1);
 }
 struct kernel_surface_result process_surface_start(MODULE_ARGS){
-    MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);if(!p || p->info.state!=PROCESS_READY){unlock(flags);return module_result(0,0);}p->info.state=PROCESS_LOADING;unlock(flags);
+    MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);if(!p || p->info.state!=PROCESS_READY || p->session_closed){unlock(flags);return module_result(0,0);}p->info.state=PROCESS_LOADING;unlock(flags);
     struct thread_request r={.abi=2,.cpu=p->info.cpu,.process_id=p->info.id,.address_space=p->info.address_space,.stack_bytes=32768,.entry=(uintptr_t)kernel_surface_find(state.hub,"process.run"),.major=1,.payload={.arguments={(uintptr_t)p}}};
     /* The entry waits for publication if create wakes its AP immediately. */
     struct kernel_surface_result created=CALL(state.create,&r,0,0);flags=lock();if(!created.status)p->info.thread=created.value;__atomic_store_n(&p->info.state,created.status?PROCESS_READY:PROCESS_RUNNING,__ATOMIC_RELEASE);unlock(flags);return created;
@@ -223,10 +224,26 @@ struct kernel_surface_result process_surface_credentials(MODULE_ARGS){
     if(b==0){size_t bytes=sizeof(p->credentials)+p->credentials.groups*8;if(!c || d<sizeof(p->credentials)){unlock(flags);return module_result(bytes,0);}*(struct cb_credentials *)c=p->credentials;if(d>=bytes)for(size_t i=0;i<p->credentials.groups;++i)((uint64_t *)(c+sizeof(p->credentials)))[i]=p->groups[i];unlock(flags);return module_result(bytes,1);}
     if(b==3){int yes=p->credentials.gid==c;for(size_t i=0;i<p->credentials.groups;++i)if(p->groups[i]==c)yes=1;unlock(flags);return module_result(yes,1);}
     struct cb_credentials value;const uint64_t *groups;
-    if(b==2){struct process *parent=find(c);if(!parent || p->info.state!=PROCESS_READY || p->info.thread){unlock(flags);return module_result(0,0);}value=parent->credentials;groups=parent->groups;}
+    if(b==2){struct process *parent=find(c);if(!parent || parent->session_closed || p->info.state!=PROCESS_READY || p->info.thread){unlock(flags);return module_result(0,0);}value=parent->credentials;groups=parent->groups;}
     else if(b==1 && (p->info.state==PROCESS_READY || p->info.state==PROCESS_RUNNING) && c && d>=sizeof(value)){value=*(const struct cb_credentials *)c;if(value.groups>(SIZE_MAX-sizeof(value))/8 || d!=sizeof(value)+value.groups*8){unlock(flags);return module_result(0,0);}groups=(const void *)(c+sizeof(value));}
     else {unlock(flags);return module_result(0,0);}
     if(p->credentials.generation==UINT64_MAX){unlock(flags);return module_result(0,0);}
     uint64_t *copy=value.groups?allocate(value.groups*8):NULL;if(value.groups && !copy){unlock(flags);return module_result(0,0);}for(size_t i=0;i<value.groups;++i)copy[i]=groups[i];
+    if(b==2){struct process *parent=find(c);p->parent=c;p->session=parent->session;p->session_parent=parent->session_parent;}
     uint64_t *old=p->groups;value.generation=p->credentials.generation+1;p->credentials=value;p->groups=copy;unlock(flags);release(old);return module_result(1,1);
+}
+
+/* Trusted mechanics only. Session policy and lifetime belong to the privileged
+ * sessions provider. Never reclaim a running context on logout. */
+struct kernel_surface_result process_surface_session(MODULE_ARGS){
+    MODULE_UNUSED();if(!state.hub)return module_result(0,0);uint64_t flags=lock();struct process *p=find(a);if(!p && b!=2){unlock(flags);return module_result(0,0);}
+    if(b==0 && c && d>=sizeof(struct cb_session)){*(struct cb_session *)c=(struct cb_session){p->session,p->session_parent,p->session,p->credentials.uid};unlock(flags);return module_result(1,1);}
+    if(b==1 && !p->session_closed && p->session!=a && p->info.state==PROCESS_RUNNING){p->session_parent=p->session;p->session=a;unlock(flags);return module_result(1,1);}
+    if(b==2 && a){for(struct process *q=state.head;q;q=q->next)if(q->session==a)q->session_closed=1;unlock(flags);
+        uint64_t cursor=0;for(;;){flags=lock();uint64_t next=0;for(struct process *q=state.head;q;q=q->next)if(q->session==a && q->info.id!=c && q->info.id>cursor && (!next || q->info.id<next))next=q->info.id;unlock(flags);if(!next)break;(void)process_surface_stop(next,0,0,0,0,0);cursor=next;}return module_result(1,1);}
+    unlock(flags);return module_result(0,0);
+}
+struct kernel_surface_result process_surface_ancestor(MODULE_ARGS){
+    MODULE_UNUSED();if(!state.hub || !a || !b)return module_result(0,0);uint64_t flags=lock();struct process *p=find(b);int yes=p && !p->session_closed && a==b;if(p && p->session_closed)p=NULL;
+    while(p && p->parent){if(p->parent==a){yes=1;break;}if(p->parent>=p->info.id)break;p=find(p->parent);}unlock(flags);return module_result(yes,1);
 }

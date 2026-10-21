@@ -151,3 +151,16 @@ on focus changes prevent other readers from retrieving owner-era key events.
 
 The packaged default is `layout=abnt2`. IBM remains selectable with `layout=ibm`;
 both definitions continue to be supplied under /system/config/keyboard.
+
+## Nested session focus
+
+Terminals explicitly claim input. A descendant process can push its parent's
+focus, validated by kernel-owned process ancestry through restricted IO. Unrelated
+claims fail BUSY. Focus-stack nodes belong to this handler's private memory;
+release or owner death restores the nearest live, open-session owner. Refused
+claims preserve focus, and generation/cursor barriers exclude previous-owner keys.
+Closed-session reads and pressed-state queries return REVOKED. Pending reads are
+checked when served, including on the next hardware event; a closed owner cannot
+retain keyboard focus through such a read. No terminal forwards structured events.
+Keyboard reports the current owner/generation mechanically to IO so mouse can
+isolate login sessions without adopting keyboard's exact per-process focus policy.

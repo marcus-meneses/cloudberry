@@ -14,7 +14,9 @@
       "scope": "boot-input",
       "operations": [
         "read",
-        "state"
+        "state",
+        "focus_claim",
+        "focus_release"
       ]
     },
     {

@@ -15,6 +15,10 @@ int main(void){
     assert(access_file(&mount,&r)==CB_OK);caller.uid=43;assert(access_file(&mount,&r)==CB_DENIED);mode=0750;group=1;assert(access_file(&mount,&r)==CB_DENIED);r.path="/private";r.operation=FS_LIST;assert(access_file(&mount,&r)==CB_OK);group=0;assert(access_file(&mount,&r)==CB_DENIED);
     caller.uid=42;r.path="/private/file";r.operation=FS_PREPARE;r.mode=CB_FILE_APPEND;missing=1;assert(access_file(&mount,&r)==CB_OK && r.uid==42 && r.gid==2);mode=0500;assert(access_file(&mount,&r)==CB_DENIED);mode=0700;rootmode=0700;assert(access_file(&mount,&r)==CB_DENIED);rootmode=0777;valid=0;assert(access_file(&mount,&r)==CB_DENIED);caller.uid=0;assert(access_file(&mount,&r)==CB_OK);
     caller.uid=42;valid=1;mode=0700;rootmode=0700;fs.cpu=cpu_fixture;struct mount parent={.id=1,.path="/",.backend=&format};fs.mounts=&parent;mount.path="/mounted";r.operation=FS_LIST;r.path="/private";assert(access_file(&mount,&r)==CB_DENIED);rootmode=0777;assert(access_file(&mount,&r)==CB_OK && !parent.refs);mount.path="/";
+    rootmode=0777;mode=0700;caller.uid=42;r.path="/private/file";missing=0;
+    r.operation=FS_CHMOD;r.mode=0640;assert(access_file(&mount,&r)==CB_OK);caller.uid=43;assert(access_file(&mount,&r)==CB_DENIED);
+    caller.uid=42;r.operation=FS_CHOWN;r.uid=99;r.gid=8;assert(access_file(&mount,&r)==CB_DENIED);
+    caller.uid=0;r.uid=UINT64_MAX;assert(access_file(&mount,&r)==CB_DENIED);r.uid=99;assert(access_file(&mount,&r)==CB_OK && r.uid==99 && r.gid==8);
     r.operation=FS_SYNC;r.path=NULL;assert(access_file(&mount,&r)==CB_DENIED);
     puts("PASS filesystem permissions: traversal, owner/group/other, creation parent access, missing metadata and root DAC bypass");
 }

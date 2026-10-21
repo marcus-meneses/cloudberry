@@ -81,7 +81,12 @@ serialize per mount using sleeping waiters without retaining CPU locks over I/O;
 already dispatched work completes, while queued requests use current policy.
 New files/directories receive caller UID/primary GID and modes 0600/0700. IDs that
 cannot be represented in ext4's 32-bit ownership fields fail rather than truncate.
-No public chmod/chown or automatic home provisioner is supplied yet.
+Public METADATA returns a separate copied UID/GID/mode reply; the old STAT ABI
+remains unchanged. CHMOD accepts 0777 bits and requires owner/root/admin; CHOWN
+requires root/admin and representable 32-bit IDs. Both check ancestors, metadata
+and namespace policy, and invoke backend journaled mutations. Protected system
+paths still fail without installation authority. Identity owns explicit home
+provisioning through the same handle; no automatic boot provisioning is added.
 
 The verified boot disk's ISO9660 filesystem mounts at /boot after ext4 adoption.
 Its metadata is synthesized read-only, and ordinary mutations are additionally

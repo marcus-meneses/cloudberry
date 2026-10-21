@@ -31,4 +31,9 @@ struct kernel_surface_result process_surface_sample(MODULE_ARGS);
  * (READY child,2,parent PID) inherits; (PID,3,GID) tests membership.
  * No user gate exposes replacement. Boot-loaded processes start as root. */
 struct kernel_surface_result process_surface_credentials(MODULE_ARGS);
+/* session(PID,0,out,capacity), session(owner,1) begins, session(owner,2) closes.
+ * ancestor(ancestor PID, descendant PID) returns a boolean for an open-session
+ * descendant; reflexive queries test that the process/session remains live. Trusted only. */
+struct kernel_surface_result process_surface_session(MODULE_ARGS);
+struct kernel_surface_result process_surface_ancestor(MODULE_ARGS);
 #endif

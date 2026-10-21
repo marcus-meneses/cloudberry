@@ -227,7 +227,7 @@ struct kernel_surface_result ext4_fs_surface_write(MODULE_ARGS){
 struct kernel_surface_result ext4_fs_surface_mutate(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);
     if(v->info.readonly || !v->engine){v->info.error=EXT4_READ_ONLY;finish(v);return module_result(0,0);}
-    int ok=d<=INT64_MAX && ext4_engine_mutate(v->engine,b,(void *)c,d,(void *)e);finish(v);return module_result(1,ok);
+    int ok=(b==EXT4_MUTATE_OWNER || d<=INT64_MAX) && ext4_engine_mutate(v->engine,b,(void *)c,d,(void *)e);finish(v);return module_result(1,ok);
 }
 struct kernel_surface_result ext4_fs_surface_sync(MODULE_ARGS){
     MODULE_UNUSED();struct volume *v=acquire(a);if(!v)return module_result(0,0);int ok=!v->engine || ext4_engine_sync(v->engine);finish(v);return module_result(1,ok);

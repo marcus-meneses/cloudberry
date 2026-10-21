@@ -66,3 +66,10 @@ focused guest client is fixture-only, never a default installed application.
 Physical-device/controller acceptance remains separate from emulated guest tests.
 The decoder follows the [HID class specification](https://www.usb.org/hid) and
 [HID Usage Tables](https://usb.org/document-library/hid-usage-tables-17).
+
+
+Mouse consumers remain independent within the foreground login session. The
+handler queries a copied keyboard-focus/session snapshot through restricted IO;
+other sessions receive DENIED, closed/reaped callers REVOKED. Focus transitions
+advance a replay floor; clients resynchronize instead of replaying events from a
+previous session. No keyboard report or terminal event forwarding is introduced.

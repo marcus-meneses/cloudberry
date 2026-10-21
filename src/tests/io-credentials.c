@@ -4,10 +4,20 @@
 #include "../kmodules/shared/io.c"
 static unsigned replacements;
 static struct kernel_surface_result credential_stub(MODULE_ARGS){MODULE_UNUSED();if(b==1){assert(a==9);++replacements;return module_result(1,1);}assert(a==8 || a==9);*(struct cb_credentials *)c=(struct cb_credentials){.uid=a,.gid=2,.generation=1};return module_result(sizeof(struct cb_credentials),1);}
+static unsigned session_mutations;
+static struct kernel_surface_result session_stub(MODULE_ARGS){MODULE_UNUSED();if(b){++session_mutations;return module_result(1,1);}*(struct cb_session *)c=(struct cb_session){a==9?100:200,0,0,a};return module_result(1,1);}
+static struct kernel_surface_result ancestor_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(a==b || (a==8 && b==9),1);}
+static struct kernel_surface_result cpu_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
 int main(void){
-    struct {struct kernel_surfaces h;struct kernel_surface entry;} table={0};table.h.count=1;table.h.methods_address=(uintptr_t)&table.entry;strcpy(table.entry.name,"process.credentials");table.entry.call=credential_stub;hub=&table.h;identity_owner=7;
+    struct {struct kernel_surfaces h;struct kernel_surface entry[4];} table={0};table.h.count=4;table.h.methods_address=(uintptr_t)table.entry;strcpy(table.entry[0].name,"process.credentials");table.entry[0].call=credential_stub;strcpy(table.entry[1].name,"process.session");table.entry[1].call=session_stub;strcpy(table.entry[2].name,"process.ancestor");table.entry[2].call=ancestor_stub;strcpy(table.entry[3].name,"cpu.control");table.entry[3].call=cpu_stub;hub=&table.h;identity_owner=7;
     uint64_t pid=9;struct cb_credentials result;struct io_invocation call={.process=8,.operation=CB_IO_CREDENTIALS,.input=&pid,.bytes=8,.output=&result,.capacity=sizeof(result)};
     io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED);pid=0;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && result.uid==8);
     struct {uint64_t pid;struct cb_credentials value;} request={.pid=9,.value={.uid=0}};call.operation=CB_IO_IDENTITY_SET;call.input=&request;call.bytes=sizeof(request);io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED && !replacements);call.process=7;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && replacements==1);
+    struct cb_io_session session={0};struct cb_session info;call=(struct io_invocation){.process=8,.operation=CB_IO_SESSION,.input=&session,.bytes=sizeof(session),.output=&info,.capacity=sizeof(info)};io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && info.id==200);
+    session.process=9;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED);session.process=0;session.operation=1;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED && !session_mutations);
+    sessions_owner=6;call.process=6;session.process=9;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && session_mutations==1);
+    uint64_t args[2]={8,9},yes=0;call=(struct io_invocation){.process=8,.operation=CB_IO_INPUT_ANCESTOR,.input=args,.bytes=16,.output=&yes,.capacity=8};io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED);keyboard_owner=8;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && yes);
+    args[0]=9;args[1]=1;call.operation=CB_IO_INPUT_FOCUS_SET;call.output=NULL;call.capacity=0;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && focus_pid==9 && focus_generation==1);io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_BAD_REQUEST);
+    struct cb_io_input_focus focused;pid=8;call=(struct io_invocation){.process=10,.operation=CB_IO_INPUT_FOCUS,.input=&pid,.bytes=8,.output=&focused,.capacity=sizeof(focused)};io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_DENIED);mouse_owner=10;io_surface_invoke((uintptr_t)&call,0,0,0,0,0);assert(call.status==CB_OK && focused.session==100 && focused.caller_session==200);
     puts("PASS IO credential authority: own queries, foreign-query refusal and installed-identity-only replacement");
 }

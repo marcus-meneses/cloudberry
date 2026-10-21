@@ -53,7 +53,7 @@ modules live under `/system/kmodules`, without a legacy boot-completion tree.
 └── tmp/
 ```
 
-Once home provisioning is implemented, non-root accounts use:
+Explicit `accounts home USER` provisioning creates the non-root account layout:
 
 ```text
 /home/<user-name>/
@@ -75,7 +75,8 @@ applications. Shared system executables live directly in `/system/apps`; private
 state (history, caches, preferences, databases, drafts) belongs in the running
 user's `<appname>.data`, including for system-provided applications. Users will
 install only for themselves. Account authentication and kernel credentials are implemented; installers,
-automatic homes/home grants and per-user catalogs remain subsequent milestones.
+user installation policy and per-user executable catalogs remain subsequent milestones.
+Home creation is explicit; startup only opens existing storage.
 
 Application filenames use catalog names without `.elf`; stable installation IDs
 remain in the authoritative catalog. Names are case-sensitive ASCII alphanumeric,
@@ -104,7 +105,7 @@ mutations, except a catalog-bound app may write descendants of its own
 installation identity; the IO bridge resolves it against the trusted catalog.
 The data directory itself, other apps' state and `_index` cannot be mutated
 through that exception. This is the current single boot-domain policy, not a full
-multi-user read-isolation implementation. App-data writes require a writable
+app-specific home data authorization implementation. UID/mode checks isolate users. App-data writes require a writable
 medium, just like other writes. `/system/root` is built with mode 0700; ext4 modes
 alone are not a replacement for future handle authorization policy.
 

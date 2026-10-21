@@ -2,12 +2,19 @@
 #define CLOUDBERRY_INTERFACE_IO_H
 #include "handle.h"
 #include "credentials.h"
+#include "sessions.h"
 #define CB_IO_NAME "/@io"
 #define CB_IO_INTERFACE_ID {{0x43,0x42,0x49,0x4f,0x30,0x31,0x46,0x3b,0x91,0xe1,0x40,0x0a,0x1c,0x87,0xc0,0x05}}
-enum {CB_IO_KEYBOARD_SUBSCRIBE=1,CB_IO_KEYBOARD_PROTOCOL,CB_IO_KEYBOARD_ACK,CB_IO_KEYBOARD_CLOSE,CB_IO_NOW_NS,CB_IO_PROCESS_LAUNCH,CB_IO_PROCESS_STOP,CB_IO_PROCESS_REAP,CB_IO_PROCESS_RELEASE,CB_IO_DISPLAY_INFO,CB_IO_DISPLAY_FILL,CB_IO_DISPLAY_BLIT,CB_IO_FILESYSTEM,CB_IO_OWNER_WATCH,CB_IO_DISPLAY_COPY,CB_IO_HID_SUBSCRIBE,CB_IO_HID_LIST,CB_IO_HID_OPEN,CB_IO_HID_DESCRIPTOR,CB_IO_HID_START,CB_IO_HID_ACK,CB_IO_HID_CLOSE,CB_IO_HID_GET_FEATURE,CB_IO_HID_SET_FEATURE,CB_IO_PROCESS_SAMPLE,CB_IO_CREDENTIALS,CB_IO_IDENTITY_SET,CB_IO_RANDOM};
+enum {CB_IO_KEYBOARD_SUBSCRIBE=1,CB_IO_KEYBOARD_PROTOCOL,CB_IO_KEYBOARD_ACK,CB_IO_KEYBOARD_CLOSE,CB_IO_NOW_NS,CB_IO_PROCESS_LAUNCH,CB_IO_PROCESS_STOP,CB_IO_PROCESS_REAP,CB_IO_PROCESS_RELEASE,CB_IO_DISPLAY_INFO,CB_IO_DISPLAY_FILL,CB_IO_DISPLAY_BLIT,CB_IO_FILESYSTEM,CB_IO_OWNER_WATCH,CB_IO_DISPLAY_COPY,CB_IO_HID_SUBSCRIBE,CB_IO_HID_LIST,CB_IO_HID_OPEN,CB_IO_HID_DESCRIPTOR,CB_IO_HID_START,CB_IO_HID_ACK,CB_IO_HID_CLOSE,CB_IO_HID_GET_FEATURE,CB_IO_HID_SET_FEATURE,CB_IO_PROCESS_SAMPLE,CB_IO_CREDENTIALS,CB_IO_IDENTITY_SET,CB_IO_RANDOM,CB_IO_SESSION,CB_IO_INPUT_ANCESTOR,CB_IO_INPUT_FOCUS_SET,CB_IO_INPUT_FOCUS};
 /* credentials: own PID=0 for ordinary callers; identity provider may query any
  * PID. identity_set: target PID then credential snapshot, provider-only.
  * random: requested uint64 byte count (<=64); hardware entropy or fail closed. */
+/* session: {pid,operation,exclude-on-close}, provider-only except self query (pid=0,op=0).
+ * input_ancestor: {ancestor,descendant}, keyboard only, returns uint64 boolean.
+ * input_focus_set: {pid,generation}, keyboard only. input_focus: caller PID,
+ * mouse/keyboard only, returns {focus PID,generation,focus SID,caller SID}. */
+struct cb_io_session {uint64_t process,operation,exclude;};
+struct cb_io_input_focus {uint64_t process,generation,session,caller_session;};
 enum {CB_IO_KEYBOARD_EVENT=1,CB_IO_PROCESS_EVENT=2,CB_IO_OWNER_EXIT=3,CB_IO_HID_EVENT=4};
 enum {CB_IO_DEVICE_ADDED=1,CB_IO_REPORT,CB_IO_DEVICE_REMOVED,CB_IO_ERROR};
 #include "applications.h"

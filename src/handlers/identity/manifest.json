@@ -24,7 +24,11 @@
       "name": "/@filesystem",
       "operations": [
         "open",
-        "stat"
+        "stat",
+        "metadata",
+        "mkdir",
+        "chmod",
+        "chown"
       ]
     },
     {
@@ -48,7 +52,8 @@
         "credential",
         "self",
         "authenticate",
-        "password"
+        "password",
+        "home"
       ]
     }
   ]

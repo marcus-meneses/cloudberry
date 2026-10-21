@@ -108,3 +108,20 @@ parent or existing children. Other callers may query only their own snapshot.
 The filesystem and identity provider read this kernel-owned identity for policy.
 Processes retain supplementary group snapshots until authentication/replacement
 or exit; database edits do not silently rewrite running identities.
+
+## Session membership and ancestry
+
+Trusted `process.session(PID,0,out,capacity)` copies `cb_session`;
+`process.session(owner,1)` begins a session using its monotonic PID;
+`process.session(owner,2,excludePID)` closes member launches and requests
+cooperative stops, excluding the owner currently completing END if specified.
+Closed membership prevents credential inheritance and process start. Closing by
+SID still works after its original owner has been reaped. Ordinary apps have no
+setter; IO restricts lifecycle mechanics to the installed sessions provider.
+Provider-owned records track parent sessions and owner-exit cleanup.
+
+`process.ancestor(ancestorPID,descendantPID)` follows immutable launch parents;
+missing/reaped intermediates fail closed. Keyboard uses this predicate through
+restricted IO to nest focus without allowing unrelated input takeover.
+Session 0 is the root boot domain. Credential replacement remains separate from
+session membership; no forced termination or existing-thread migration is added.

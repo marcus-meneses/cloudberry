@@ -22,7 +22,8 @@
         "hid_close",
         "hid_get_feature",
         "hid_set_feature",
-        "now_ns"
+        "now_ns",
+        "input_focus"
       ]
     },
     {

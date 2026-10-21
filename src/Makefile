@@ -79,13 +79,15 @@ LDFLAGS := -nostdlib -static -no-pie -Wl,--build-id=none \
     -Wl,-z,noexecstack -Wl,-z,max-page-size=0x1000 -Wl,-T,boot/linker.ld
 
 # USB boot medium avoids attaching a legacy IDE optical drive. SATA uses AHCI.
+DEV_DISK ?= $(BUILD)/cloudberry-dev.img
+QEMU_BOOT_IMAGE ?= $(ISO)
 QEMU_BOOT_WRITABLE ?= 0
 QEMU_BOOT_MEDIA_MODE = $(if $(filter 1,$(QEMU_BOOT_WRITABLE)),snapshot=on,readonly=on)
 QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
     $(QEMU_IOMMU_FLAGS) -accel $(QEMU_ACCEL) -cpu $(QEMU_CPU) -smp cpus=$(QEMU_CPUS),sockets=1,cores=$(QEMU_CPUS),threads=1 -bios "$(OVMF)" \
     -device VGA -device qemu-xhci,id=xhci \
     -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
-    -drive if=none,id=bootmedia,format=raw,$(QEMU_BOOT_MEDIA_MODE),file="$(ISO)" \
+    -drive if=none,id=bootmedia,format=raw,$(QEMU_BOOT_MEDIA_MODE),file="$(QEMU_BOOT_IMAGE)" \
     -device usb-bot,id=bootusb,bus=xhci.0 \
     -device scsi-hd,bus=bootusb.0,drive=bootmedia,bootindex=1 \
     -drive if=none,id=nvmedisk,format=raw,file="$(NVME_DISK)" \
@@ -163,6 +165,21 @@ $(NVME_DISK) $(SATA_DISK):
 
 run: build
 	@test -f "$(OVMF)" || { echo 'Set OVMF to the installed UEFI firmware path'; exit 1; }
+	bash boot/run-qemu.sh $(QEMU) $(QEMU_FLAGS)
+
+# Explicit initialization only. No update or migration of an existing disk.
+.PHONY: init-dev-disk run-dev
+init-dev-disk: build
+	python3 tools/init-dev-disk.py "$(ISO)" "$(DEV_DISK)"
+
+# Launch the initialized system as-is, without rebuilding or copying candidate.
+run-dev:
+	@test -f "$(DEV_DISK)" || { echo 'Run make -C src init-dev-disk first'; exit 1; }
+	@test -f "$(NVME_DISK)" -a -f "$(SATA_DISK)" || { echo 'Run make -C src build first'; exit 1; }
+	$(MAKE) _run-dev QEMU_BOOT_IMAGE="$(DEV_DISK)" QEMU_BOOT_MEDIA_MODE=cache=writeback
+
+.PHONY: _run-dev
+_run-dev:
 	bash boot/run-qemu.sh $(QEMU) $(QEMU_FLAGS)
 
 debug: build
@@ -1010,7 +1027,7 @@ test-handles:
 $(BUILD)/apps/keyboard.elf: handlers/keyboard/report.c handlers/keyboard/report.h common/hid-report.c common/hid-report.h interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/report.c common/hid-report.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts)) $(foreach p,terminal echo cat ls pwd monitor accounts,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity)) $(foreach p,display graphics text filesystem mouse identity,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
+$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts fsctl)) $(foreach p,terminal echo cat ls pwd monitor accounts fsctl,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity sessions)) $(foreach p,display graphics text filesystem mouse identity sessions,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
@@ -1019,11 +1036,12 @@ $(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf
 	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
 	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
 	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
-	$(foreach p,display graphics text filesystem mouse identity,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,display graphics text filesystem mouse identity sessions,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
 	cp handlers/identity/crypto/vendor/LICENSE $(BUILD)/src-handler-bundles/identity/THIRD-PARTY-LICENSE.txt
-	$(foreach p,terminal echo cat ls pwd monitor accounts,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,terminal echo cat ls pwd monitor accounts fsctl,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
 	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
+	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/identity/catalog.bin
 	python3 tools/build-initial.py terminal $(BUILD)/src-handler-bundles/applications/initial.bin
 	@touch $@
 .PHONY: test-keyboard
@@ -1105,7 +1123,7 @@ test-installations:
 	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests
 
 # Application-facing rendering providers (independent replaceable contracts).
-CONSOLE_PROVIDERS := display graphics text filesystem mouse identity
+CONSOLE_PROVIDERS := display graphics text filesystem mouse identity sessions
 CONSOLE_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(CONSOLE_PROVIDERS)))
 IDENTITY_CRYPTO := handlers/identity/crypto/password.c handlers/identity/crypto/strings.c handlers/identity/crypto/vendor/source/sha256.c handlers/identity/crypto/vendor/source/utils.c
 IDENTITY_CRYPTO_FLAGS := -Ihandlers/identity/crypto/vendor/include -Ihandlers/identity/crypto/compat -fno-builtin
@@ -1119,7 +1137,7 @@ $(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wi
 
 $(BUILD)/apps/graphics.elf: handlers/graphics/raster.c handlers/graphics/raster.h handlers/graphics/glyphs.h
 
-SHELL_APPS := terminal echo cat ls pwd monitor accounts
+SHELL_APPS := terminal echo cat ls pwd monitor accounts fsctl
 SHELL_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(SHELL_APPS)))
 define SHELL_RULE
 $(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/application.h sdk/system.c $(wildcard interfaces/*.h)
@@ -1244,7 +1262,7 @@ test-monitor-accounting:
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/process-samples.c -Wl,--gc-sections -o $(BUILD)/tests/src-process-samples
 	$(BUILD)/tests/src-process-samples
 
-$(BUILD)/apps/identity.elf: $(IDENTITY_CRYPTO) handlers/identity/auth.inc handlers/identity/crypto/password.h handlers/identity/format.c interfaces/identity-format.h handlers/identity/store.c handlers/identity/store.h
+$(BUILD)/apps/identity.elf: $(IDENTITY_CRYPTO) handlers/identity/auth.inc handlers/identity/home.inc handlers/identity/crypto/password.h handlers/identity/format.c interfaces/identity-format.h handlers/identity/store.c handlers/identity/store.h
 
 .PHONY: test-identity
 test-identity:

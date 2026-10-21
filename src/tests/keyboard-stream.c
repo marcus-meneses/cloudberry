@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #define _start keyboard_application_entry
@@ -7,12 +8,18 @@
 
 static unsigned char captured[CB_FRAME_LIMIT];
 static size_t captured_bytes;
+static int allow_descendant;static uint64_t revoked_pid;
 static unsigned replies,watches;static cb_status_t watch_error;
 cb_status_t cb_system_reply(const void *data,uint64_t bytes){assert(bytes<=sizeof(captured));memcpy(captured,data,bytes);captured_bytes=bytes;++replies;return CB_OK;}
 cb_status_t cb_system_get_handle(const char *n,uint64_t bytes,const struct cb_interface_id *i,uint16_t major,uint16_t minor,cb_handle_t *out){(void)n;(void)bytes;(void)i;(void)major;(void)minor;(void)out;assert(0);return CB_UNAVAILABLE;}
 cb_status_t cb_system_invoke(const void *data,uint64_t bytes,void *out,uint64_t capacity_out,uint64_t *actual){
-    (void)capacity_out;struct cb_call_header call;memcpy(&call,data,sizeof(call));assert(bytes==sizeof(call)+sizeof(struct cb_io_owner_watch) && call.operation==CB_IO_OWNER_WATCH);struct cb_io_owner_watch watch;memcpy(&watch,(const unsigned char *)data+sizeof(call),sizeof(watch));assert(watch.process==42 && watch.token==FOCUS_WATCH);++watches;
-    struct cb_reply_header reply={.version={sizeof(reply),1,0},.status=watch_error};memcpy(out,&reply,sizeof(reply));*actual=sizeof(reply);return watch_error;
+    (void)capacity_out;struct cb_call_header call;memcpy(&call,data,sizeof(call));const unsigned char *payload=(const unsigned char *)data+sizeof(call);struct cb_reply_header reply={.version={sizeof(reply),1,0}};unsigned char result[64];size_t n=0;
+    if(!memcmp(&call.interface,&(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,16)){assert(bytes==sizeof(call)+sizeof(struct cb_memory_request));struct cb_memory_request r;memcpy(&r,payload,sizeof(r));struct cb_memory_result allocated={0};if(call.operation==CB_MEMORY_ALLOCATE)allocated.address=(uintptr_t)calloc(1,r.bytes);else if(call.operation==CB_MEMORY_FREE)free((void *)(uintptr_t)r.address);else assert(0);memcpy(result,&allocated,sizeof(allocated));n=sizeof(allocated);}
+    else if(call.operation==CB_IO_OWNER_WATCH){assert(bytes==sizeof(call)+sizeof(struct cb_io_owner_watch));struct cb_io_owner_watch watch;memcpy(&watch,payload,sizeof(watch));assert((watch.process==42 || watch.process==43) && watch.token==FOCUS_WATCH);++watches;reply.status=watch_error;}
+    else if(call.operation==CB_IO_INPUT_ANCESTOR){uint64_t args[2];memcpy(args,payload,16);uint64_t yes=(!revoked_pid || args[1]!=revoked_pid) && (args[0]==args[1] || allow_descendant);memcpy(result,&yes,8);n=8;}
+    else if(call.operation==CB_IO_INPUT_FOCUS_SET){assert(bytes==sizeof(call)+16);}
+    else assert(0);
+    reply.result_bytes=n;memcpy(out,&reply,sizeof(reply));memcpy((unsigned char *)out+sizeof(reply),result,n);*actual=sizeof(reply)+n;return reply.status;
 }
 cb_status_t cb_system_release(cb_handle_t cap){(void)cap;assert(0);return CB_UNAVAILABLE;}
 cb_status_t cb_system_publish(const void *a,uint64_t b,cb_handle_t *c){(void)a;(void)b;(void)c;assert(0);return CB_UNAVAILABLE;}
@@ -51,6 +58,11 @@ int main(void){
     request.process=7;assert(read_request(&request,1) && header().status==CB_INPUT_RESYNC && !batch().flags && batch().next_sequence==4);
     request.focus_generation=2;request.read.after_sequence=4;assert(!read_request(&request,1));
     request.read.version=(struct cb_version){sizeof(struct cb_keyboard_read),1,0};request.read.after_sequence=3;assert(read_request(&request,1) && header().status==CB_INPUT_RESYNC && batch().version.bytes==32 && batch().next_sequence==4);
+    assert(change_focus(42,1)==CB_OK);allow_descendant=1;
+    assert(change_focus(43,1)==CB_OK && focus_owner==43 && focus_stack && focus_stack->process==42);
+    assert(change_focus(42,0)==CB_DENIED);
+    revoked_pid=43;struct pending closed={.process=43};assert(read_request(&closed,1) && header().status==CB_REVOKED && focus_owner==42 && !focus_stack);revoked_pid=0;
+    assert(change_focus(42,0)==CB_OK && !focus_owner);allow_descendant=0;
     uint64_t grant=0;const char context[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551615,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(admission((const void *)context,sizeof(context)-1,&grant) && grant==UINT64_MAX);
     const char overflow[]="{\"input_stream\":\"boot:1\",\"grant_ns\":18446744073709551616,\"process\":1,\"installation\":\"00000000000000000000000000000000\"}";assert(!admission((const void *)overflow,sizeof(overflow)-1,&grant));
     /* A timed-read node remains reusable without another memory-handle call.

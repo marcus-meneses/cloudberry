@@ -21,7 +21,9 @@
         "hid_ack",
         "hid_close",
         "now_ns",
-        "owner_watch"
+        "owner_watch",
+        "input_ancestor",
+        "input_focus_set"
       ]
     },
     {

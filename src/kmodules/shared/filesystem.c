@@ -66,15 +66,18 @@ struct kernel_surface_result filesystem_surface_release(MODULE_ARGS){MODULE_UNUS
 /* Re-evaluate on each operation, including calls on already-open streams.
  * Metadata-less format backends fail closed for user processes. */
 static cb_status_t access_as(struct mount *m,struct filesystem_request *r,struct cb_credentials who,const uint64_t *groups){
-    r->uid=who.uid;r->gid=who.gid;
+    if(r->operation!=FS_CHOWN){r->uid=who.uid;r->gid=who.gid;}
+    int admin=!who.uid || who.gid==1;for(size_t i=0;i<who.groups;++i)if(groups && groups[i]==1)admin=1;
+    if(r->operation==FS_CHOWN && (!admin || r->uid>UINT32_MAX || r->gid>UINT32_MAX))return CB_DENIED;
     if(!who.uid){if(r->operation!=FS_EXEC)return CB_OK;struct filesystem_request st={.operation=FS_STAT,.path=r->path};cb_status_t status=backend_call(m->backend,m->cookie,&st);return status?status:!st.stat.valid || st.stat.type!=FS_REGULAR || !(st.stat.permissions&0111)?CB_DENIED:CB_OK;}
     struct filesystem_request target={.operation=FS_STAT,.path=r->path};cb_status_t target_status=backend_call(m->backend,m->cookie,&target);if(target_status!=CB_OK && target_status!=CB_NOT_FOUND)return target_status;
+    if(!target_status && (r->operation==FS_CHMOD || r->operation==FS_CHOWN) && (!target.stat.valid || (!admin && target.stat.uid!=who.uid)))return CB_DENIED;
     int creates=target_status==CB_NOT_FOUND && r->operation==FS_PREPARE && r->mode!=CB_FILE_READ;
     char path[4096];size_t n=flength(r->path);if(n>=sizeof(path))return CB_BAD_REQUEST;fcopy(path,r->path,n+1);
     for(size_t end=0;;){
         if(!end)end=1;else while(end<n && path[end]!='/')++end;
         char saved=path[end];path[end]=0;struct filesystem_request st={.operation=FS_STAT,.path=path};cb_status_t status=backend_call(m->backend,m->cookie,&st);path[end]=saved;
-        int final=end==n;unsigned needed=final?(r->flags&FS_ACCESS_SEARCH?1:r->operation==FS_STAT || r->operation==FS_REMOVE?0:r->operation==FS_EXEC?1:r->operation==FS_LIST?5:r->operation==FS_READ?4:r->operation==FS_PREPARE && r->mode==CB_FILE_READ?4:2):1;
+        int final=end==n;unsigned needed=final?(r->flags&FS_ACCESS_SEARCH?1:r->operation==FS_STAT || r->operation==FS_REMOVE || r->operation==FS_CHMOD || r->operation==FS_CHOWN?0:r->operation==FS_EXEC?1:r->operation==FS_LIST?5:r->operation==FS_READ?4:r->operation==FS_PREPARE && r->mode==CB_FILE_READ?4:2):1;
         if(status==CB_NOT_FOUND && final && ((r->operation==FS_PREPARE && r->mode!=CB_FILE_READ) || r->operation==FS_MKDIR)){if(who.uid>UINT32_MAX || who.gid>UINT32_MAX)return CB_DENIED;return CB_OK;}
         if(status)return status;
         if(!st.stat.valid)return CB_DENIED;
@@ -113,7 +116,7 @@ static cb_status_t access_file(struct mount *m,struct filesystem_request *r){
 }
 struct kernel_surface_result filesystem_surface_file(MODULE_ARGS){
     MODULE_UNUSED();struct filesystem_request *r=(void *)b;if(!foreground() || !r)return module_result(0,0);r->status=CB_RESOURCE_FAILURE;r->actual=0;
-    if(r->operation<FS_STAT || r->operation>FS_EXEC || (r->operation!=FS_SYNC && !canonical(r->path))){r->status=CB_BAD_REQUEST;return module_result(1,1);}
+    if(r->operation<FS_STAT || r->operation>FS_CHOWN || (r->operation!=FS_SYNC && !canonical(r->path))){r->status=CB_BAD_REQUEST;return module_result(1,1);}
     uint64_t flags=flock();struct mount *m=find_mount(a);if(!m || m->closing || m->active==UINT32_MAX){funlock(flags);return module_result(1,1);}++m->active;
     kernel_surface_call control=kernel_surface_find(fs.hub,"threads.control");
     while(m->busy){if(!control){--m->active;funlock(flags);r->status=CB_BUSY;return module_result(1,1);}struct fs_call_waiter waiter={.mount=a,.thread=FC(control,THREAD_CURRENT,0,0).value,.next=fs.waiters};fs.waiters=&waiter;funlock(flags);struct kernel_surface_result waited=FC(control,THREAD_BLOCK,0,0);flags=flock();struct fs_call_waiter **at=&fs.waiters;while(*at!=&waiter)at=&(*at)->next;*at=waiter.next;if(waited.status){--m->active;funlock(flags);return module_result(1,1);}}
@@ -129,19 +132,21 @@ static cb_status_t invoke_filesystem(struct io_invocation *r){
     if(r->process!=fs.owner || !fs.owner)return CB_DENIED;
     if(r->bytes<32+sizeof(struct cb_filesystem_request))return CB_BAD_REQUEST;
     uint64_t owner_pid,op;fcopy(&owner_pid,r->input,8);fcopy(&op,(const unsigned char *)r->input+8,8);struct cb_filesystem_request req;fcopy(&req,(const unsigned char *)r->input+32,sizeof(req));
-    if(!req.path_bytes || req.path_bytes>4095 || r->bytes!=32+sizeof(req)+req.path_bytes)return CB_BAD_REQUEST;
+    if(!req.path_bytes || req.path_bytes>4095 || r->bytes!=32+sizeof(req)+req.path_bytes+(op==CB_FILESYSTEM_CHOWN?sizeof(struct cb_filesystem_owner):0))return CB_BAD_REQUEST;
     char path[4096];fcopy(path,(const unsigned char *)r->input+32+sizeof(req),req.path_bytes);path[req.path_bytes]=0;if(flength(path)!=req.path_bytes || !canonical(path))return CB_BAD_REQUEST;
-    int writes=(op==CB_FILESYSTEM_OPEN && req.mode!=CB_FILE_READ) || op==CB_FILESYSTEM_REMOVE || op==CB_FILESYSTEM_MKDIR;
+    int writes=(op==CB_FILESYSTEM_OPEN && req.mode!=CB_FILE_READ) || op==CB_FILESYSTEM_REMOVE || op==CB_FILESYSTEM_MKDIR || op==CB_FILESYSTEM_CHMOD || op==CB_FILESYSTEM_CHOWN;
     kernel_surface_call data=kernel_surface_find(fs.hub,"applications.data");struct kernel_surface_result grant=data?data((uintptr_t)r->input+16,(uintptr_t)path,0,0,0,0):module_result(0,0);int own_data=!grant.status && grant.value;
     const char identity_path[]="/system/config/identity";size_t identity_bytes=sizeof(identity_path)-1;
     if(req.path_bytes>=identity_bytes && prefix(path,identity_path,identity_bytes) && (!path[identity_bytes] || path[identity_bytes]=='/') && !own_data)return CB_DENIED;
     if(writes && !own_data && ((req.path_bytes>=5 && prefix(path,"/boot",5) && (!path[5] || path[5]=='/')) || (req.path_bytes>=7 && prefix(path,"/system",7) && (!path[7] || path[7]=='/'))))return CB_DENIED;
     const char *relative=NULL;struct mount *m=route(path,&relative);if(!m)return CB_UNAVAILABLE;cb_status_t status=CB_BAD_REQUEST;
     if(op==CB_FILESYSTEM_OPEN){if(r->capacity>=8 && !req.cursor && req.mode>=CB_FILE_READ && req.mode<=CB_FILE_APPEND){kernel_surface_call open=kernel_surface_find(fs.hub,"handles.file_open");struct kernel_surface_result opened=open?open(owner_pid,m->id,(uintptr_t)relative,req.mode,0,0):module_result(0,0);status=opened.status?opened.status:CB_OK;if(!opened.status){fcopy(r->output,&opened.value,8);r->actual=8;}}}
-    else if(!req.mode && (op==CB_FILESYSTEM_LIST || !req.cursor)){
+    else if((!req.mode || (op==CB_FILESYSTEM_CHMOD && !(req.mode&~0777))) && (op==CB_FILESYSTEM_LIST || !req.cursor)){
         struct filesystem_request call={.path=relative,.cursor=req.cursor,.process=owner_pid};
         if(op==CB_FILESYSTEM_STAT && r->capacity>=sizeof(struct cb_filesystem_stat)){call.operation=FS_STAT;filesystem_surface_file(m->id,(uintptr_t)&call,0,0,0,0);status=call.status;if(!status){struct cb_filesystem_stat out={call.stat.bytes,call.stat.type==FS_DIRECTORY,0};fcopy(r->output,&out,sizeof(out));r->actual=sizeof(out);}}
         else if(op==CB_FILESYSTEM_LIST){call.operation=FS_LIST;filesystem_surface_file(m->id,(uintptr_t)&call,0,0,0,0);status=call.status;if(!status && call.actual){if(call.entry.name_bytes>sizeof(call.entry.name))status=CB_RESOURCE_FAILURE;else if(r->capacity<sizeof(struct cb_filesystem_entry))status=CB_BUFFER_TOO_SMALL;else {struct cb_filesystem_entry out={.cursor=call.cursor,.directory=call.entry.type==FS_DIRECTORY,.name_bytes=call.entry.name_bytes};fcopy(out.name,call.entry.name,call.entry.name_bytes);fcopy(r->output,&out,sizeof(out));r->actual=sizeof(out);}}}
+        else if(op==CB_FILESYSTEM_METADATA && r->capacity>=sizeof(struct cb_filesystem_metadata)){call.operation=FS_STAT;filesystem_surface_file(m->id,(uintptr_t)&call,0,0,0,0);status=call.status;if(!status){if(!call.stat.valid)status=CB_BAD_REQUEST;else {struct cb_filesystem_metadata out={call.stat.bytes,call.stat.uid,call.stat.gid,call.stat.permissions,call.stat.type==FS_DIRECTORY};fcopy(r->output,&out,sizeof(out));r->actual=sizeof(out);}}}
+        else if(op==CB_FILESYSTEM_CHMOD || op==CB_FILESYSTEM_CHOWN){call.operation=op==CB_FILESYSTEM_CHMOD?FS_CHMOD:FS_CHOWN;call.mode=req.mode;if(op==CB_FILESYSTEM_CHOWN){struct cb_filesystem_owner owner;fcopy(&owner,(const unsigned char *)r->input+32+sizeof(req)+req.path_bytes,sizeof(owner));call.uid=owner.uid;call.gid=owner.gid;}filesystem_surface_file(m->id,(uintptr_t)&call,0,0,0,0);status=call.status;}
         else if(op==CB_FILESYSTEM_REMOVE || op==CB_FILESYSTEM_MKDIR){call.operation=op==CB_FILESYSTEM_REMOVE?FS_REMOVE:FS_MKDIR;filesystem_surface_file(m->id,(uintptr_t)&call,0,0,0,0);status=call.status;}
     }
     filesystem_surface_release(m->id,0,0,0,0,0);return status;

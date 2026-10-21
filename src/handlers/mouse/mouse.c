@@ -7,8 +7,8 @@ static cb_handle_t memory,io,publication;
 static uint64_t subscription,epoch,sequence,evicted_sequence,evicted_ns;
 static unsigned char incoming[CB_FRAME_LIMIT],outgoing[CB_FRAME_LIMIT];
 struct mouse {struct mouse *next;struct cb_io_hid_device usb;uint64_t id,seen;struct mouse_hid hid;unsigned rejected;};
-struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_mouse_read read;uint64_t grant_ns;};
-static uint64_t scan_serial;
+struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_mouse_read read;uint64_t grant_ns,process;};
+static uint64_t scan_serial,focus_generation,focus_floor;
 static struct mouse *devices;static struct pending *pending,*spare;
 static struct cb_mouse_event *history;static size_t capacity,count,head;
 static void *allocate(size_t bytes){struct cb_memory_request r={.bytes=bytes};if(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_ALLOCATE,&r,sizeof(r),0))return NULL;struct cb_memory_result value;cb_copy(&value,cb_result(&client),sizeof(value));return (void *)(uintptr_t)value.address;}
@@ -37,9 +37,13 @@ static void respond(const struct cb_delivery_header *d,cb_status_t status,const 
     else sent=cb_respond(&reply,d,status,p,bytes);
     CB_REQUIRE(sent==CB_OK || sent==CB_BAD_REQUEST);
 }
+/* Mouse stays independently consumable within the foreground login session.
+ * Cross-session reads fail closed; generation changes discard replay history. */
+static cb_status_t input_access(uint64_t pid){cb_status_t s=invoke(CB_IO_INPUT_FOCUS,&pid,8);if(s)return s;struct cb_io_input_focus focus;cb_copy(&focus,cb_result(&client),sizeof(focus));if(focus.generation!=focus_generation){focus_generation=focus.generation;focus_floor=sequence;}return focus.process && focus.session!=focus.caller_session?CB_DENIED:CB_OK;}
 static int read_request(struct pending *p,uint64_t time){
+    cb_status_t access=input_access(p->process);if(access){respond(&p->delivery,access,NULL,0);return 1;}
     struct cb_mouse_read *r=&p->read;struct cb_mouse_batch batch={.version={sizeof(batch),1,0},.provider_epoch=epoch,.next_sequence=sequence};int initial=!r->provider_epoch && !r->after_sequence;
-    if((!initial && r->provider_epoch!=epoch) || r->after_sequence>sequence || (initial?p->grant_ns<=evicted_ns && evicted_sequence:r->after_sequence<evicted_sequence)){respond(&p->delivery,CB_INPUT_RESYNC,&batch,sizeof(batch));return 1;}
+    if(r->after_sequence<focus_floor || (!initial && r->provider_epoch!=epoch) || r->after_sequence>sequence || (initial?p->grant_ns<=evicted_ns && evicted_sequence:r->after_sequence<evicted_sequence)){respond(&p->delivery,CB_INPUT_RESYNC,&batch,sizeof(batch));return 1;}
     size_t slots=(sizeof(outgoing)-sizeof(struct cb_reply_header)-sizeof(batch)-512)/sizeof(struct cb_mouse_event);if(slots>r->max_events)slots=r->max_events;size_t bytes=sizeof(batch);
     for(size_t i=0;i<count && batch.count<slots;++i){struct cb_mouse_event *e=at(i);if(e->sequence<=r->after_sequence || e->timestamp_ns<p->grant_ns)continue;cb_copy(outgoing+bytes,e,sizeof(*e));bytes+=sizeof(*e);batch.next_sequence=e->sequence;++batch.count;}
     if(!batch.count){if(p->delivery.call.deadline_ns && time>=p->delivery.call.deadline_ns){respond(&p->delivery,CB_TIMEOUT,NULL,0);return 1;}return 0;}cb_copy(outgoing,&batch,sizeof(batch));respond(&p->delivery,CB_OK,outgoing,bytes);return 1;
@@ -89,8 +93,8 @@ __attribute__((noreturn)) void _start(void){
             continue;
         }
         struct cb_admission caller;if(d.call.flags!=CB_CALL_PROVIDER_DELIVERY || d.call.handle!=publication || !cb_admission_parse(incoming+sizeof(d),d.context_bytes,&caller)){respond(&d,CB_DENIED,NULL,0);continue;}
-        if(d.call.operation==CB_MOUSE_STATE && d.call.payload_bytes==8){uint64_t cursor;cb_copy(&cursor,payload,8);struct cb_mouse_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};struct mouse *m=devices;while(m){if(!m->rejected){if(!cursor)break;--cursor;}m=m->next;}cb_copy(outgoing,&state,sizeof(state));size_t n=sizeof(state);if(m){state.count=1;struct cb_mouse_device item={m->id,m->usb.device,m->usb.generation,m->usb.interface,m->hid.flags,m->hid.x,m->hid.y,m->hid.buttons};cb_copy(outgoing,&state,sizeof(state));cb_copy(outgoing+n,&item,sizeof(item));n+=sizeof(item);}respond(&d,CB_OK,outgoing,n);}
-        else if(d.call.operation==CB_MOUSE_READ && d.call.payload_bytes==sizeof(struct cb_mouse_read)){struct pending p={.delivery=d,.grant_ns=caller.grant_ns};cb_copy(&p.read,payload,sizeof(p.read));if(p.read.version.bytes!=sizeof(p.read) || p.read.version.major!=1 || p.read.version.minor || p.read.reserved || !p.read.max_events){respond(&d,CB_BAD_REQUEST,NULL,0);continue;}if(!read_request(&p,now())){struct pending *save=spare;if(save)spare=NULL;else save=allocate(sizeof(*save));if(!save){respond(&d,CB_RESOURCE_FAILURE,NULL,0);continue;}*save=p;save->next=pending;pending=save;}}
+        if(d.call.operation==CB_MOUSE_STATE && d.call.payload_bytes==8){cb_status_t access=input_access(caller.process);if(access){respond(&d,access,NULL,0);continue;}uint64_t cursor;cb_copy(&cursor,payload,8);struct cb_mouse_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};struct mouse *m=devices;while(m){if(!m->rejected){if(!cursor)break;--cursor;}m=m->next;}cb_copy(outgoing,&state,sizeof(state));size_t n=sizeof(state);if(m){state.count=1;struct cb_mouse_device item={m->id,m->usb.device,m->usb.generation,m->usb.interface,m->hid.flags,m->hid.x,m->hid.y,m->hid.buttons};cb_copy(outgoing,&state,sizeof(state));cb_copy(outgoing+n,&item,sizeof(item));n+=sizeof(item);}respond(&d,CB_OK,outgoing,n);}
+        else if(d.call.operation==CB_MOUSE_READ && d.call.payload_bytes==sizeof(struct cb_mouse_read)){struct pending p={.delivery=d,.grant_ns=caller.grant_ns,.process=caller.process};cb_copy(&p.read,payload,sizeof(p.read));if(p.read.version.bytes!=sizeof(p.read) || p.read.version.major!=1 || p.read.version.minor || p.read.reserved || !p.read.max_events){respond(&d,CB_BAD_REQUEST,NULL,0);continue;}if(!read_request(&p,now())){struct pending *save=spare;if(save)spare=NULL;else save=allocate(sizeof(*save));if(!save){respond(&d,CB_RESOURCE_FAILURE,NULL,0);continue;}*save=p;save->next=pending;pending=save;}}
         else respond(&d,CB_BAD_REQUEST,NULL,0);
     }
 }

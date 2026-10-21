@@ -244,7 +244,7 @@ vCPU pauses. [Device IRQ routing](kmodules/shared/irq.md) adds exclusive IOAPIC 
 MSI/MSI-X messages, preallocated/coalesced notifications and foreground drain/rearm.
 It does not program PCI capabilities, resolve ACPI PCI INTx routing or initialize
 USB/storage devices. Controller-specific work belongs to NVMe/AHCI/xHCI drivers;
-USB core owns enumeration; usb-storage provides BOT/SCSI read/write/flush. HID remains deferred. IRQ affinity is CPU0.
+USB core owns enumeration; usb-storage provides BOT/SCSI read/write/flush. Descriptor-driven keyboard/mouse providers and shared HID demultiplexing are implemented. IRQ affinity is CPU0.
 Production boot creates no test routes or periodic device polling. ACPI reserves
 its SCI route masked. The [ACPI/platform modules](kmodules/shared/acpi.md) load
 DSDT/SSDT AML, publish boot device/resource inventories and attach stable firmware
@@ -277,9 +277,9 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
-| Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures, sessions, forced termination or automatic manager recovery |
+| Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures or forced termination or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
-| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU/window/session model |
+| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU or window/compositor model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, descriptor-driven keyboard/mouse providers with shared-interface demultiplexing implemented; broader HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations and an application-facing filesystem provider with file streams | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
@@ -343,8 +343,8 @@ high-speed TT/SuperSpeed hub qualification remain pending; earlier AMD KVM
 clock/SMP acceptance does not qualify the new USB stack.
 
 Ext4 now supplies creation, growth, append, truncate, deletion, directories and
-no-replace rename with journaling. Default mounts and the ordinary QEMU boot medium
-remain read-only; explicit writable mounts replay an internal journal and require
+no-replace rename with journaling. The configured production mount requests writes when supported; the ordinary QEMU boot medium
+remains read-only; explicit writable mounts replay an internal journal and require
 block write/flush support. The private pinned lwext4 engine runs behind the same
 frontend for writable and ordinary read-only mounts. Explicit checksum-seed layouts
 currently retain the qualified read-only parser and cannot be mounted writable.
@@ -355,7 +355,7 @@ slices and unreferenced BOT records. Retained dead slices reject I/O until their
 final release. Replacement devices require fresh cookies and an explicit mount,
 which replays the journal. See [USB storage](kmodules/shared/usb-storage.md),
 [GPT partitions](kmodules/shared/partition.md) and [ext4](kmodules/shared/ext4-fs.md).
-All remain boot-loaded; production selects the configured unique driver volume read-only and performs
+All remain boot-loaded; production selects the configured unique driver volume according to writable policy and performs
 no formatting or migration. Test fixtures never enter the candidate image.
 
 ## Focused validation
@@ -421,7 +421,8 @@ src/
 │   └── hid-report.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
-│   ├── identity/ (README.md, identity.c, auth.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
+│   ├── sessions/ (README.md, sessions.c, manifest.json, provider.cnf)
+│   ├── identity/ (README.md, identity.c, auth.inc, home.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
 │   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
 │   ├── filesystem/ (README.md, filesystem.c, manifest.json, provider.cnf)
 │   ├── graphics/ (README.md, graphics.c, glyphs.h, raster.c, raster.h, font.h, manifest.json, provider.cnf)
@@ -445,6 +446,7 @@ src/
 │   ├── admission.h
 │   ├── applications.h
 │   ├── credentials.h
+│   ├── sessions.h
 │   ├── identity.h
 │   ├── identity-format.h
 │   ├── installations.h
@@ -700,6 +702,7 @@ src/
 │   ├── cat/ (cat.c, manifest.json)
 │   ├── ls/ (ls.c, manifest.json)
 │   ├── pwd/ (pwd.c, manifest.json)
+│   ├── fsctl/ (README.md, fsctl.c, manifest.json)
 │   ├── accounts/ (README.md, accounts.c, manifest.json)
 │   ├── monitor/ (README.md, monitor.c, model.h, manifest.json)
 │   └── true/ (true.c, manifest.json)
@@ -712,6 +715,7 @@ src/
 │   ├── system.c
 │   └── system.h
 ├── tests/
+│   ├── persistent-sessions.py
 │   ├── console-boot.py
 │   ├── raster.c
 │   ├── graphics-present.c
@@ -873,6 +877,7 @@ src/
 │   ├── build-initial.py
 │   ├── filesystem-tree.py
 │   ├── clean-tests.py
+│   ├── init-dev-disk.py
 │   ├── identity-db.py
 │   ├── stage-kmodules.py
 │   ├── build-boot-image.py
@@ -964,7 +969,7 @@ both emulated IOMMUs. Native/physical xHCI acceptance remains pending.
 Normal boot starts root enumeration in preemptible BSP workers; workers sleep
 between xHCI change notifications. Interface-scoped ownership and core-owned I/O
 buffers keep class drivers independent of xHCI DMA/context formats.
-The separate usb-storage module implements BOT/SCSI; HID remains deferred.
+The separate usb-storage module implements BOT/SCSI; Descriptor-driven keyboard/mouse providers and shared HID demultiplexing are implemented.
 
 [USB hub class](kmodules/shared/usb-hub.md) supplies seven surfaces and the owned
 `usb.hubs` registry. Normal boot starts its manager alongside USB core. External
@@ -1001,7 +1006,8 @@ Kernel-owned process UID/GID and supplementary groups now inherit at launch.
 The identity provider verifies passwords, authorizes root/admin management and
 authenticates app execution through the ordinary [accounts app](apps/accounts/README.md).
 Filesystem calls enforce ownership/mode bits, including on existing file streams.
-Automatic homes, complete login sessions and live group revocation remain open.
+Explicit home provisioning and nested interactive sessions are implemented;
+per-user installers, app-specific home grants and live group revocation remain open.
 
 The default keyboard layout is ABNT2 (IBM remains bundled). Boot filesystem
 contents are accessible through /@filesystem at /boot: kernel.elf, cloudberry.cnf,
@@ -1026,3 +1032,44 @@ than assuming US punctuation. Tests remain isolated; successful media is cleaned
 The `iso9660-fs` helper is the second registered filesystem backend. It provides
 read-only boot filesystem access, while ext4 holds /system/kmodules for future
 disk-loaded modules. See [boot filesystem](shared/iso9660-fs.md).
+
+## Ownership, interactive sessions and persistent development storage
+
+Filesystem `metadata`, `chmod` and `chown` expose explicit copied UID/GID/mode
+metadata without changing the original STAT reply. `fsctl stat PATH`, `fsctl chmod
+OCTAL PATH` and `fsctl chown UID GID PATH` are ordinary apps. Owners may change
+mode; ownership changes require root/admin, valid 32-bit filesystem IDs and
+ancestor search permissions. Protected system/boot policy and manifests still
+apply. Metadata mutation uses the format backend, with ext4 journaling/barriers;
+ISO9660 remains read-only.
+
+`accounts home USER` explicitly provisions private 0700 user storage and system
+application data directories from the immutable catalog. Existing unrelated
+folders are not taken over. Root remains `/system/root`; boot cwd stays `/`.
+`accounts login USER` authenticates and starts a nested terminal at its existing
+home. An optional APP retains authenticated child execution. The continuous
+sessions handler owns lifecycle records; kernel process membership and ancestry
+inherit at launch. Nested keyboard focus restores its parent on release/death;
+mouse input is independent within the foreground session. Logout closes launches
+and requests cooperative stop, preserving contexts until actual process exit.
+This remains a shared display, without a secure compositor or forced kill.
+
+```sh
+# Once, from the built candidate; refuses an existing destination:
+make -C src init-dev-disk
+# Preserve accounts, credentials, home directories and files across boots:
+make -C src run-dev QEMU_ACCEL=kvm QEMU_CPUS=4
+```
+
+The separate `bin/cloudberry-dev.img` contains the initialized hybrid boot/system
+image. Normal builds, `run-dev`, test cleanup and `clean` do not replace it.
+`DEV_DISK=/absolute/path` selects another explicit destination. Updating installed
+code on existing persistent images still needs an installer/update workflow;
+rebuilding the candidate does not update that disk. Automated tests use disposable
+copies under `bin/tests`; developer persistent disks are never auto-attached.
+
+Focused validation: `python3 src/tests/persistent-sessions.py bin --cpus 4` runs
+two isolated TCG boots to verify persisted credentials, homes, files and modes,
+plus terminal/monitor focus restoration and root logout behavior. It removes
+successful disposable media and retains reports. Native runs may opt into
+`--accel kvm`; no native or physical validation is inferred from TCG results.

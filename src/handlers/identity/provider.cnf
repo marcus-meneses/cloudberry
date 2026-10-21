@@ -5,3 +5,4 @@ ready=/@identity
 installation_id=636c6f756462657272792e6964656e74
 cpu=0
 stack_bytes=262144
+files=catalog.bin

@@ -13,7 +13,7 @@
  * actual=0 at EOF or 1 with entry/cursor. PREPARE validates/creates/truncates.
  * Calls never retry writes automatically; errors may have unknown disk outcome.
  */
-enum filesystem_operation {FS_PROBE=1,FS_MOUNT,FS_UNMOUNT,FS_STAT,FS_LIST,FS_READ,FS_WRITE,FS_PREPARE,FS_REMOVE,FS_MKDIR,FS_SYNC,FS_EXEC};
+enum filesystem_operation {FS_PROBE=1,FS_MOUNT,FS_UNMOUNT,FS_STAT,FS_LIST,FS_READ,FS_WRITE,FS_PREPARE,FS_REMOVE,FS_MKDIR,FS_SYNC,FS_EXEC,FS_CHMOD,FS_CHOWN};
 enum {FS_MOUNT_WRITE=1,FS_REGULAR=1,FS_DIRECTORY=2,FS_ACCESS_SEARCH=0x10000};
 struct filesystem_stat {uint64_t bytes;uint32_t type,reserved;uint64_t uid,gid;uint32_t permissions,valid;};
 struct filesystem_dirent {uint32_t type,name_bytes;char name[256];};

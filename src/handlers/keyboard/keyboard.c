@@ -13,6 +13,8 @@ static struct cb_keyboard_event *history;static size_t capacity,count,head;
 struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_keyboard_read read;uint64_t grant_ns,process,focus_generation;};
 static struct pending *pending,*spare;
 static uint64_t focus_owner,focus_generation,focus_floor;
+struct focus_saved {struct focus_saved *next;uint64_t process;};
+static struct focus_saved *focus_stack;
 #define FOCUS_WATCH UINT64_C(0x6b657962666f6375)
 static unsigned char incoming[CB_FRAME_LIMIT],outgoing[CB_FRAME_LIMIT];
 static void copy(void *dst,const void *src,size_t bytes){unsigned char *d=dst;const unsigned char *s=src;for(size_t i=0;i<bytes;++i)d[i]=s[i];}
@@ -55,14 +57,24 @@ static uint64_t emit(void *unused,uint32_t kind,uint16_t usage,uint32_t codepoin
 static void reply(const struct cb_delivery_header *delivery,cb_status_t status,uint32_t outcome,size_t result_bytes){
     struct cb_reply_header h={.version={sizeof(h),1,0},.request=delivery->call.request,.status=status,.outcome=outcome,.provider_epoch=delivery->provider_epoch,.result_bytes=result_bytes};copy(outgoing,&h,sizeof(h));cb_status_t sent=cb_system_reply(outgoing,sizeof(h)+result_bytes);if(sent!=CB_OK && sent!=CB_BAD_REQUEST)cb_exit(sent);
 }
+/* The reflexive ancestry query also verifies that this process belongs to an
+ * open session. Closed-session pending reads cannot retain console ownership. */
+static int input_live(uint64_t pid){uint64_t args[2]={pid,pid},live=0;return !invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_INPUT_ANCESTOR,args,sizeof(args),&live,sizeof(live),NULL) && live;}
 static cb_status_t change_focus(uint64_t process,int claim){
-    if(claim && focus_owner && focus_owner!=process)return CB_BUSY;
     if(!claim && focus_owner!=process)return CB_DENIED;
+    if(claim && !input_live(process))return CB_REVOKED;
     if(claim && focus_owner==process)return CB_OK;
     if(focus_generation==UINT64_MAX)return CB_RESOURCE_FAILURE;
+    struct focus_saved *save=NULL;
+    if(claim && focus_owner){uint64_t args[2]={focus_owner,process},descendant=0;cb_status_t status=invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_INPUT_ANCESTOR,args,sizeof(args),&descendant,sizeof(descendant),NULL);if(status)return status;if(!descendant)return CB_BUSY;save=allocate(sizeof(*save));if(!save)return CB_RESOURCE_FAILURE;save->process=focus_owner;save->next=focus_stack;}
+    uint64_t next=claim?process:0;
+    if(claim && focus_owner){struct cb_io_owner_watch old={focus_owner,FOCUS_WATCH,0};cb_status_t s=invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&old,sizeof(old),NULL,0,NULL);if(s){release(save);return s;}}
     struct cb_io_owner_watch watch={process,FOCUS_WATCH,claim!=0};
-    cb_status_t status=invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),NULL,0,NULL);if(status)return status;
-    focus_owner=claim?process:0;focus_floor=sequence;++focus_generation;return CB_OK;
+    cb_status_t status=invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),NULL,0,NULL);if(status){if(claim && focus_owner){watch=(struct cb_io_owner_watch){focus_owner,FOCUS_WATCH,1};if(invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),NULL,0,NULL))cb_exit(CB_RESOURCE_FAILURE);}release(save);return status;}
+    if(claim){if(save)focus_stack=save;}
+    else while(focus_stack){struct focus_saved *old=focus_stack;focus_stack=old->next;watch=(struct cb_io_owner_watch){old->process,FOCUS_WATCH,1};status=input_live(old->process)?invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_OWNER_WATCH,&watch,sizeof(watch),NULL,0,NULL):CB_REVOKED;next=old->process;release(old);if(!status)break;next=0;}
+    uint64_t focus[2]={next,focus_generation+1};status=invoke(io_handle,(struct cb_interface_id)CB_IO_INTERFACE_ID,CB_IO_INPUT_FOCUS_SET,focus,sizeof(focus),NULL,0,NULL);if(status)cb_exit(status);
+    focus_owner=next;focus_floor=sequence;++focus_generation;return CB_OK;
 }
 static void batch_reply(struct pending *request,struct cb_keyboard_batch *batch,cb_status_t status){
     size_t bytes=batch->version.bytes;copy(outgoing+sizeof(struct cb_reply_header),batch,sizeof(*batch));
@@ -70,6 +82,7 @@ static void batch_reply(struct pending *request,struct cb_keyboard_batch *batch,
     reply(&request->delivery,status,status?CB_NOT_COMMITTED:CB_COMMITTED,bytes+(size_t)batch->count*sizeof(struct cb_keyboard_event));
 }
 static int read_request(struct pending *request,int may_wait){
+    if(!input_live(request->process)){if(focus_owner==request->process && change_focus(focus_owner,0))cb_exit(CB_RESOURCE_FAILURE);reply(&request->delivery,CB_REVOKED,CB_NOT_COMMITTED,0);return 1;}
     struct cb_keyboard_read *r=&request->read;int aware=r->version.bytes==sizeof(struct cb_keyboard_read_focus);size_t prefix=aware?sizeof(struct cb_keyboard_batch_focus):sizeof(struct cb_keyboard_batch);
     struct cb_keyboard_batch batch={.version={prefix,1,aware?1:0},.provider_epoch=epoch,.next_sequence=sequence,.flags=focus_owner && focus_owner!=request->process?CB_KEYBOARD_FOCUS_SUSPENDED:0};
     if((aware && request->focus_generation!=focus_generation) || r->after_sequence<focus_floor){batch.next_sequence=focus_floor;batch_reply(request,&batch,CB_INPUT_RESYNC);return 1;}
@@ -122,6 +135,7 @@ __attribute__((noreturn)) void _start(uint64_t argument){
             if(!delivery.call.handle && same_interface(&delivery.call.interface,&base) && delivery.call.operation==CB_HANDLE_RELEASE){
                 while(pending){struct pending *p=pending;pending=p->next;reply(&p->delivery,CB_REVOKED,CB_NOT_COMMITTED,0);release(p);}
                 struct cb_io_subscription close={subscription};if(invoke(io_handle,io,CB_IO_HID_CLOSE,&close,sizeof(close),NULL,0,NULL))cb_exit(CB_RESOURCE_FAILURE);
+                while(focus_stack){struct focus_saved *old=focus_stack;focus_stack=old->next;release(old);}
                 keyboard_descriptor_free(&descriptor);release(spare);spare=NULL;release(history);(void)cb_system_release(publication);(void)cb_system_release(io_handle);(void)cb_system_release(memory_handle);cb_exit(0);
             }
             if(same_interface(&delivery.call.interface,&io) && delivery.call.operation==CB_IO_OWNER_EXIT && delivery.call.handle==FOCUS_WATCH && delivery.call.payload_bytes==8){uint64_t owner;copy(&owner,payload,8);if(owner==focus_owner){if(change_focus(owner,0))cb_exit(CB_RESOURCE_FAILURE);serve_pending();}continue;}
@@ -138,7 +152,7 @@ __attribute__((noreturn)) void _start(uint64_t argument){
         }
         struct cb_admission caller;uint64_t grant_ns;if(delivery.call.flags!=CB_CALL_PROVIDER_DELIVERY || delivery.call.handle!=publication || !cb_admission_parse(incoming+sizeof(delivery),delivery.context_bytes,&caller) || !admission(incoming+sizeof(delivery),delivery.context_bytes,&grant_ns)){reply(&delivery,CB_DENIED,CB_NOT_COMMITTED,0);continue;}
         if((delivery.call.operation==CB_KEYBOARD_FOCUS_CLAIM || delivery.call.operation==CB_KEYBOARD_FOCUS_RELEASE) && !delivery.call.payload_bytes){cb_status_t status=change_focus(caller.process,delivery.call.operation==CB_KEYBOARD_FOCUS_CLAIM);struct cb_keyboard_focus result={epoch,focus_floor,focus_generation,focus_owner};copy(outgoing+sizeof(struct cb_reply_header),&result,sizeof(result));reply(&delivery,status,status?CB_NOT_COMMITTED:CB_COMMITTED,status?0:sizeof(result));serve_pending();continue;}
-        if(delivery.call.operation==CB_KEYBOARD_STATE && !delivery.call.payload_bytes){if(focus_owner && focus_owner!=caller.process){reply(&delivery,CB_DENIED,CB_NOT_COMMITTED,0);continue;}struct cb_keyboard_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};size_t size=sizeof(struct cb_reply_header)+sizeof(state);for(unsigned i=0;i<256;++i)if(keyboard.pressed[i]){struct cb_keyboard_pressed key={device_id,7,i,0};copy(outgoing+size,&key,sizeof(key));size+=sizeof(key);++state.count;}copy(outgoing+sizeof(struct cb_reply_header),&state,sizeof(state));reply(&delivery,CB_OK,CB_COMMITTED,size-sizeof(struct cb_reply_header));}
+        if(delivery.call.operation==CB_KEYBOARD_STATE && !delivery.call.payload_bytes){if(!input_live(caller.process)){reply(&delivery,CB_REVOKED,CB_NOT_COMMITTED,0);continue;}if(focus_owner && focus_owner!=caller.process){reply(&delivery,CB_DENIED,CB_NOT_COMMITTED,0);continue;}struct cb_keyboard_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};size_t size=sizeof(struct cb_reply_header)+sizeof(state);for(unsigned i=0;i<256;++i)if(keyboard.pressed[i]){struct cb_keyboard_pressed key={device_id,7,i,0};copy(outgoing+size,&key,sizeof(key));size+=sizeof(key);++state.count;}copy(outgoing+sizeof(struct cb_reply_header),&state,sizeof(state));reply(&delivery,CB_OK,CB_COMMITTED,size-sizeof(struct cb_reply_header));}
         else if(delivery.call.operation==CB_KEYBOARD_READ && (delivery.call.payload_bytes==sizeof(struct cb_keyboard_read) || delivery.call.payload_bytes==sizeof(struct cb_keyboard_read_focus))){struct pending request={.delivery=delivery,.grant_ns=grant_ns,.process=caller.process};copy(&request.read,payload,sizeof(request.read));if(request.read.version.bytes!=delivery.call.payload_bytes || request.read.version.major!=1 || request.read.version.minor!=(delivery.call.payload_bytes==sizeof(struct cb_keyboard_read_focus)?1:0) || request.read.reserved || !request.read.max_events){reply(&delivery,CB_BAD_REQUEST,CB_NOT_COMMITTED,0);continue;}
             if(delivery.call.payload_bytes==sizeof(struct cb_keyboard_read_focus))copy(&request.focus_generation,payload+sizeof(request.read),sizeof(request.focus_generation));
             if(!read_request(&request,1)){struct pending *copy_request=pending_allocate();if(!copy_request){reply(&delivery,CB_RESOURCE_FAILURE,CB_NOT_COMMITTED,0);continue;}*copy_request=request;copy_request->next=pending;pending=copy_request;}

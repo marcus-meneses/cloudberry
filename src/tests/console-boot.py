@@ -3,8 +3,10 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-if sum((a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only))>1:p.error('choose only one focused run mode')
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+if sum((a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase)))>1:p.error('choose only one focused run mode')
+if a.disk_source and (a.fixtures or a.startup_trace):p.error('--disk-source cannot rebuild fixtures')
+if a.disk_source and not a.disk_source.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests'):p.error('disk-source must be isolated inside bin/tests')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
 if (a.identity_only or a.stdio_only or a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only or a.edit_only or a.mouse_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
 if a.startup_trace and (not a.startup_only or a.kernel):p.error('--startup-trace requires --startup-only and cannot use --kernel')
@@ -41,7 +43,7 @@ if a.fixtures or a.startup_trace:
             (fixtures/'_hidden.txt').write_text('hidden-file\n')
         (bundles/'pipe-source.bin').write_bytes(bytes((i*37+11)%256 for i in range(65536+317)))
     subprocess.run(['python3',str(root/'src/tools/build-boot-image.py'),str(stage),str(image),'--drivers-source',str(bundles)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-else:subprocess.run(['cp','--reflink=auto','--sparse=always',str(build/'cloudberry.iso'),str(image)],check=True)
+else:subprocess.run(['cp','--reflink=auto','--sparse=always',str(a.disk_source.resolve() if a.disk_source else build/'cloudberry.iso'),str(image)],check=True)
 qmp=work/'qmp.sock';log=work/'boot.log';screenshot=work/'screen.ppm'
 command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',str(a.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
 if a.diagnostics:command+=['-gdb','unix:'+str(work/'gdb.sock')+',server=on,wait=off']
@@ -140,6 +142,41 @@ try:
             if c not in typed:raise RuntimeError('No QMP key mapping for '+repr(c)+' in '+layout_name)
             send_keys(typed[c])
         if enter:send_keys([{'type':'qcode','data':'ret'}]);time.sleep(.1)
+    if a.persistence_phase:
+        def command_done(command,expected):
+            before=screen();prompt='/home/alice >' if before.rstrip().endswith('/home/alice >') else '/ >';count=before.count(prompt)
+            type_line(command);wait_for(lambda text:expected in text and text.count(prompt)>count and text.rstrip().endswith(prompt),120)
+        if a.persistence_phase=='create':
+            command_done('accounts useradd alice','Updated.')
+            command_done('accounts home alice','/home/alice')
+            command_done('fsctl stat /home/alice','uid=1 gid=2 mode=700')
+            command_done('fsctl stat /home/alice/_apps','uid=1 gid=2 mode=700')
+            type_line('accounts passwd alice');wait_for(lambda text:'New password:' in text,40)
+            secret='session-test-password';type_line(secret);wait_for(lambda text:'Confirm password:' in text,40);type_line(secret)
+            wait_for(lambda text:'Password updated.' in text and text.rstrip().endswith('/ >'),120)
+            assert secret not in screen()
+        type_line('clear');wait_for(lambda text:text.count('/ >')==1 and text.rstrip().endswith('/ >'),45)
+        type_line('accounts login alice');wait_for(lambda text:'Password:' in text,40);type_line('session-test-password')
+        wait_for(lambda text:text.rstrip().endswith('/home/alice >'),120)
+        command_done('accounts self','uid=1 gid=2')
+        if a.persistence_phase=='create':
+            command_done('echo durable-home => documents/persist.txt','/home/alice >')
+            command_done('fsctl chmod 640 documents/persist.txt','/home/alice >')
+            command_done('fsctl stat documents/persist.txt','uid=1 gid=2 mode=640')
+            # Deny user ownership takeover and access to root's private data.
+            command_done('fsctl chown 0 0 documents/persist.txt','fsctl: status 1')
+            command_done('cat /system/root/_apps/terminal.data/history','cat: permission denied')
+        else:
+            command_done('cat documents/persist.txt','durable-home')
+            command_done('fsctl stat documents/persist.txt','uid=1 gid=2 mode=640')
+        # A direct keyboard consumer temporarily takes focus from this terminal;
+        # ESC exits monitor, then the nested terminal must accept more input.
+        type_line('monitor');wait_for(lambda text:'PROCESSES' in text or 'PID' in text,45)
+        send_keys([{'type':'qcode','data':'esc'}]);wait_for(lambda text:text.rstrip().endswith('/home/alice >'),45)
+        command_done('pwd','/home/alice')
+        type_line('exit');wait_for(lambda text:text.rstrip().endswith('/ >'),60)
+        command_done('accounts self','uid=0 gid=0')
+        raise ProfileComplete()
     if a.bootfs_only:
         type_line('ls /boot');wait_for(lambda text:'kernel.elf' in text and 'cloudberry.cnf' in text and text.count('/ >')>=2,45)
         type_line('cat /boot/cloudberry.cnf');wait_for(lambda text:'drivers.directory=/system/kmodules/drivers' in text and text.count('/ >')>=3,45)
@@ -161,6 +198,7 @@ try:
         account_command('accounts self','uid=0 gid=0');prompts+=1
         for command in ('accounts groupadd staff','accounts useradd alice staff','accounts join alice admin'):
             account_command(command,'Updated.');prompts+=1
+        account_command('accounts home alice','/home/alice');prompts+=1
         type_line('accounts passwd alice');wait_for(lambda text:'New password:' in text,40)
         secret='cloudberry-test-secret';type_line(secret);wait_for(lambda text:'Confirm password:' in text,40);type_line(secret)
         wait_for(lambda text:'Password updated.' in text and text.count('/ >')>=prompts+1,120);prompts+=1

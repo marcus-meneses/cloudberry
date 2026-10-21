@@ -46,6 +46,7 @@ UEFI firmware
                 │   ├── text     → /@graphics
                 │   ├── filesystem → /@io → filesystem → format backend
                 │   ├── identity → /@filesystem → protected binary account database
+                │   ├── sessions → /@io → process membership and owner notifications
                 │   └── applications → /@io → applications kmodule
                 └── applications launches initial ordinary terminal
                     ├── /@keyboard and /@text
@@ -334,3 +335,15 @@ The Limine filesystem stores kernel/config/modules at its root; public paths are
 directory remains source/configuration, not an ext4 completion directory. ext4
 contains only an empty /boot mountpoint and /system/kmodules/{drivers,helpers}.
 Boot mounting requires verified parent-disk identity; FAT ESP mounting is separate.
+
+Explicit account/home management runs after startup through `/@identity`.
+`accounts login` authenticates the launcher, begins `/@sessions`, resolves the
+existing home and launches terminal/app with inherited UID/GIDs and SID. The
+keyboard owns a dynamic focus stack; direct-input children restore their parent.
+Session records live in the sessions provider; process membership/ancestry are
+kernel-owned values, not borrowed pointers. Logout requests cooperative shutdown.
+
+`init-dev-disk` clones the complete built hybrid image into separate persistent
+media once. `run-dev` uses that initialized image without rebuilding/copying it.
+Candidate runs remain read-only or disposable snapshots. Both still load all
+foundational kmodules through Limine; the appended ext4 holds system/user state.

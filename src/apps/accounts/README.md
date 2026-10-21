@@ -20,8 +20,9 @@ accounts groupdel NAME                 # fails if still referenced
 accounts grouprename NAME NEW-NAME
 accounts join USER GROUP
 accounts leave USER GROUP
+accounts home USER                    # explicit root/admin provisioning
 accounts passwd USER
-accounts login USER APP [ARGS]
+accounts login USER [APP [ARGS]]
 ```
 
 Password entry and confirmation are non-echoed, using exclusive keyboard focus.
@@ -30,11 +31,17 @@ with the current password. Root/admin can reset other non-root accounts. Passwor
 length is 1..64 Unicode scalar values. Password changes/account mutations require
 a writable volume; QEMU_BOOT_WRITABLE=1 uses a disposable snapshot.
 
-Login authenticates this launcher before starting APP, which inherits its kernel
-credentials. The invoking terminal keeps its existing identity. For example:
-`accounts login alice accounts self`. This supplies authenticated app execution,
-not a complete login-session manager. Home creation, user installation policy and
-nested interactive terminal focus routing are not provided by this app.
+Login authenticates this launcher, opens a session through `/@sessions`, then
+starts APP with the verified home as cwd. Omit APP for an interactive terminal.
+Exit returns to the invoking terminal with its original identity. Keyboard focus
+is nested by verified process ancestry; monitor/password entry restore the nested
+terminal. Session close requests cooperative stop of remaining session members.
+Run `accounts home USER` before first interactive login; useradd does not provision
+storage. Homes and system app data are owned by UID/primary GID, mode 0700.
+
+For persistent state initialize separate media once with `make -C src init-dev-disk`,
+then use `make -C src run-dev QEMU_ACCEL=kvm QEMU_CPUS=4`. The normal candidate and
+writable snapshots retain their existing semantics.
 
 IDs remain stable across renames and are not reused after deletion. User deletion
 removes its credential and supplementary memberships, but retains existing files.

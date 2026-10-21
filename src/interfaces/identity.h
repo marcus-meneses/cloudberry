@@ -4,7 +4,7 @@
 #include "credentials.h"
 #define CB_IDENTITY_NAME "/@identity"
 #define CB_IDENTITY_INTERFACE_ID {{0x43,0x42,0x49,0x44,0x45,0x4e,0x54,0x31,0x91,0xe1,0x40,0x0a,0x1c,0x87,0xc0,0x15}}
-enum {CB_IDENTITY_INFO=1,CB_IDENTITY_USERS,CB_IDENTITY_GROUPS,CB_IDENTITY_BEGIN,CB_IDENTITY_STAGE,CB_IDENTITY_COMMIT,CB_IDENTITY_ABORT,CB_IDENTITY_CREDENTIAL,CB_IDENTITY_SELF,CB_IDENTITY_AUTHENTICATE,CB_IDENTITY_PASSWORD};
+enum {CB_IDENTITY_INFO=1,CB_IDENTITY_USERS,CB_IDENTITY_GROUPS,CB_IDENTITY_BEGIN,CB_IDENTITY_STAGE,CB_IDENTITY_COMMIT,CB_IDENTITY_ABORT,CB_IDENTITY_CREDENTIAL,CB_IDENTITY_SELF,CB_IDENTITY_AUTHENTICATE,CB_IDENTITY_PASSWORD,CB_IDENTITY_HOME};
 enum {CB_IDENTITY_USERS_FILE=0,CB_IDENTITY_GROUPS_FILE=1,CB_IDENTITY_CREDENTIALS_FILE=2};
 /* File payloads are explicit little-endian encoded bytes, never these ABI structs.
  * INFO and listing omit credentials. BEGIN/STAGE/COMMIT/ABORT require distinct
@@ -30,4 +30,7 @@ struct cb_identity_stage {uint64_t transaction,offset;uint32_t file,reserved;};
  * Non-admin may change its own password only with old secret supplied first.
  * No passwords in argv. SELF returns cb_credentials and supplementary GIDs. */
 struct cb_identity_password {uint64_t uid;uint32_t old_bytes,password_bytes;};
+/* HOME takes a uint64 UID; root/admin explicitly provision, any account may
+ * query its own existing home. Returns canonical UTF-8 path without NUL.
+ * Root uses /system/root. Existing unrelated directories fail closed. */
 #endif

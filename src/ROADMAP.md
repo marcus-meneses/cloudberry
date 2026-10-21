@@ -3,6 +3,16 @@
 Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
 Kmodules are coupled kernel mechanisms; isolated handlers use a separate handle layer.
 
+Current closure (2026-10-21): ownership management, explicit account homes,
+nested interactive login and separate persistent development media are implemented.
+See the closure at the end for validation. Earlier sections record chronological
+milestones and their limitations at that time; current contracts live beside code.
+
+Next bounded gaps: installer/update support for existing development media,
+app-specific per-user data authorization and live credential/group revocation.
+Session stop remains cooperative; forced termination and a secure compositor are
+not provided by this milestone. Hardware/native KVM validation remains separate.
+
 Completed foundation: dynamic ABI3 hub and provider ownership/draining, heap, hardware/MMIO inventory, clock/RTC,
 vector and CMOS/NMI ownership, APIC timers, deadline callbacks, owned page reuse,
 guarded stacks, CPU-pinned preemptible threads, AP startup, per-CPU descriptor
@@ -1613,7 +1623,7 @@ Fixtures and account mutations remain in a copied test image.
 
 The subsequent identity execution milestone below closes password verification,
 trusted process credentials, root/admin management and filesystem mode checks.
-Automatic homes and user app-data provisioning remain separate.
+Explicit homes and system app-data provisioning are closed by the session/storage milestone below.
 
 ### Identity execution and administration
 
@@ -1639,9 +1649,8 @@ contracts are version 2; the old ext4 stat prefix remains capacity-compatible.
 
 The ordinary installed accounts app supplies listings, user/group edits,
 non-echoed password changes and authenticated child execution. Root terminal
-identity stays unchanged. This is an execution-subtree transition, not a complete
-login-session manager. Automatic home provisioning, user installation policy,
-ACL/setuid features, live group revocation and nested terminal routing remain open.
+identity stays unchanged. The session/storage milestone below adds nested interactive login and explicit
+homes. User installation policy, ACL/setuid and live group revocation remain open.
 
 Validation: focused credential/IO-authority/permission tests, password derivation
 against hashlib, storage/recovery and C/C++/installation/backend checks. Four-CPU
@@ -1681,3 +1690,42 @@ Four-CPU TCG guest 085b6015a700463699f988fed305d6c9 passes public /boot reads,
 foundational module listing, new system module directory, default ABNT2, protected
 boot writes and subsequent terminal input. Reports remain; disposable VM media
 was removed automatically. Native KVM acceptance is not claimed for this change.
+
+### Ownership, interactive sessions and persistent development media
+
+1. Closed ownership/home administration: public metadata/chmod/chown preserve old
+   STAT ABI and use backend metadata operations. Owner/admin policy intersects
+   manifests, ancestor permissions and protected namespaces. `fsctl` is an ordinary
+   catalog app. `accounts home USER` explicitly creates 0700 UID/GID-owned homes,
+   standard folders, system app data and a catalog-derived index. Root remains
+   /system/root. Homes are separate from account transactions; failures may leave
+   a private staging tree, and unrelated directories are never taken over.
+2. Closed nested interactive sessions: privileged /@sessions owns dynamic records;
+   trusted process mechanics inherit membership/ancestry and reject closed-session
+   launches. `accounts login USER [APP [ARGS]]` authenticates before session creation,
+   defaults to terminal at the existing home, and logs out on child completion.
+   Keyboard-owned focus nests by verified ancestry and restores on release/death.
+   Mouse is independent inside the foreground session and blocks cross-session
+   reads. Standard streams remain independent directional bytes. Cooperative stop
+   preserves running contexts; hostile/unresponsive-app forced kill remains open.
+3. Closed persistent development launch: init-dev-disk atomically clones the built
+   candidate once and refuses an existing destination. run-dev launches that image
+   as-is, without build/repair/copy work. Candidate and developer NVMe/SATA images
+   are preserved. All provisioning remains explicit or image-build-time.
+
+Validation: candidate build and focused C/C++ contracts, installation/namespace,
+identity storage/recovery, credential/session/IO authority, filesystem permission,
+format backend, keyboard nested focus and ISO9660 tests. Isolated four-CPU TCG
+reports d7b3ca3d211449e486e6da5911e6b277 and c414aab2930840eaac75af396f1a87b9
+verify accounts/passwords/home/files/mode bits across two boots, unauthorized
+ownership/root-data access, nested terminal → monitor → terminal focus, logout
+and restored root identity. Successful test media are automatically removed;
+reports/logs remain under bin/tests. Initializer refusal/preservation is host-tested.
+Native KVM/physical acceptance is not claimed by these checks.
+
+Final candidate acceptance: four-CPU TCG accounts report
+31143300412d40a3ae62880c8f9f6679 passes supplementary-admin account management and
+authenticated execution. Rebuilt-candidate interactive report
+2176b5f3fc6c491fbea3c27a51cd5fe7 passes nested terminal, ownership denial, monitor
+handoff and root restoration after the closed-session input fix. Focus tests also
+cover revoking a pending read from a closed owner and restoring its live parent.

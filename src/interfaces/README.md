@@ -164,8 +164,8 @@ header plus named inline file entries. It carries bundle data explicitly selecte
 by trusted startup policy, never handles, kernel pointers or additional runtime
 authority. The keyboard provider selects/interprets its own config/layout within
 that envelope. This is separate from handle invocation and from format3 kmodule
-initialization. Conventional argv/environment and runtime bundle filesystem access
-remain future work.
+initialization. Readonly argv/cwd are carried by installed application startup frames; general
+environment and installer-managed runtime bundle policy remain future work.
 
 
 ## Installed application lifecycle
@@ -176,7 +176,7 @@ readonly argv/cwd startup data. `admission.h` decodes the broker-generated calle
 PID, installation ID and grant time. No payload field can replace those identities.
 Launch authority additionally requires the installation's launcher role; child
 operations require the caller owner. This initial installed policy is bound to the
-trusted build-owned image/catalog, without a general installer, sessions or signature checks.
+trusted build-owned image/catalog, without a general installer or signature checks. Sessions are a separate provider.
 The [applications provider](../handlers/applications/README.md) owns runtime policy;
 `/@io` only bridges the catalog-bound process execution and completion mechanisms.
 
@@ -195,7 +195,7 @@ new child-local capabilities after child-manifest validation; the SDK retrieves
 them with `cb_standard`. Reserved /@stdin, /@stdout and /@stderr names resolve the caller's bindings;
 named acquisitions return independently releasable directional stream handles.
 The old numeric gate remains ABI-compatible and returns zero for absent bindings.
-`filesystem.h` exposes canonical-path open/stat/list/remove/mkdir and returns
+`filesystem.h` exposes canonical-path open/stat/list/remove/mkdir/metadata/chmod/chown and returns
 caller-owned streams, preserving the same read/write contract across backing types.
 The C layouts contain no kernel or provider pointers. See [streams](../sdk/streams.md)
 and [graphics](../handlers/graphics/README.md) for bounds and lifetime rules.
@@ -240,3 +240,16 @@ SELF/AUTHENTICATE/PASSWORD extend the existing interface without changing old
 operation numbers. IO credential replacement is restricted to the installed
 identity provider; ordinary IO callers can query only themselves. Manifest grants
 and user privileges intersect. File streams recheck current caller permissions.
+
+`identity.h` appends HOME without changing previous operation IDs. It returns an
+existing canonical home, with explicit root/admin provisioning when needed.
+`filesystem.h` appends METADATA (separate from original STAT), CHMOD (request.mode)
+and CHOWN (owner trailer after path). Field sizes are explicit; no inode pointers.
+
+`sessions.h` defines SELF/BEGIN/END and a copied four-uint64 session reply. Kernel
+membership inherits separately from the unchanged credential header. Privileged
+IO session mutation is installation-bound. Keyboard focus now permits verified
+descendant claims through a provider-owned dynamic stack; generation barriers
+and unrelated-claim denial remain. Mouse session gating uses copied IO focus/SID
+snapshots and keeps mouse independent within that session. Byte standard streams
+retain their existing launch bindings and transport behavior.

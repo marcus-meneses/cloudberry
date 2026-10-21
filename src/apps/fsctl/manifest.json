@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@filesystem",
+      "operations": [
+        "metadata",
+        "chmod",
+        "chown"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    }
+  ]
+}

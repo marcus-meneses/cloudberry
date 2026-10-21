@@ -81,7 +81,7 @@ struct kernel_surface_result iso9660_fs_surface_invoke(MODULE_ARGS){
     }
     uint64_t flags=ilock();struct iso_volume *v=iso.first;while(v && v->id!=a)v=v->next;if(!v){iunlock(flags);return module_result(1,1);}if(v->busy){iunlock(flags);r->status=CB_BUSY;return module_result(1,1);}v->busy=1;iunlock(flags);
     if(r->operation==FS_UNMOUNT){r->status=v->disk.control(v->disk.cookie,BLOCK_RELEASE,0,0,0,0).status?CB_RESOURCE_FAILURE:CB_OK;if(!r->status){flags=ilock();struct iso_volume **at=&iso.first;while(*at!=v)at=&(*at)->next;*at=v->next;iunlock(flags);IC(iso.free,iso.heap,v,0);return module_result(1,1);}}
-    else if(r->operation==FS_WRITE || r->operation==FS_REMOVE || r->operation==FS_MKDIR || (r->operation==FS_PREPARE && r->mode!=CB_FILE_READ))r->status=CB_READ_ONLY;
+    else if(r->operation==FS_CHMOD || r->operation==FS_CHOWN || r->operation==FS_WRITE || r->operation==FS_REMOVE || r->operation==FS_MKDIR || (r->operation==FS_PREPARE && r->mode!=CB_FILE_READ))r->status=CB_READ_ONLY;
     else if(r->operation==FS_SYNC)r->status=CB_OK;
     else {struct iso_node entry;r->status=lookup(v,r->path,&entry);if(!r->status){
         if(r->operation==FS_STAT)r->stat=(struct filesystem_stat){.bytes=entry.bytes,.type=entry.directory?FS_DIRECTORY:FS_REGULAR,.permissions=entry.directory?0555:0444,.valid=1};

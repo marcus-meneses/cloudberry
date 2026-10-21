@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "session",
+        "owner_watch"
+      ]
+    },
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@sessions",
+      "publish": true,
+      "operations": [
+        "self",
+        "begin",
+        "end"
+      ]
+    }
+  ]
+}

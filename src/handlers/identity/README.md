@@ -148,8 +148,26 @@ or compositor-isolated trusted UI. Client/provider secret buffers are scrubbed;
 normal broker request lifetime ends on SDK release. Root's unknown build-generated
 boot secret can be replaced by root with `accounts passwd root`.
 
-No home directories, user app installations or per-user terminal persistence are
-created by account updates. `accounts login USER APP [ARGS]` authenticates an
-execution subtree; it does not change the invoking terminal's identity. A window/
-login-session manager, automatic home provisioning and live membership revocation
-remain separate work. The default root boot workflow is unchanged.
+Account updates do not implicitly create homes. Explicit home provisioning and
+interactive login are described below and in [sessions](../sessions/README.md).
+The default root boot workflow is unchanged.
+
+## Explicit home provisioning
+
+`accounts home USER` invokes HOME with a UID. Root/admin may create the active
+account's `/home/<username>` with `_config`, `_apps`, documents, downloads and
+desktop, owned by its UID/primary GID with mode 0700. System applications receive
+`_apps/<name>.data` and a derived `_index` from the immutable startup catalog.
+No executable is installed in that directory by this operation. Root resolves to
+`/system/root`; it gets neither a home nor personal installed apps.
+
+Provisioning keeps the parent root-owned 0700 until children are assigned. It can
+resume its private staging tree after failure, rejects unrelated owners/types,
+and never takes over an existing user directory. A matching existing home is
+returned unchanged. Ordinary callers may resolve their own existing home, but
+cannot create one. This is an explicit administrative operation, separate from
+the binary account transaction: a failure may leave an account with no home or a
+private staging tree. No provisioning, migration or repair scan runs during boot.
+Renames/deletions preserve existing directories; no automatic file movement or
+ownership reuse occurs. Per-user installation and app-specific home data grants
+remain future policy work; UID/mode protection isolates different users now.

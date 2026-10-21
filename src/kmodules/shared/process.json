@@ -64,6 +64,14 @@
     {
       "name": "process.credentials",
       "symbol": "process_surface_credentials"
+    },
+    {
+      "name": "process.session",
+      "symbol": "process_surface_session"
+    },
+    {
+      "name": "process.ancestor",
+      "symbol": "process_surface_ancestor"
     }
   ]
 }

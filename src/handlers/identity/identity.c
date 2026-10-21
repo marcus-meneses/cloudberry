@@ -2,6 +2,7 @@
 #include "../../interfaces/identity.h"
 #include "../../interfaces/io.h"
 #include "store.h"
+#include "../../interfaces/installations.h"
 #include "crypto/password.h"
 struct transaction {struct transaction *next;uint64_t id,owner,generation;struct id_blob files[3];size_t written[3];};
 static struct cb_client client,responder;
@@ -9,6 +10,7 @@ static cb_handle_t memory,filesystem,io,publication;
 static struct id_store database;
 static struct transaction *transactions;
 static uint64_t serial;
+static const unsigned char *catalog;
 static unsigned char incoming[CB_FRAME_LIMIT],output[CB_FRAME_LIMIT];
 static void *allocate(void *unused,size_t bytes){(void)unused;if(bytes>SIZE_MAX-sizeof(size_t))return NULL;struct cb_memory_request request={.bytes=bytes+sizeof(size_t)};if(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_ALLOCATE,&request,sizeof(request),0))return NULL;struct cb_memory_result result;cb_copy(&result,cb_result(&client),sizeof(result));size_t *p=(void *)(uintptr_t)result.address;*p=bytes;return p+1;}
 static void release(void *unused,void *pointer){(void)unused;if(!pointer)return;size_t *p=(size_t *)pointer-1;volatile unsigned char *v=pointer;for(size_t i=0;i<*p;++i)v[i]=0;struct cb_memory_request request={.address=(uintptr_t)p};CB_REQUIRE(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_FREE,&request,sizeof(request),0)==CB_OK);}
@@ -46,10 +48,11 @@ static cb_status_t credential(struct transaction *t,const struct cb_identity_cre
     if(out!=bytes){release(NULL,data);return CB_RESOURCE_FAILURE;}id_put64(data+16,bytes);id_put64(data+32,(bytes-ID_HEADER)/96);id_put32(data+48,id_crc(data,bytes,48));release(NULL,b->data);*b=(struct id_blob){data,bytes};t->written[2]=bytes;return CB_OK;
 }
 #include "auth.inc"
+#include "home.inc"
 __attribute__((noreturn)) void _start(const struct cb_startup *packet){
-    (void)packet;memory=cb_acquire(CB_MEMORY_NAME,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID);filesystem=cb_acquire(CB_FILESYSTEM_NAME,(struct cb_interface_id)CB_FILESYSTEM_INTERFACE_ID);io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
+    const void *catalog_data;size_t catalog_bytes;CB_REQUIRE(packet && cb_startup_find(packet,packet->bytes,"catalog.bin",&catalog_data,&catalog_bytes) && cb_install_valid(catalog_data,catalog_bytes));catalog=catalog_data;memory=cb_acquire(CB_MEMORY_NAME,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID);filesystem=cb_acquire(CB_FILESYSTEM_NAME,(struct cb_interface_id)CB_FILESYSTEM_INTERFACE_ID);io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
     database=(struct id_store){.allocate=allocate,.release=release,.read=read_file,.write=write_file};CB_REQUIRE(id_store_load(&database)==CB_OK);
-    static const char *names[]={"info","users","groups","begin","stage","commit","abort","credential","self","authenticate","password"};publication=cb_publish(&client,CB_IDENTITY_NAME,(struct cb_interface_id)CB_IDENTITY_INTERFACE_ID,names,11);
+    static const char *names[]={"info","users","groups","begin","stage","commit","abort","credential","self","authenticate","password","home"};publication=cb_publish(&client,CB_IDENTITY_NAME,(struct cb_interface_id)CB_IDENTITY_INTERFACE_ID,names,12);
     for(;;){uint64_t bytes;CB_REQUIRE(cb_system_receive(incoming,sizeof(incoming),&bytes,0)==CB_OK && bytes>=sizeof(struct cb_delivery_header));struct cb_delivery_header d;cb_copy(&d,incoming,sizeof(d));CB_REQUIRE(d.context_bytes<=bytes-sizeof(d) && d.call.payload_bytes==bytes-sizeof(d)-d.context_bytes);const unsigned char *payload=incoming+sizeof(d)+d.context_bytes;
         if(d.call.flags==(CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT)){
             if(d.call.operation==CB_IO_OWNER_EXIT && d.call.payload_bytes==8 && id_equal(&d.call.interface,&(struct cb_interface_id)CB_IO_INTERFACE_ID,sizeof(d.call.interface))){uint64_t owner;cb_copy(&owner,payload,8);struct transaction *t=find(owner,d.call.handle);if(t)dispose(t);}
@@ -63,6 +66,7 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
         status=CB_BAD_REQUEST;
         if(d.call.operation==CB_IDENTITY_SELF && !d.call.payload_bytes){struct cb_reply_header h;cb_copy(&h,client.result,sizeof(h));cb_copy(output,cb_result(&client),h.result_bytes);result=h.result_bytes;status=CB_OK;}
         else if((d.call.operation==CB_IDENTITY_AUTHENTICATE || d.call.operation==CB_IDENTITY_PASSWORD) && d.call.payload_bytes>=sizeof(struct cb_identity_password)){struct cb_identity_password request;cb_copy(&request,payload,sizeof(request));status=CB_BAD_REQUEST;if(request.old_bytes<=256 && request.password_bytes<=256 && d.call.payload_bytes==sizeof(request)+(uint64_t)request.old_bytes+request.password_bytes)status=d.call.operation==CB_IDENTITY_AUTHENTICATE?authenticate(caller.process,&request,payload+sizeof(request)):change_password(caller.process,&who,admin,&request,payload+sizeof(request));}
+        else if(d.call.operation==CB_IDENTITY_HOME && d.call.payload_bytes==8){uint64_t uid;cb_copy(&uid,payload,8);status=home(uid,&who,admin,&result);}
         else if(d.call.operation==CB_IDENTITY_INFO && !d.call.payload_bytes){struct cb_identity_info info={.generation=id_u64(database.files[0].data+24),.next_uid=id_u64(database.files[0].data+40),.next_gid=id_u64(database.files[1].data+40),.users=id_u64(database.files[0].data+32),.groups=id_u64(database.files[1].data+32),.healthy=1};cb_copy(output,&info,sizeof(info));result=sizeof(info);status=CB_OK;}
         else if((d.call.operation==CB_IDENTITY_USERS || d.call.operation==CB_IDENTITY_GROUPS) && d.call.payload_bytes==8){uint64_t cursor;cb_copy(&cursor,payload,8);struct id_blob *b=&database.files[d.call.operation==CB_IDENTITY_USERS?0:1];if(cursor>b->bytes)goto reply;size_t n=b->bytes-cursor;if(n>4096)n=4096;status=CB_OK;if(n){uint64_t next=cursor+n;cb_copy(output,&next,8);cb_copy(output+8,b->data+cursor,n);result=n+8;}}
         else if(d.call.operation==CB_IDENTITY_BEGIN && d.call.payload_bytes==sizeof(struct cb_identity_begin)){struct cb_identity_begin request;cb_copy(&request,payload,sizeof(request));uint64_t id;status=begin(caller.process,&request,&id);if(!status){cb_copy(output,&id,8);result=8;}}

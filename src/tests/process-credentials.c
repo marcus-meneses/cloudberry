@@ -19,5 +19,13 @@ int main(void){
     assert(process_surface_credentials(2,1,(uintptr_t)&input,sizeof(input)-1,0,0).status);
     child.info.state=PROCESS_RUNNING;assert(process_surface_credentials(2,2,1,0,0,0).status);
     assert(process_surface_credentials(999,0,(uintptr_t)&output,sizeof(output),0,0).status);
+    root.info.state=PROCESS_RUNNING;child.info.state=PROCESS_READY;
+    assert(!process_surface_session(1,1,0,0,0,0).status);
+    assert(!process_surface_credentials(2,2,1,0,0,0).status && child.parent==1 && child.session==1);
+    assert(process_surface_ancestor(1,2,0,0,0,0).value && !process_surface_ancestor(2,1,0,0,0,0).value);
+    struct cb_session session;assert(!process_surface_session(2,0,(uintptr_t)&session,sizeof(session),0,0).status && session.id==1 && session.uid==99);
+    assert(!process_surface_session(1,2,1,0,0,0).status && child.session_closed && root.session_closed);
+    assert(process_surface_credentials(2,2,1,0,0,0).status);
+    assert(!process_surface_ancestor(1,2,0,0,0,0).value && !process_surface_ancestor(2,2,0,0,0,0).value);
     release(root.groups);release(child.groups);assert(!live);puts("PASS process credentials: independent inheritance, group checks, replacement, invalid length, OOM and lifecycle denial");
 }
