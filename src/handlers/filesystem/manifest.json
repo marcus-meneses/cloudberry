@@ -19,7 +19,8 @@
         "mkdir",
         "metadata",
         "chmod",
-        "chown"
+        "chown",
+        "rmdir"
       ]
     }
   ]

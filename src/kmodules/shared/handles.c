@@ -18,7 +18,7 @@ struct policy {
 #ifdef CB_HANDLES_PROFILE
     struct hp_call *probe;
 #endif
-struct policy *next;unsigned revoked;uint64_t pid,receiver;cb_handle_t standard[3];char *json;struct grant *grants,*building;struct cb_provider_identity identity;};
+struct policy *next;unsigned revoked;uint64_t pid,receiver;cb_handle_t standard[3];char *json;struct grant *grants,*building;struct cb_provider_identity identity;uint64_t installation_owner;};
 struct publication {struct publication *next;uint64_t pid,token,epoch,refs,completed,last_operation;int dead,kernel;char *name;unsigned char *description;size_t bytes;};
 struct stream;
 struct capability {struct capability *next;uint64_t id,pid,grant_ns;int publisher;struct stream *stream;unsigned direction;char *scope;struct publication *publication;struct operation *operations;};
@@ -181,7 +181,7 @@ static cb_status_t reflect(struct capability *cap,unsigned char **out,size_t *by
     struct cb_reply_header h={.version={sizeof(h),1,0},.status=CB_OK,.outcome=CB_COMMITTED,.provider_epoch=p->epoch,.result_bytes=end-sizeof(h)};copy_bytes(reply,&h,sizeof(h));*out=reply;*bytes=end;return CB_OK;
 }
 #include "handles-stream.inc"
-static size_t kernel_reply_capacity(struct publication *p,unsigned op){return p->kernel==2 && (op==CB_IO_CREDENTIALS || op==CB_IO_PROCESS_DATA)?CB_FRAME_LIMIT-1024:p->kernel==2 && op==CB_IO_RANDOM?64:p->kernel==2 && op==CB_IO_PROCESS_SAMPLE?sizeof(struct cb_process_sample):p->kernel==3 && op==CB_STREAM_READ?CB_STREAM_CHUNK:p->kernel==2 && (op==CB_IO_HID_DESCRIPTOR || op==CB_IO_HID_GET_FEATURE)?CB_HID_LIMIT:p->kernel==2 && op==CB_IO_FILESYSTEM?512:64;}
+static size_t kernel_reply_capacity(struct publication *p,unsigned op){return p->kernel==2 && (op==CB_IO_CREDENTIALS || op==CB_IO_PROCESS_DATA || op==CB_IO_REGISTRY)?CB_FRAME_LIMIT-1024:p->kernel==2 && op==CB_IO_RANDOM?64:p->kernel==2 && op==CB_IO_PROCESS_SAMPLE?sizeof(struct cb_process_sample):p->kernel==3 && op==CB_STREAM_READ?CB_STREAM_CHUNK:p->kernel==2 && (op==CB_IO_HID_DESCRIPTOR || op==CB_IO_HID_GET_FEATURE)?CB_HID_LIMIT:p->kernel==2 && op==CB_IO_FILESYSTEM?512:64;}
 static cb_status_t kernel_call(uint64_t pid,struct publication *p,const struct cb_call_header *call,const unsigned char *payload,unsigned char **out,size_t *bytes){
     size_t capacity=kernel_reply_capacity(p,call->operation);
     unsigned char *reply=allocate(sizeof(struct cb_reply_header)+capacity);if(!reply)return CB_RESOURCE_FAILURE;
@@ -222,7 +222,7 @@ struct kernel_surface_result handles_surface_init(MODULE_ARGS){
     const char *memory_names[]={"allocate","free"};
     /* Build relocated pointers at runtime. A large local pointer initializer
        becomes an absolute .rodata pointer table in the flat PIC module. */
-    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access"};
+    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access","registry"};
     const char *io_names[sizeof(io_labels)/sizeof(io_labels[0])];for(size_t i=0;i<sizeof(io_names)/sizeof(io_names[0]);++i)io_names[i]=io_labels[i];
     const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID,stream=CB_STREAM_INTERFACE_ID;const char *stream_names[]={"pipe","read","write"};
     return module_result(1,kernel_publication(CB_MEMORY_NAME,&memory,memory_names,2,1) && kernel_publication(CB_IO_NAME,&io,io_names,sizeof(io_names)/sizeof(io_names[0]),2) && kernel_publication(CB_STREAM_NAME,&stream,stream_names,3,3));
@@ -230,7 +230,7 @@ struct kernel_surface_result handles_surface_init(MODULE_ARGS){
 struct kernel_surface_result handles_surface_admit(MODULE_ARGS){
     MODULE_UNUSED();const struct handle_policy *r=(const void *)a;if(!state.hub || !r || !r->manifest || !r->bytes || r->bytes==SIZE_MAX)return module_result(0,0);
     struct process_info info;if(CALL(state.process_info,r->process,&info,0).status || info.state!=PROCESS_READY || info.thread)return module_result(0,0);
-    struct policy *owner=allocate(sizeof(*owner));if(!owner)return module_result(0,0);owner->pid=r->process;owner->identity=r->identity;owner->json=allocate(r->bytes+1);if(!owner->json){release(owner);return module_result(0,0);}copy_bytes(owner->json,r->manifest,r->bytes);
+    struct policy *owner=allocate(sizeof(*owner));if(!owner)return module_result(0,0);owner->pid=r->process;owner->identity=r->identity;owner->installation_owner=r->installation_owner;owner->json=allocate(r->bytes+1);if(!owner->json){release(owner);return module_result(0,0);}copy_bytes(owner->json,r->manifest,r->bytes);
     struct manifest_parser parser={.at=owner->json,.end=owner->json+r->bytes,.context=owner,.resource=manifest_resource,.operation=manifest_operation};if(!manifest_parse(&parser)){free_policy(owner);return module_result(0,0);}
     struct channel *control=allocate(sizeof(*control));if(!control){free_policy(owner);return module_result(0,0);}control->pid=r->process;control->capacity=sizeof(struct cb_delivery_header);control->frame=allocate(control->capacity);if(!control->frame){release(control);free_policy(owner);return module_result(0,0);}
     uint64_t flags=lock();if(policy(r->process) || CALL(state.process_info,r->process,&info,0).status || info.state!=PROCESS_READY || info.thread){unlock(flags);release(control->frame);release(control);free_policy(owner);return module_result(0,0);}control->next=state.channels;state.channels=control;owner->next=state.policies;state.policies=owner;unlock(flags);return module_result(1,1);
@@ -427,7 +427,7 @@ struct kernel_surface_result handles_surface_owner_watch(MODULE_ARGS){
 }
 
 /* Trusted copied installation identity; never a borrowed policy pointer. */
-struct kernel_surface_result handles_surface_identity(MODULE_ARGS){MODULE_UNUSED();if(!b || c!=16)return module_result(0,0);uint64_t flags=lock();struct policy *p=policy(a);if(p)copy_bytes((void *)b,p->identity.installation_id,16);unlock(flags);return module_result(p!=NULL,p!=NULL);}
+struct kernel_surface_result handles_surface_identity(MODULE_ARGS){MODULE_UNUSED();if(!b || (c!=16 && c!=24))return module_result(0,0);uint64_t flags=lock();struct policy *p=policy(a);if(p){copy_bytes((void *)b,p->identity.installation_id,16);if(c==24)copy_bytes((unsigned char *)b+16,&p->installation_owner,8);}unlock(flags);return module_result(p!=NULL,p!=NULL);}
 
 /* Revoke authority without reclaiming executable code, caps or in-flight payloads.
  * Dispatch and revocation share the broker lock; dispatched work can reply. */

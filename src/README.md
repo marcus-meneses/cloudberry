@@ -277,8 +277,8 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
-| Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Read-only image trust; no installer/signatures or forced termination or automatic manager recovery |
-| Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no installer/signature enforcement, approval UI, automatic rebind, vows or C++ wrappers |
+| Applications | Privileged userland lifecycle, versioned installed-app registry, signed local install/remove, per-user/global scopes, stable identity and private data | Pinned development issuer; no in-place upgrades, forced termination or automatic manager recovery |
+| Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Built-in and signed runtime installation bindings; one boot input domain; no general approval UI, automatic rebind, vows or C++ wrappers |
 | Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU or window/compositor model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, descriptor-driven keyboard/mouse providers with shared-interface demultiplexing implemented; broader HID/UAS and physical qualification remain open |
@@ -422,6 +422,7 @@ src/
 │   └── hid-report.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
+│   ├── installer/ (README.md, installer.c, bundle.h, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
 │   ├── sessions/ (README.md, sessions.c, manifest.json, provider.cnf)
 │   ├── identity/ (README.md, identity.c, auth.inc, home.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
 │   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
@@ -451,6 +452,8 @@ src/
 │   ├── identity.h
 │   ├── identity-format.h
 │   ├── installations.h
+│   ├── registry.h
+│   ├── installer.h
 │   ├── display.h
 │   ├── graphics.h
 │   ├── text.h
@@ -555,6 +558,7 @@ src/
 │   │   ├── handles.md
 │   │   ├── applications-access.inc
 │   ├── applications.c
+│   ├── applications-registry.inc
 │   │   ├── applications.h
 │   │   ├── applications.json
 │   │   ├── display.c
@@ -698,6 +702,7 @@ src/
 ├── apps/
 │   ├── README.md
 │   ├── installed.json
+│   ├── install/ (README.md, install.c, manifest.json)
 │   ├── launch/ (launch.c, manifest.json)
 │   ├── terminal/ (README.md, terminal.c, parser.h, editor.h, editing.inc, manifest.json)
 │   ├── echo/ (echo.c, manifest.json)
@@ -791,6 +796,13 @@ src/
 │   ├── cpu-tsc.c
 │   ├── cpu-profile.c
 │   ├── installation-contract.c
+│   ├── installation-registry.c
+│   ├── installer-store.c
+│   ├── installation-state.py
+│   ├── installer-fixture.py
+│   ├── persistent-installations.py
+│   ├── bundle-check.c
+│   ├── bundles.py
 │   ├── installations.py
 │   ├── runtime-fixture.py
 │   ├── interfaces.c
@@ -880,6 +892,8 @@ src/
 │   └── xstate-host.c
 ├── tools/
 │   ├── build-installations.py
+│   ├── build-app-bundle.py
+│   ├── installation-state.py
 │   ├── build-initial.py
 │   ├── filesystem-tree.py
 │   ├── clean-tests.py
@@ -1016,7 +1030,7 @@ The identity provider verifies passwords, authorizes root/admin management and
 authenticates app execution through the ordinary [accounts app](apps/accounts/README.md).
 Filesystem calls enforce ownership/mode bits, including on existing file streams.
 Explicit home provisioning and nested interactive sessions are implemented;
-per-user installers remain open. App-specific home data authorization, session-wide
+signed local per-user/global installation is implemented. App-specific home data authorization, session-wide
 resource revocation and explicit administrator account revocation are implemented.
 Group edits retain snapshots unless an administrator explicitly revokes them.
 
@@ -1038,7 +1052,7 @@ apply. Metadata mutation uses the format backend, with ext4 journaling/barriers;
 ISO9660 remains read-only.
 
 `accounts home USER` explicitly provisions private 0700 user storage and system
-application data directories from the immutable catalog. Existing unrelated
+application data directories from the authoritative registry. Existing unrelated
 folders are not taken over. Root remains `/system/root`; boot cwd stays `/`.
 `accounts login USER` authenticates and starts a nested terminal at its existing
 home. An optional APP retains authenticated child execution. The continuous
@@ -1106,3 +1120,19 @@ Owned offscreen graphics remain usable in the background; screen readback does n
 This is one shared console, without a secure compositor or secure-attention UI.
 See the sessions provider contract for precise admission and retry semantics.
 Focused host checks: `make -C src test-session-policy test-credentials test-handles`.
+
+
+## Signed local installation
+
+The continuously running installer provider publishes `/@installer`; the ordinary
+`install` app inspects, installs, lists and removes signed native bundles. Normal
+users install only into their own `_apps`; root/admin may select global scope.
+Built-in admission remains immutable. Supplemental records are refcounted registry
+snapshots shared by launch, discovery and filesystem policy. Private-data reuse
+requires explicit consent. Writes use a recoverable intent/commit journal; offline
+development updates preserve verified runtime apps with their registrations/data.
+Only a pinned host development issuer is supported; this is not Secure Boot or a
+public package trust system. There is no provider installation, in-place upgrade,
+network repository, dependency solver or forced termination in this milestone.
+See [installer](handlers/installer/README.md), [CLI](apps/install/README.md),
+[filesystem layout](maps/filesystem.md) and [development media](tools/development-images.md).

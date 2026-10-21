@@ -1,0 +1,8 @@
+version=1
+executable=installer.elf
+manifest=manifest.json
+ready=/@installer
+installation_id=636c6f756462657272792e696e737431
+cpu=0
+stack_bytes=1048576
+files=trusted-key.bin,catalog.bin

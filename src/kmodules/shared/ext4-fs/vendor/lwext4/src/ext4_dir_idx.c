@@ -377,7 +377,7 @@ int ext4_dir_dx_init(struct ext4_inode_ref *dir, struct ext4_inode_ref *parent)
 	struct ext4_dir_idx_root *root = (void *)block.data;
 	struct ext4_dir_idx_rinfo *info = &(root->info);
 
-	memset(root, 0, sizeof(struct ext4_dir_idx_root));
+	memset(block.data, 0, block_size);
 	struct ext4_dir_en *de;
 
 	/* Initialize dot entries */
@@ -431,6 +431,9 @@ int ext4_dir_dx_init(struct ext4_inode_ref *dir, struct ext4_inode_ref *parent)
 	}
 
 	/* Fill the whole block with empty entry */
+	/* Recycled blocks may contain live-looking inode numbers. Initialize
+	 * every byte before calculating the leaf checksum. */
+	memset(new_block.data, 0, block_size);
 	struct ext4_dir_en *be = (void *)new_block.data;
 
 	if (ext4_sb_feature_ro_com(sb, EXT4_FRO_COM_METADATA_CSUM)) {

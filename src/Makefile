@@ -1033,7 +1033,7 @@ test-handles:
 $(BUILD)/apps/keyboard.elf: handlers/keyboard/report.c handlers/keyboard/report.h common/hid-report.c common/hid-report.h interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/report.c common/hid-report.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts fsctl)) $(foreach p,terminal echo cat ls pwd monitor accounts fsctl,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity sessions)) $(foreach p,display graphics text filesystem mouse identity sessions,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
+$(BUILD)/src-handler-bundles/.ready: $(BUILD)/installer-trusted-key.bin $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts fsctl install)) $(foreach p,terminal echo cat ls pwd monitor accounts fsctl install,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity sessions installer)) $(foreach p,display graphics text filesystem mouse identity sessions installer,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
@@ -1042,12 +1042,15 @@ $(BUILD)/src-handler-bundles/.ready: $(addprefix $(BUILD)/apps/,$(addsuffix .elf
 	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
 	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
 	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
-	$(foreach p,display graphics text filesystem mouse identity sessions,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,display graphics text filesystem mouse identity sessions installer,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
 	cp handlers/identity/crypto/vendor/LICENSE $(BUILD)/src-handler-bundles/identity/THIRD-PARTY-LICENSE.txt
-	$(foreach p,terminal echo cat ls pwd monitor accounts fsctl,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,terminal echo cat ls pwd monitor accounts fsctl install,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
 	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/identity/catalog.bin
+	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/installer/catalog.bin
+	cp $(BUILD)/installer-trusted-key.bin $(BUILD)/src-handler-bundles/installer/trusted-key.bin
+	cp handlers/installer/vendor/monocypher/LICENCE.md $(BUILD)/src-handler-bundles/installer/THIRD-PARTY-LICENSE.txt
 	python3 tools/build-initial.py terminal $(BUILD)/src-handler-bundles/applications/initial.bin
 	@touch $@
 .PHONY: test-keyboard
@@ -1129,21 +1132,21 @@ test-installations:
 	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests
 
 # Application-facing rendering providers (independent replaceable contracts).
-CONSOLE_PROVIDERS := display graphics text filesystem mouse identity sessions
+CONSOLE_PROVIDERS := display graphics text filesystem mouse identity sessions installer
 CONSOLE_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(CONSOLE_PROVIDERS)))
 IDENTITY_CRYPTO := handlers/identity/crypto/password.c handlers/identity/crypto/strings.c handlers/identity/crypto/vendor/source/sha256.c handlers/identity/crypto/vendor/source/utils.c
 IDENTITY_CRYPTO_FLAGS := -Ihandlers/identity/crypto/vendor/include -Ihandlers/identity/crypto/compat -fno-builtin
 define CONSOLE_RULE
 $(BUILD)/apps/$(1).elf: handlers/$(1)/$(1).c
 	@mkdir -p $$(@D)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) $(if $(filter mouse,$(1)),handlers/mouse/hid.c common/hid-report.c) $(if $(filter identity,$(1)),handlers/identity/format.c handlers/identity/store.c $(IDENTITY_CRYPTO) $(IDENTITY_CRYPTO_FLAGS)) sdk/system.c -o $$@
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) $(if $(filter mouse,$(1)),handlers/mouse/hid.c common/hid-report.c) $(if $(filter identity,$(1)),handlers/identity/format.c handlers/identity/store.c $(IDENTITY_CRYPTO) $(IDENTITY_CRYPTO_FLAGS)) $(if $(filter installer,$(1)),$(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o -Xlinker --gc-sections) sdk/system.c -o $$@
 endef
 $(foreach p,$(CONSOLE_PROVIDERS),$(eval $(call CONSOLE_RULE,$(p))))
 $(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wildcard interfaces/*.h) handlers/graphics/font.h
 
 $(BUILD)/apps/graphics.elf: handlers/graphics/raster.c handlers/graphics/raster.h handlers/graphics/glyphs.h
 
-SHELL_APPS := terminal echo cat ls pwd monitor accounts fsctl
+SHELL_APPS := terminal echo cat ls pwd monitor accounts fsctl install
 SHELL_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(SHELL_APPS)))
 define SHELL_RULE
 $(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/application.h sdk/system.c $(wildcard interfaces/*.h)
@@ -1315,3 +1318,46 @@ test-session-policy:
 	$(BUILD)/tests/session-policy
 	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/graphics-access.c -Wl,--gc-sections -o $(BUILD)/tests/graphics-access
 	$(BUILD)/tests/graphics-access
+
+
+INSTALL_SIGNING_KEY ?= $(TOOLCHAIN_DIR)/signing/installer-development.pem
+$(BUILD)/installer-trusted-key.bin: tools/build-app-bundle.py $(wildcard $(INSTALL_SIGNING_KEY))
+	@mkdir -p $(@D)
+	python3 tools/build-app-bundle.py key --private "$(INSTALL_SIGNING_KEY)" --public "$@"
+$(BUILD)/apps/installer.elf: $(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o handlers/installer/bundle.h handlers/installer/files.inc handlers/installer/store.inc handlers/installer/operations.inc $(wildcard handlers/installer/vendor/monocypher/*)
+
+.PHONY: test-installation-registry
+test-installation-registry: $(BUILD)/src-handler-bundles/.ready
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/installation-registry.c -Wl,--gc-sections -o $(BUILD)/tests/installation-registry
+	$(BUILD)/tests/installation-registry $(BUILD)/src-handler-bundles/installed.bin
+
+$(BUILD)/tests/apps/installed-sample.elf: tests/apps/installed-sample.c $(wildcard interfaces/*.h) sdk/service.h sdk/stream.h sdk/system.c sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+.PHONY: installer-fixture
+installer-fixture: $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/apps/installed-sample.elf
+	python3 tests/installer-fixture.py $(BUILD) "$(INSTALL_SIGNING_KEY)"
+
+.PHONY: test-installer-store
+test-installer-store: installer-fixture $(BUILD)/tests/installer-monocypher.o $(BUILD)/tests/installer-ed25519.o
+	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/installer-store.c $(BUILD)/tests/installer-monocypher.o $(BUILD)/tests/installer-ed25519.o -Wl,--gc-sections -o $(BUILD)/tests/installer-store
+	$(BUILD)/tests/installer-store $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/installer/sample.cbp
+
+.PHONY: test-bundles
+test-bundles: installer-fixture
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fPIC -shared tests/bundle-check.c handlers/installer/vendor/monocypher/monocypher.c handlers/installer/vendor/monocypher/monocypher-ed25519.c -o $(BUILD)/tests/bundle-check.so
+	python3 tests/bundles.py $(BUILD) "$(INSTALL_SIGNING_KEY)"
+
+$(BUILD)/apps/installer-monocypher.o: handlers/installer/vendor/monocypher/monocypher.c handlers/installer/vendor/monocypher/monocypher.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -ffunction-sections -fdata-sections -c $< -o $@
+$(BUILD)/apps/installer-ed25519.o: handlers/installer/vendor/monocypher/monocypher-ed25519.c handlers/installer/vendor/monocypher/monocypher-ed25519.h handlers/installer/vendor/monocypher/monocypher.h
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -ffunction-sections -fdata-sections -c $< -o $@
+$(BUILD)/tests/installer-monocypher.o: handlers/installer/vendor/monocypher/monocypher.c handlers/installer/vendor/monocypher/monocypher.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections -c $< -o $@
+$(BUILD)/tests/installer-ed25519.o: handlers/installer/vendor/monocypher/monocypher-ed25519.c handlers/installer/vendor/monocypher/monocypher-ed25519.h handlers/installer/vendor/monocypher/monocypher.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections -c $< -o $@

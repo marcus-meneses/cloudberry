@@ -12,7 +12,7 @@ static struct kernel_surface_result load_stub(MODULE_ARGS){MODULE_UNUSED();const
 static struct kernel_surface_result admit_stub(MODULE_ARGS){MODULE_UNUSED();const struct handle_policy *p=(const void *)a;assert(p->process==99 && p->bytes && p->identity.installation_id[0]);return module_result(1,!reject_admission);}
 static struct kernel_surface_result reap_stub(MODULE_ARGS){MODULE_UNUSED();assert(a==99);++reaped;return module_result(1,1);}
 static uint8_t caller_ids[2][16];
-static struct kernel_surface_result identity_stub(MODULE_ARGS){MODULE_UNUSED();memcpy((void *)b,caller_ids[a==43],16);return module_result(1,1);}
+static struct kernel_surface_result identity_stub(MODULE_ARGS){MODULE_UNUSED();memcpy((void *)b,caller_ids[a==43],16);if(c==24)memset((unsigned char *)b+16,0,8);return module_result(1,1);}
 static struct kernel_surface_result credentials_stub(MODULE_ARGS){MODULE_UNUSED();*(struct cb_credentials *)c=(struct cb_credentials){.uid=a==44?2:1,.gid=2,.generation=1};return module_result(sizeof(struct cb_credentials),1);}
 static struct kernel_surface_result home_stub(MODULE_ARGS){MODULE_UNUSED();const char *home=a==44?"/home/bob":"/home/alice";if(c<strlen(home)+1)return module_result(0,0);strcpy((void *)b,home);return module_result(strlen(home),1);}
 int main(int argc,char **argv){

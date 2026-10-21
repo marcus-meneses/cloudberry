@@ -956,3 +956,12 @@ index 195719d..9f903db 100644
 +    struct ext4_mountpoint **m=&s_mp;while(*m && *m!=p->mp)m=&(*m)->next;if(!*m)return EINVAL;
 +    *m=p->mp->next;*link=p->next;return EOK;
 +}
+--- a/lwext4/src/ext4_dir_idx.c
++++ b/lwext4/src/ext4_dir_idx.c
+@@ -380 +380 @@ int ext4_dir_dx_init(struct ext4_inode_ref *dir, struct ext4_inode_ref *parent)
+-	memset(root, 0, sizeof(struct ext4_dir_idx_root));
++	memset(block.data, 0, block_size);
+@@ -433,0 +434,3 @@ int ext4_dir_dx_init(struct ext4_inode_ref *dir, struct ext4_inode_ref *parent)
++	/* Recycled blocks may contain live-looking inode numbers. Initialize
++	 * every byte before calculating the leaf checksum. */
++	memset(new_block.data, 0, block_size);

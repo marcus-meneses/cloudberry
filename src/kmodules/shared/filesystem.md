@@ -102,3 +102,9 @@ Mounted aliases cannot bypass it. `process.active` rejects closed sessions befor
 backend execution; `filesystem.revoke(PID)` wakes queued mount waiters. Backend
 operations that have already begun finish synchronously; executable/context
 reclamation still waits for actual process exit.
+
+ABI2 minor 1 adds FS_RMDIR / public filesystem.rmdir for empty directories.
+The manager accepts minor 0/1, refuses newer descriptors, and does not invoke
+RMDIR on a minor-0 backend. ext4 performs its existing journaled empty-directory
+mutation; ISO9660 reports READ_ONLY. Parent write/search/sticky and private-data
+policy apply to directory removal. Recursive deletion stays in the installer.

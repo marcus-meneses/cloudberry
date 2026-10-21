@@ -1,9 +1,9 @@
 """Build the guest namespace from compiler bundle intermediates; never run at boot."""
-import json,pathlib,shutil,struct,importlib.util
+import json,pathlib,shutil,struct,importlib.util,hashlib
 
 DIRECTORIES = ('boot','system/apps',
  'system/handlers','system/kmodules/drivers','system/kmodules/helpers','system/fonts',
- 'system/config/keyboard','system/config/identity','system/state','system/root/_config','system/root/_apps',
+ 'system/config/keyboard','system/config/identity','system/config/installations/packages','system/packages','system/state','system/root/_config','system/root/_apps',
  'home','volumes','tmp')
 
 def populate(root, bundles=None):
@@ -58,6 +58,9 @@ def populate(root, bundles=None):
             if at!=len(data):raise ValueError('trailing installation data')
             shutil.copy2(catalog,root/'system/state/installed.bin')
             (drivers/'installed.bin').unlink()
+        if (bundles/'packages').is_dir():
+            shutil.copytree(bundles/'packages',root/'system/packages',dirs_exist_ok=True)
+            shutil.rmtree(drivers/'packages')
         # Build markers and source specifications are never guest files.
         for name in ('.ready','test-installed.json'):(drivers/name).unlink(missing_ok=True)
     for directory,entries in indexes.items():
@@ -76,3 +79,10 @@ def populate(root, bundles=None):
 
     spec=importlib.util.spec_from_file_location('identity_db',pathlib.Path(__file__).with_name('identity-db.py'))
     identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity);identity.provision(root)
+
+    installation=root/'system/config/installations'
+    empty=struct.pack('<QQQQ',0x314745524243,32,1,0)
+    (installation/'registry.bin').write_bytes(empty+hashlib.sha512(empty).digest())
+    (installation/'transaction.bin').write_bytes(b'')
+    installation.chmod(0o700);(installation/'packages').chmod(0o700)
+    for entry in installation.glob('*.bin'):entry.chmod(0o600)

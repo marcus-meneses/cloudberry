@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@installer",
+      "operations": [
+        "inspect",
+        "install",
+        "remove",
+        "list",
+        "status"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    }
+  ]
+}

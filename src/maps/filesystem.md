@@ -37,6 +37,10 @@ modules live under `/system/kmodules`, without a legacy boot-completion tree.
 │   │   │   ├── groups.bin
 │   │   │   ├── credentials.bin
 │   │   │   └── transaction.bin
+│   │   ├── installations/
+│   │   │   ├── registry.bin
+│   │   │   ├── transaction.bin
+│   │   │   └── packages/             # Verified signed bundle archives
 │   │   └── keyboard/
 │   │       ├── config.cnf
 │   │       ├── ibm.keymap
@@ -60,10 +64,11 @@ Explicit `accounts home USER` provisioning creates the non-root account layout:
 ├── _config/
 ├── _apps/
 │   ├── _index
-│   ├── <appname>                    # User-installed apps only
-│   ├── <appname>.manifest.json      # User-installed apps only
-│   ├── <appname>.resources/         # User-installed apps only
-│   └── <appname>.data/
+│   ├── _<id>.<name>                  # User-installed executable
+│   ├── _<id>.<name>.manifest.json
+│   ├── _<id>.<name>.resources/
+│   ├── _<id>.<name>.data/            # User-installed or global installed app
+│   └── <appname>.data/               # Built-in app state
 ├── documents/
 ├── downloads/
 └── desktop/
@@ -73,25 +78,33 @@ No placeholder user or `/home/root` is created. Root's reserved identity is zero
 its account area is `/system/root`, initial cwd `/`, and it has no own installed
 applications. Shared system executables live directly in `/system/apps`; private
 state (history, caches, preferences, databases, drafts) belongs in the running
-user's `<appname>.data`, including for system-provided applications. Users will
-install only for themselves. Account authentication and kernel credentials are implemented; installers,
-user installation policy and per-user executable catalogs remain subsequent milestones.
-Home creation is explicit; startup only opens existing storage.
+user's `<appname>.data`, including for system-provided applications. Explicit
+home provisioning is separate from login and boot. Users may install only for
+themselves; root/admin may install system-wide. Root has no private app scope.
 
-Application filenames use catalog names without `.elf`; stable installation IDs
-remain in the authoritative catalog. Names are case-sensitive ASCII alphanumeric,
-hyphen or underscore, start with an alphanumeric character, and are unique in the
-catalog. This avoids both reserved hidden prefixes and sidecar suffix collisions.
-Renaming, replacement and reuse of old private data will require installer policy
-bound to identity, not filename alone. The current catalog is immutable.
+Built-in application filenames use catalog names without `.elf`. Runtime-installed
+apps use `_<32-hex-installation-id>.<name>` plus `.manifest.json`, `.resources/`
+and `.data` sidecars. Friendly names are case-sensitive ASCII alphanumeric,
+hyphen or underscore, start with an alphanumeric character and have at most 207
+characters so the longest sidecar fits ext4's 255-byte component limit. Names/IDs
+cannot collide with built-ins or visible global installations; separate users may
+have different private installations with the same friendly name.
 
-Each `_index` is JSON version 1 with entries containing `app_id`, `name` and
-`installation`. The build derives these disposable lookup caches from the
-installation catalog; changing an index grants no rights. Runtime application
-lookup still uses the immutable catalog, not these JSON caches. A future installer
-must update installation files, authoritative records and derived indexes as one
-transaction; no boot-time repair scan is introduced. Root's index references
-system applications and contains no root-owned installations.
+Built-ins live in immutable `installed.bin`; supplemental registrations live in
+the protected versioned `registry.bin`. The applications kmodule owns immutable,
+refcounted live snapshots. Only the privileged [installer](../handlers/installer/README.md)
+may publish a validated replacement. Launch, discovery and private-data policy
+use the same registry; admitted installation identity/scope stays stable across
+credential changes. Existing app replacement is refused while registered; remove
+an inactive app before reinstalling. Reusing retained data requires explicit
+`--reuse-data`; removal retains it unless `--delete-data` is selected.
+
+Each `_index` is a derived JSON version 1 display cache with `app_id`, `name` and
+`installation`; editing it grants no rights. The build supplies built-in caches;
+installer transactions refresh affected caches and new-home provisioning includes
+visible global installations. Registry/WAL recovery runs only when required;
+there is no boot-time installation scan, migration or directory provisioning.
+Root's cache references global apps, never root-owned installations.
 
 A leading underscore means hidden presentation only. Enumeration retains all
 entries; `ls` omits underscore-prefixed names by default and `ls -a` includes
@@ -108,7 +121,8 @@ Same-user apps cannot read, mutate, inspect or change permissions on another app
 private data, even if mode bits permit it. An app cannot remove its container or
 mutate `_apps`/`_index`/installation sidecars. Ordinary document paths keep UID/mode
 semantics. Root retains administrative access, while protected identity files
-remain exclusive to the installed identity provider. Existing /system and /boot
+remain exclusive to the installed identity provider. Installation state is
+exclusive to the installer provider; it is not exposed to root apps directly. Existing /system and /boot
 mutation restrictions remain. Names/caches confer no installation authority.
 
 Closed sessions revoke new resource calls, queued work and blocked stream/FS
@@ -138,3 +152,8 @@ directory. It is not an application installation or a user home.
 Account metadata is provisioned under /system/config/identity at image-build time.
 Only the installed identity handler can access that subtree through public
 filesystem handles; management uses /@identity. See [identity](../handlers/identity/README.md).
+
+The public filesystem contract includes empty-directory `rmdir`. Recursive
+uninstall traversal belongs to the userland installer; it skips `.`/`..` and
+never recursively deletes inside the kernel. Backend ABI 2.1 adds this operation;
+2.0 backends remain usable and return UNAVAILABLE for `rmdir`.

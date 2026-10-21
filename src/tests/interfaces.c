@@ -7,6 +7,7 @@
 #include "../interfaces/system.h"
 #include "../interfaces/startup.h"
 #include "../interfaces/installations.h"
+#include "../interfaces/installer.h"
 #include "../interfaces/admission.h"
 #include "../interfaces/display.h"
 #include "../interfaces/graphics.h"
@@ -20,6 +21,8 @@
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_installer_request)==96 && sizeof(struct cb_bundle_info)==136 && sizeof(struct cb_registry_entry)==56,"installer/registry frames");
+ABI_ASSERT(CB_FILESYSTEM_RMDIR==9 && CB_APPLICATION_RESOURCES==9,"appended filesystem/resources operations");
 ABI_ASSERT(sizeof(struct cb_identity_home)==40 && sizeof(struct cb_session_status)==64 && CB_APPLICATION_DATA==8,"identity home/session drain/appdata ABI");
 ABI_ASSERT(sizeof(struct cb_session)==32 && sizeof(struct cb_io_session)==24 && sizeof(struct cb_io_input_focus)==32,"session/focus ABI");
 ABI_ASSERT(sizeof(struct cb_filesystem_stat)==16 && sizeof(struct cb_filesystem_metadata)==32 && sizeof(struct cb_filesystem_owner)==16,"filesystem metadata ABI preserves STAT");

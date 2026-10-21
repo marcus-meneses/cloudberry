@@ -1,5 +1,5 @@
 """Build-owned coherence manifest; excludes mutable identity and application data."""
-import hashlib,json,pathlib
+import hashlib,json,pathlib,re
 
 def normalized_config(data):
     return b'\n'.join(line for line in data.split(b'\n') if not line.startswith(b'system.build_id=')).rstrip(b'\n')+b'\n'
@@ -7,6 +7,8 @@ def normalized_config(data):
 def managed(root):
     for p in sorted(pathlib.Path(root).rglob('*')):
         relative=p.relative_to(root).as_posix()
+        dynamic=relative.startswith('system/apps/') and re.fullmatch(r'_[0-9a-f]{32}\.[A-Za-z0-9][A-Za-z0-9_-]*(?:\.manifest\.json|\.resources(?:/.*)?)?',relative.removeprefix('system/apps/'))
+        if relative=='system/apps/_index' or relative.startswith('system/config/installations/') or dynamic:continue
         if p.is_file() and (relative=='system/state/installed.bin' or (relative.startswith('system/') and not relative.startswith(('system/root/','system/config/identity/','system/state/')))):
             yield p,relative
 
@@ -37,5 +39,5 @@ def verify(boot,root):
         if r['tree']=='boot' and str(name)=='cloudberry.cnf':data=normalized_config(data)
         if hashlib.sha256(data).hexdigest()!=r['sha256']:raise ValueError('mixed/corrupt managed file: '+str(name))
         if r['tree']=='system' and file.stat().st_mode&0o7777!=r['mode']:raise ValueError('managed file mode mismatch: '+str(name))
-    if {name for p,name in managed(root)}!={r['path'] for r in document['files'] if r['tree']=='system'}:raise ValueError('unrecorded managed system files')
+    if {name for p,name in managed(root)}!={r['path'] for r in document['files'] if r['tree']=='system' and r['path']!='system/apps/_index'}:raise ValueError('unrecorded managed system files')
     return identity

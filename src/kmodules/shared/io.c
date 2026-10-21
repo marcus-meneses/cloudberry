@@ -3,7 +3,7 @@
 #include "process.h"
 #include "../../kernel/cpu.h"
 static const struct kernel_surfaces *hub;
-static uint64_t text_owner,display_owner,graphics_owner,keyboard_owner,identity_owner,sessions_owner,mouse_owner,focus_pid,focus_generation;
+static uint64_t installer_owner,text_owner,display_owner,graphics_owner,keyboard_owner,identity_owner,sessions_owner,mouse_owner,focus_pid,focus_generation;
 static kernel_surface_call hid,display,filesystem,applications,clock,watch,hid_exit,applications_exit;
 #define CALL(fn,a,b,c) (fn)((uintptr_t)(a),(uintptr_t)(b),(uintptr_t)(c),0,0,0)
 struct kernel_surface_result io_surface_init(MODULE_ARGS){
@@ -15,7 +15,7 @@ struct kernel_surface_result io_surface_init(MODULE_ARGS){
     for(unsigned i=0;i<sizeof(init)/sizeof(init[0]);++i){kernel_surface_call start=kernel_surface_find(candidate,init[i]);if(!start)return module_result(0,0);struct kernel_surface_result result=start(a,b,c,0,0,0);if(result.status || !result.value)return module_result(0,0);}
     hub=candidate;return module_result(1,1);
 }
-struct kernel_surface_result io_surface_bind(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);if(kernel_hub_name_equal((const char *)a,"text"))text_owner=b;else if(kernel_hub_name_equal((const char *)a,"display"))display_owner=b;else if(kernel_hub_name_equal((const char *)a,"graphics"))graphics_owner=b;else if(kernel_hub_name_equal((const char *)a,"keyboard"))keyboard_owner=b;else if(kernel_hub_name_equal((const char *)a,"identity"))identity_owner=b;else if(kernel_hub_name_equal((const char *)a,"sessions"))sessions_owner=b;else if(kernel_hub_name_equal((const char *)a,"mouse"))mouse_owner=b;return module_result(1,1);}
+struct kernel_surface_result io_surface_bind(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);if(kernel_hub_name_equal((const char *)a,"installer"))installer_owner=b;else if(kernel_hub_name_equal((const char *)a,"text"))text_owner=b;else if(kernel_hub_name_equal((const char *)a,"display"))display_owner=b;else if(kernel_hub_name_equal((const char *)a,"graphics"))graphics_owner=b;else if(kernel_hub_name_equal((const char *)a,"keyboard"))keyboard_owner=b;else if(kernel_hub_name_equal((const char *)a,"identity"))identity_owner=b;else if(kernel_hub_name_equal((const char *)a,"sessions"))sessions_owner=b;else if(kernel_hub_name_equal((const char *)a,"mouse"))mouse_owner=b;return module_result(1,1);}
 /* Authorize screen access before a frontend mutates its state. Each backend
  * trusts only the bound upstream renderer, never a claimed identity in payload. */
 static cb_status_t console_access(uint64_t provider,const struct cb_io_console_access *r){
@@ -39,6 +39,7 @@ static cb_status_t console_access(uint64_t provider,const struct cb_io_console_a
 }
 struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
+    if(r->operation==CB_IO_REGISTRY){r->authority=installer_owner && r->process==installer_owner?1:identity_owner && r->process==identity_owner?2:0;(void)CALL(applications,r,0,0);return module_result(1,1);}
     if(r->operation==CB_IO_CONSOLE_ACCESS){if(r->bytes==sizeof(struct cb_io_console_access)){struct cb_io_console_access request;__builtin_memcpy(&request,r->input,sizeof(request));r->status=console_access(r->process,&request);}return module_result(1,1);}
     if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(clock,0,0,0).value;for(unsigned i=0;i<8;++i)((unsigned char *)r->output)[i]=((unsigned char *)&time)[i];r->actual=8;r->status=CB_OK;}return module_result(1,1);}
     if(r->operation==CB_IO_OWNER_WATCH){r->status=CB_DENIED;if((!graphics_owner || r->process!=graphics_owner) && (!keyboard_owner || r->process!=keyboard_owner) && (!identity_owner || r->process!=identity_owner) && (!sessions_owner || r->process!=sessions_owner))return module_result(1,1);r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_io_owner_watch))return module_result(1,1);struct cb_io_owner_watch request;for(size_t i=0;i<sizeof(request);++i)((unsigned char *)&request)[i]=((const unsigned char *)r->input)[i];if(request.enable<=1)r->status=watch(r->process,request.process,request.token,request.enable,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}

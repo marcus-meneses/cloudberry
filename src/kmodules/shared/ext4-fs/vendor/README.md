@@ -7,7 +7,8 @@ License: BSD-3-Clause, retained in lwext4/LICENSE and source headers.
 Fresh upstream sources; no superseded Cloudberry components were imported.
 Local changes are recorded in cloudberry.patch: dynamic registries, normal dirty
 mount state, integrity/transaction failure hooks, registry-only disconnect
-unlinking and recovery corrections as
+unlinking, recovery corrections and initialization of recycled indexed-directory
+blocks before checksum calculation, as
 validated by the isolated tests. Formatting/MBR/mkfs/xattr API sources are not
 linked. The Cloudberry adapter supplies allocation, byte primitives and durable
 block I/O through the hub-selected transport.

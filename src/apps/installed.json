@@ -18,6 +18,15 @@
     "stack_bytes": 262144
   },
   {
+    "name": "installer",
+    "executable": "/system/handlers/installer",
+    "manifest": "installer/manifest.json",
+    "installation_id": "636c6f756462657272792e696e737431",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 1048576
+  },
+  {
     "name": "applications",
     "executable": "/system/handlers/applications",
     "manifest": "applications/manifest.json",
@@ -167,6 +176,15 @@
     "manifest": "sessions/manifest.json",
     "installation_id": "636c6f756462657272792e736573736e",
     "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "install",
+    "executable": "/system/apps/install",
+    "manifest": "install/manifest.json",
+    "installation_id": "636c6f756462657272792e696e73746c",
+    "flags": 1,
     "cpu": 0,
     "stack_bytes": 262144
   }

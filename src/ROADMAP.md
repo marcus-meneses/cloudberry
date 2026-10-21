@@ -4,11 +4,13 @@ Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
 Kmodules are coupled kernel mechanisms; isolated handlers use a separate handle layer.
 
 Current closure (2026-10-21): ownership management, explicit account homes,
-nested interactive login and separate persistent development media are implemented.
+nested interactive login, persistent development media and signed local
+application installation are implemented.
 See the closure at the end for validation. Earlier sections record chronological
 milestones and their limitations at that time; current contracts live beside code.
 
-Next bounded gap: a dedicated guest installer/user application installation.
+Next bounded installation work: explicit upgrade/rollback policy and issuer-key
+enrollment/rotation, after the local install/remove contract is accepted.
 Explicit account revocation and foreground console authorization are implemented;
 secure-attention UI and a full compositor remain separate work. Explicit offline
 updates, app-specific data authorization and session resource revocation are closed.
@@ -1818,3 +1820,51 @@ Console handoff closure: screen transform/clip/composition is now per drawing
 process, with owner-exit cleanup and default state for new callers. Administrative
 self-session close accepts revoked stdout after successful closure. Host screen
 authority/state and session policy checks pass.
+
+
+Signed local installation closure (2026-10-21):
+
+1. Console screen state follows the drawing caller, and successful administrative
+   self-session closure tolerates revoked stdout. Checkpoint b7227b3 records it.
+2. Built-ins retain immutable admission. Supplemental applications use versioned
+   refcounted snapshots shared by discovery, launch, resources and filesystem
+   policy. Admission binds ID plus original installation scope independently of
+   later credentials. Prepare gates new dynamic loads and refuses changed active
+   apps; commit is an allocation-free pointer swap. Bulk snapshot allocation and
+   retirement execute outside the publication lock. Readers retain old snapshots
+   until release; provider death leaves uncertain prepared state gated for recovery.
+3. The dedicated privileged installer owns local Ed25519-verified bundle install
+   and removal. The ordinary install app provides manifest review/consent, own-user
+   or authorized global scope, explicit retained-data reuse/deletion and status.
+   The kernel checks source reads as the original caller, preventing a privileged
+   copy from another app's private area. Code/resources are immutable to ordinary
+   apps; new-home provisioning and installer plans create owned private data.
+   Protected intent/commit journaling recovers partial install/remove and an
+   interrupted registry rewrite. Offline updates preserve signed registrations,
+   archives, code/resources, ownership and private data together; changed issuers,
+   candidate conflicts, unresolved journals and modified code are refused.
+
+No in-place upgrade, dependency resolver, online repository, provider installation,
+forced termination, secure compositor, general approval broker or public signing
+trust ecosystem is added. The development private key remains excluded on the
+host; only a pinned public issuer enters the image. Tests remain on disposable
+media, separate from the candidate and developer disks.
+
+Host validation passes: registry authority/generation/OOM/snapshot lifetime,
+reauthentication binding, active removal and source access; installer crash cuts
+before/after intent, artifacts, commit, registry and publication; truncated registry
+repair and refusal without a committed WAL; signature/format/path failures; signed
+offline preservation refusals; C/C++ ABI, filesystem/backend, broker and console
+session/state checks. Actual ext4 recycled-directory block initialization is fixed
+and tested through repeated file/directory reuse. Guest acceptance evidence follows.
+
+Four-CPU TCG install/update/reboot acceptance passed in
+`installer-persistence/7d0275b27e6c45cd98cc596d73a5aa78`:
+create `console/6af52f8223bc446095ba46280c71e510`, reboot
+`console/2cd658f278c44abc83ce0f630cd8b4f5`. It includes bad-signature denial,
+active-app removal refusal, retained-data consent, delete/reinstall, per-user
+installation, denied user system-install, global app data for a new home,
+resource reads and preserved data after candidate update. The updater's journal
+replay and independent e2fsck checks pass on copied media. Native KVM and physical
+hardware have not been requalified for this installer milestone. Successful
+disposable disks were cleaned; reports and logs remain.

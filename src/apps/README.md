@@ -2,7 +2,7 @@
 
 `installed.json` binds image paths, immutable manifest bytes, OS installation
 identities, roles and stack settings in a build-generated catalog outside app
-bundles. Keyboard, mouse, display, graphics, text, filesystem, identity and application providers
+bundles. Keyboard, mouse, display, graphics, text, filesystem, identity, sessions, installer and application providers
 are registered alongside ordinary apps. Callers cannot override those bindings.
 
 | Application | Role |
@@ -14,6 +14,7 @@ are registered alongside ordinary apps. Callers cannot override those bindings.
 | cat | Copies stdin or named files to stdout |
 | ls | Lists the supplied directory or startup cwd, in four output columns |
 | pwd | Writes startup cwd to stdout |
+| install | Signed local bundle inspection, own/global install and inactive-app removal through /@installer |
 | accounts | User/group management, non-echoed password changes and authenticated app execution through /@identity |
 | monitor | Read-only live process/handler monitor, CPU time and committed user pages; batch stdout snapshots |
 
@@ -35,3 +36,7 @@ underscore-prefixed entries; default listings omit them.
 See [monitor](monitor/README.md) for monitoring fields and refresh controls.
 
 See [accounts](accounts/README.md) for management commands and identity inheritance.
+
+The [install utility](install/README.md) does not edit protected registry files.
+Runtime app basenames include their installation ID; friendly-name discovery uses
+the authoritative supplemental registry rather than directory scans or `_index`.

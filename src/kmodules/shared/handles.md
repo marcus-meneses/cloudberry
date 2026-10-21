@@ -40,7 +40,8 @@ registered test launchers; no test autostart enters the candidate.
 ## Kernel mechanism boundary
 
 `kmodules/shared/applications.c` belongs to the independent applications kmodule. Its kernel-only catalog loader
-copies the OS registry once and its installed-image loader uses the record's
+copies immutable built-ins and owns versioned supplemental registry snapshots;
+its installed-image loader uses the selected record's
 path, manifest, identity, CPU and stack settings. Only the catalog-selected
 manager process can use process_launch/stop/reap/release through `/@io`; even a
 manually admitted forged manifest does not create this binding. Runtime requests
@@ -67,9 +68,9 @@ remains available, but cannot bind the process-manager role.
 
 The trust root is the build-owned boot image/catalog. The filesystem handler
 protects its installed boot/system tree from application mutations, including on
-an explicitly writable development snapshot. This is not a signature
-verification chain, installer, complete login-session manager or writable app
-registry. Cwd is immutable startup metadata; there is no filesystem grant implied
+an explicitly writable development snapshot. Signed local application installation and session management now run in
+dedicated privileged userland providers. Built-ins remain rooted in the build;
+this does not establish Secure Boot or a public issuer ecosystem. Cwd is immutable startup metadata; there is no filesystem grant implied
 by it. Argv currently travels within one bounded handle message, retaining empty
 arguments, spaces and case; larger streamed launch packets are future transport
 work. Launch ABI 1.1 supplies explicit parent-owned standard-stream endpoints. The
@@ -78,7 +79,8 @@ the child manifest. The system library retrieves these bindings; raw parent
 tokens are cleared from child startup data. Processes still have one user thread;
 the kernel selects its initial CPU by live process occupancy and then pins it. This handler and the device
 I/O execution path currently run on CPU0. The catalog and handler child/wait
-records are dynamically sized; the catalog is immutable and boot-pinned.
+records are dynamically sized; built-ins are immutable and boot-pinned.
+Supplemental registrations use immutable refcounted generations.
 
 
 ## Validation
@@ -154,3 +156,15 @@ FORGET, including rejections without a publication. They must not return a tempo
 unregistered request ID: that masks the original error during SDK cleanup. Failed
 submissions return no accepted ID; OOM without an output rolls back the unobservable
 record. Focused broker and guest SDK tests cover these lifetime rules.
+
+## Installation binding
+
+Admission stores the installation ID and original scope (zero for built-in/global,
+UID for a private installation). Trusted `handles.identity` accepts 16 bytes for
+ID or 24 for ID plus scope; this kernel-only extension does not change the public
+handle ABI. Reauthentication cannot redirect a running private app to another
+user's installation or bypass active-uninstall checks. Applications resolves
+launch, list, resources and private-data authority from one pinned registry view.
+Only the bound installer may stage/prepare/publish supplemental records. See
+[installer](../../handlers/installer/README.md) and
+[applications](../../handlers/applications/README.md) for policy and lifetime rules.

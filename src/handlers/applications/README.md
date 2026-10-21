@@ -40,7 +40,8 @@ registered test launchers; no test autostart enters the candidate.
 ## Kernel mechanism boundary
 
 `kmodules/shared/applications.c` belongs to the independent applications kmodule. Its kernel-only catalog loader
-copies the OS registry once and its installed-image loader uses the record's
+copies the immutable built-in catalog once; a versioned supplemental registry
+provides installed apps. Its installed-image loader uses the selected record's
 path, manifest, identity, CPU and stack settings. Only the catalog-selected
 manager process can use process_launch/stop/reap/release through `/@io`; even a
 manually admitted forged manifest does not create this binding. Runtime requests
@@ -67,9 +68,9 @@ remains available, but cannot bind the process-manager role.
 
 The trust root is the build-owned boot image/catalog. The filesystem handler
 protects its installed boot/system tree from application mutations, including on
-an explicitly writable development snapshot. This is not a signature
-verification chain, installer, complete login-session manager or writable app
-registry. Cwd is immutable startup metadata; there is no filesystem grant implied
+an explicitly writable development snapshot. Signed local application installation is now provided by the dedicated
+installer handler and versioned supplemental registry. Built-in admission remains
+rooted in the build-owned image, without Secure Boot or a public issuer ecosystem. Cwd is immutable startup metadata; there is no filesystem grant implied
 by it. Argv currently travels within one bounded handle message, retaining empty
 arguments, spaces and case; larger streamed launch packets are future transport
 work. Launch ABI 1.1 supplies explicit parent-owned standard-stream endpoints. The
@@ -78,7 +79,8 @@ the child manifest. The system library retrieves these bindings; raw parent
 tokens are cleared from child startup data. Processes still have one user thread;
 the kernel selects its initial CPU by live process occupancy and then pins it. This handler and the device
 I/O execution path currently run on CPU0. The catalog and handler child/wait
-records are dynamically sized; the catalog is immutable and boot-pinned.
+records are dynamically sized. Built-ins are immutable and boot-pinned;
+supplemental registrations use refcounted immutable generations.
 
 
 ## Validation
@@ -130,3 +132,11 @@ provisioning. `fsctl data` demonstrates it. Manifests still authorize acquisitio
 and operations; filesystem checks apply on every call, including delegated files.
 Same-user applications cannot access each other's private containers. Root keeps
 its administrative exceptions, with credential storage restricted to identity.
+
+
+Runtime discovery and launch policy use the authoritative applications registry,
+not startup catalog copies or `_index` caches. `resources` returns the caller's
+registered resource directory, alongside the existing private `data` resolver.
+The manager delegates list/launch decisions through IO; identity home provisioning
+queries that registry too. Installed app scope, metadata and lifetime rules are
+specified by the [installer](../../handlers/installer/README.md).

@@ -47,6 +47,28 @@ static void full_mutations(struct block_device *part,uint64_t id){
     assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_RENAME,(uintptr_t)path,0,(uintptr_t)to,0).status);
     assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_REMOVE,(uintptr_t)to,0,0,0).status);
     assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_RMDIR,(uintptr_t)dir,0,0,0).status);
+    /* Install/remove/install reuses freed inode and directory blocks. */
+    for(unsigned pass=0;pass<3;++pass){
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MKDIR,(uintptr_t)dir,0,0,0).status);
+        struct kernel_surface_result created=ext4_fs_surface_write(id,(uintptr_t)path,0,(uintptr_t)data,16384,EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE);
+        if(created.status){struct ext4_info detail;CALL(ext4_fs_surface_info,id,&detail,0);fprintf(stderr,"recreate pass %u failed ext4 error %u\n",pass,detail.error);}
+        assert(!created.status && created.value==16384);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MODE,(uintptr_t)path,0555,0,0).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_REMOVE,(uintptr_t)path,0,0,0).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_RMDIR,(uintptr_t)dir,0,0,0).status);
+    }
+    /* A freed data block can become an indexed directory leaf. Its checksum
+     * must cover the initialized inode field, not bytes of the previous file. */
+    for(unsigned pass=0;pass<3;++pass){
+        const char *seed="/system/kmodules/drivers/recycled-data";
+        const char *resources="/system/kmodules/drivers/_112233445566778899aabbccddeeff00.sample.resources";
+        assert(!ext4_fs_surface_write(id,(uintptr_t)seed,0,(uintptr_t)data,sizeof(data),EXT4_WRITE_CREATE|EXT4_WRITE_EXCLUSIVE).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_REMOVE,(uintptr_t)seed,0,0,0).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MKDIR,(uintptr_t)resources,0,0,0).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_MODE,(uintptr_t)resources,0555,0,0).status);
+        struct ext4_stat st;assert(!CALL(ext4_fs_surface_stat,id,resources,&st).status);
+        assert(!ext4_fs_surface_mutate(id,EXT4_MUTATE_RMDIR,(uintptr_t)resources,0,0,0).status);
+    }
     assert(!CALL(ext4_fs_surface_sync,id,0,0).status && writes && flushes);
     /* Conflicting read-only views of an active writable volume are refused. */
     struct ext4_info refused;assert(CALL(ext4_fs_surface_mount,part,&refused,0).status);

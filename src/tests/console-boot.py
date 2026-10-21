@@ -3,9 +3,10 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-focused_modes=(a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['create','verify']);p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
 if sum(focused_modes)>1:p.error('choose only one focused run mode')
+if a.installer_phase=='create' and not a.fixtures:p.error('installer create requires isolated fixtures')
 if a.disk_source and (a.fixtures or a.startup_trace):p.error('--disk-source cannot rebuild fixtures')
 if a.disk_source and not a.disk_source.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests'):p.error('disk-source must be isolated inside bin/tests')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
@@ -27,6 +28,9 @@ if a.fixtures or a.startup_trace:
         operations=['info','fill','glyph','surface_create','surface_release','surface_info','state','line','rectangle','ellipse','arc','bezier','path','bitmap','blit','present']
         (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@graphics',operations=operations),dict(name='/@applications',operations=['launch','wait','release','processes']),dict(name='/@keyboard',scope='boot-input',operations=['read','focus_claim','focus_release']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@text',operations=['write','clear']),dict(name='/@io',scope='self',operations=['now_ns']),dict(name='/@filesystem',operations=['open','stat','remove'])])))
         records=json.loads((root/'src/apps/installed.json').read_text());records.append(dict(name='graphics-check',executable='/system/apps/graphics-check',manifest='graphics-check/manifest.json',installation_id='636c6f756462657272792e6766786368',flags=3,cpu=0,stack_bytes=262144));
+        if a.installer_phase:
+            packages=bundles/'packages';packages.mkdir()
+            for name in ('sample.cbp','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
         if a.private_check:
             directory=bundles/'private-check';directory.mkdir();shutil.copy2(build/'tests/apps/private-check.elf',directory/'private-check.elf')
             (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@filesystem',operations=['open','metadata','chmod']),dict(name='/@applications',operations=['data','launch','wait','release']),dict(name='/@sessions',operations=['begin','end','status']),dict(name='/@streams',operations=['read','write'])])))
@@ -39,7 +43,7 @@ if a.fixtures or a.startup_trace:
             directory=bundles/'identity-check';directory.mkdir();shutil.copy2(build/'tests/apps/identity-check.elf',directory/'identity-check.elf')
             (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@identity',operations=['info','users','groups','begin','stage','commit','abort','credential','self','authenticate','password']),dict(name='/@memory',scope='self',operations=['allocate','free']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@sessions',operations=['begin','revoke_uid']),dict(name='/@text',operations=['clear']),dict(name='/@graphics',operations=['fill','surface_create','surface_release','blit']),dict(name='/@display',operations=['fill']),dict(name='/@filesystem',operations=['stat','open','remove']),dict(name='/@applications',operations=['launch','wait','release'])])))
             records.append(dict(name='identity-check',executable='/system/apps/identity-check',manifest='identity-check/manifest.json',installation_id='636c6f756462657272792e6964746573',flags=3,cpu=0,stack_bytes=262144))
-        spec=work/'installed.json';spec.write_text(json.dumps(records));subprocess.run(['python3',str(root/'src/tools/build-installations.py'),str(spec),str(bundles),str(bundles/'installed.bin')],check=True);shutil.copy2(bundles/'installed.bin',bundles/'applications/catalog.bin');shutil.copy2(bundles/'installed.bin',bundles/'identity/catalog.bin')
+        spec=work/'installed.json';spec.write_text(json.dumps(records));subprocess.run(['python3',str(root/'src/tools/build-installations.py'),str(spec),str(bundles),str(bundles/'installed.bin')],check=True);shutil.copy2(bundles/'installed.bin',bundles/'applications/catalog.bin');shutil.copy2(bundles/'installed.bin',bundles/'identity/catalog.bin');shutil.copy2(bundles/'installed.bin',bundles/'installer/catalog.bin')
         name=b'graphics-check';arguments=name+(b'\0!stdio\0' if a.stdio_only else b'\0!supervise\0');(bundles/'applications/initial.bin').write_bytes(struct.pack('<IHHQQQQ',40,1,0,len(name),2,len(arguments),1)+name+arguments+b'/')
         if a.edit_only:
             fixtures=bundles/'completion fixtures';fixtures.mkdir()
@@ -148,6 +152,43 @@ try:
             if c not in typed:raise RuntimeError('No QMP key mapping for '+repr(c)+' in '+layout_name)
             send_keys(typed[c])
         if enter:send_keys([{'type':'qcode','data':'ret'}]);time.sleep(.1)
+    if a.installer_phase:
+        prompt='/ >'
+        def installed_command(command,expected,timeout=100):
+            type_line('clear');wait_for(lambda text:text.count(prompt)==1 and text.rstrip().endswith(prompt),45)
+            type_line(command);wait_for(lambda text:expected in text and text.count(prompt)>=2 and text.rstrip().endswith(prompt),timeout)
+        if a.installer_phase=='create':
+            installed_command('install add /system/packages/bad.cbp --yes','install: status 1')
+            installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+            installed_command('sample','sample data 0')
+            assert 'sample resource resource payload' in screen()
+            installed_command('install list','sample (system)')
+            type_line('clear');wait_for(lambda text:text.count('/ >')==1,45)
+            type_line('sample hold |> install remove sample --yes');wait_for(lambda text:'install: status 11' in text,100)
+            send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':'d'}],.06);wait_for(lambda text:text.rstrip().endswith('/ >'),60)
+            installed_command('install remove sample --yes','Removed.')
+            installed_command('install add /system/packages/sample.cbp --yes','install: status 11')
+            installed_command('install add /system/packages/sample.cbp --reuse-data --yes','Installed.')
+            installed_command('sample','sample data 13')
+            installed_command('install remove sample --delete-data --yes','Removed.')
+            installed_command('install add /system/packages/shared.cbp --yes','Installed.')
+            installed_command('shared','sample data 0')
+            installed_command('accounts useradd alice','Updated.')
+            installed_command('accounts home alice','/home/alice')
+            type_line('accounts passwd alice');wait_for(lambda text:'New password:' in text,45);type_line('x');wait_for(lambda text:'Confirm password:' in text,45);type_line('x');wait_for(lambda text:'Password updated.' in text and text.rstrip().endswith('/ >'),120)
+        type_line('accounts login alice');wait_for(lambda text:'Password:' in text,45);type_line('x');prompt='/home/alice >';wait_for(lambda text:text.rstrip().endswith(prompt),120)
+        if a.installer_phase=='create':
+            installed_command('install add /system/packages/sample.cbp --system --yes','install: status 1')
+            installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+            installed_command('sample','sample data 0')
+        else:
+            installed_command('install list','sample (user)')
+            installed_command('sample','sample data 13')
+        assert 'sample resource resource payload' in screen()
+        installed_command('shared','sample data 0' if a.installer_phase=='create' else 'sample data 13')
+        type_line('exit');prompt='/ >';wait_for(lambda text:text.rstrip().endswith(prompt),60)
+        installed_command('sample','not found')
+        raise ProfileComplete()
     if a.persistence_phase:
         def command_done(command,expected):
             before=screen();prompt='/home/alice >' if before.rstrip().endswith('/home/alice >') else '/ >';count=before.count(prompt)

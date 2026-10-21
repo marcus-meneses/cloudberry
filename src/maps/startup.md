@@ -47,6 +47,7 @@ UEFI firmware
                 │   ├── filesystem → /@io → filesystem → format backend
                 │   ├── identity → /@filesystem → protected binary account database
                 │   ├── sessions → /@io → membership, credential queries and owner notifications
+                │   ├── installer → verify saved registrations; recover outstanding WAL → /@io registry publication
                 │   └── applications → /@io → applications kmodule
                 └── applications launches initial ordinary terminal
                     ├── /@keyboard and /@text
@@ -372,3 +373,11 @@ Foreground-session ancestry permits the focused app and its output-draining
 ancestors; other sessions cannot draw through a lower rendering layer. Only the
 bound upstream renderers have chain exemptions. Owned offscreen graphics do not
 require foreground access; copying pixels from the screen does.
+
+The installer starts before the application manager. It reads the protected
+supplemental registry, verifies saved signed packages and installed code/resources,
+recovers an outstanding intent, then publishes a generation and its ready handle.
+Normal boot does not discover/install loose bundles. Only explicit `install`
+requests create new installations. The application manager, identity home builder
+and filesystem policy consume the shared registry through copied queries/pinned
+kernel snapshots; built-in provider bindings remain immutable.

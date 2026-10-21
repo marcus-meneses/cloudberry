@@ -1,0 +1,327 @@
+struct data_plan {struct data_plan *next;
+    uint64_t uid,gid,existed;
+    char home[];
+    };
+struct action {uint64_t operation,owner,options;
+    char base[4096];
+    struct data_plan *plans;
+    struct bundle bundle;
+    unsigned char *next;
+    size_t next_bytes;
+    };
+static const char *basename(const char *p){const char *last=p;
+    while(*p)if(*p++=='/')last=p;
+    return last;
+    }
+static cb_status_t suffix(char out[4096],const char *base,const char *tail){size_t a=cb_length(base),b=cb_length(tail);
+    if(a+b>4095)return CB_BAD_REQUEST;
+    cb_copy(out,base,a);
+    cb_copy(out+a,tail,b+1);
+    return CB_OK;
+    }
+static cb_status_t directory(const char *path){struct cb_filesystem_metadata m;
+    cb_status_t s=metadata(path,&m);
+    if(s==CB_NOT_FOUND)s=cb_fs_call(&client,filesystem,CB_FILESYSTEM_MKDIR,path,0,0);
+    else if(!s && !m.directory)s=CB_DENIED;
+    return s;
+    }
+static cb_status_t remove_tree(const char *root){
+    struct cb_filesystem_metadata m;
+    cb_status_t status=metadata(root,&m);
+    if(status==CB_NOT_FOUND)return CB_OK;
+    if(status)return status;
+    if(!m.directory)return cb_fs_call(&client,filesystem,CB_FILESYSTEM_REMOVE,root,0,0);
+    struct level {struct level *next;
+        size_t length;uint64_t cursor;
+        };
+    struct level *stack=allocate(sizeof(*stack));
+    if(!stack)return CB_RESOURCE_FAILURE;
+    char path[4096];
+    cb_copy(path,root,cb_length(root)+1);
+    *stack=(struct level){NULL,cb_length(root),0};
+    while(stack){status=cb_fs_call(&client,filesystem,CB_FILESYSTEM_LIST,path,0,stack->cursor);
+        if(status)break;
+        struct cb_reply_header h;
+        cb_copy(&h,client.result,sizeof(h));
+        if(!h.result_bytes){status=cb_fs_call(&client,filesystem,CB_FILESYSTEM_RMDIR,path,0,0);
+            if(status)break;
+            struct level *old=stack;
+            stack=old->next;
+            release(old);
+            if(stack)path[stack->length]=0;
+            continue;
+            }
+        struct cb_filesystem_entry e;
+        cb_copy(&e,cb_result(&client),sizeof(e));
+        if(e.cursor<=stack->cursor){status=CB_BAD_REQUEST;break;}stack->cursor=e.cursor;
+        if((e.name_bytes==1 && e.name[0]=='.') || (e.name_bytes==2 && e.name[0]=='.' && e.name[1]=='.'))continue;
+        if(!e.name_bytes || e.name_bytes>255 || stack->length+1+e.name_bytes>4095 || !bundle_path((unsigned char *)e.name,e.name_bytes)){status=CB_BAD_REQUEST;
+            break;
+            }for(unsigned i=0;i<e.name_bytes;++i)if(e.name[i]=='/'){status=CB_BAD_REQUEST;
+            break;
+            }if(status)break;
+        stack->cursor=0;
+        size_t base=stack->length;
+        path[base]='/';
+        cb_copy(path+base+1,e.name,e.name_bytes);
+        path[base+1+e.name_bytes]=0;
+        if(e.directory){struct level *next=allocate(sizeof(*next));
+            if(!next){status=CB_RESOURCE_FAILURE;
+                break;
+                }*next=(struct level){stack,base+1+e.name_bytes,0};
+            stack=next;
+            }else {status=cb_fs_call(&client,filesystem,CB_FILESYSTEM_REMOVE,path,0,0);
+            path[base]=0;
+            if(status)break;
+            }
+    }while(stack){struct level *next=stack->next;
+        release(stack);
+        stack=next;
+        }return status;
+    }
+static cb_status_t data_path(char path[4096],const char *home,const char *base){size_t h=cb_length(home),n=cb_length(basename(base));
+    if(h+7+n+5>4095)return CB_BAD_REQUEST;
+    cb_copy(path,home,h);
+    cb_copy(path+h,"/_apps/",7);
+    cb_copy(path+h+7,basename(base),n);
+    cb_copy(path+h+7+n,".data",6);
+    return CB_OK;
+    }
+static void free_plans(struct action *a){while(a->plans){struct data_plan *p=a->plans;
+        a->plans=p->next;
+        release(p);
+        }}
+static cb_status_t plan_home(struct action *a,const char *home,uint64_t uid,uint64_t gid){
+    char path[4096];
+    cb_status_t s=data_path(path,home,a->base);
+    if(s)return s;
+    struct cb_filesystem_metadata m;
+    s=metadata(path,&m);
+    unsigned existed=!s;
+    if(s && s!=CB_NOT_FOUND)return s;
+    if(existed && (!m.directory || m.uid!=uid || m.gid!=gid))return CB_DENIED;
+    if(a->operation==1 && existed && !(a->options&CB_INSTALL_REUSE_DATA))return CB_BUSY;
+    size_t n=cb_length(home);
+    struct data_plan *p=allocate(sizeof(*p)+n+1);
+    if(!p)return CB_RESOURCE_FAILURE;
+    *p=(struct data_plan){a->plans,uid,gid,existed};
+    cb_copy(p->home,home,n+1);
+    a->plans=p;
+    return CB_OK;
+    }
+static cb_status_t data_plans(struct action *a,const struct cb_install_context *who,const char *home){
+    if(a->owner!=CB_REGISTRY_SYSTEM)return plan_home(a,home,who->uid,who->gid);
+    cb_status_t s=plan_home(a,"/system/root",0,0);
+    if(s)return s;
+    struct blob users={0};
+    uint64_t cursor=0;
+    size_t at=0;
+    for(;;){s=cb_invoke(&client,identity,(struct cb_interface_id)CB_IDENTITY_INTERFACE_ID,CB_IDENTITY_USERS,&cursor,8,0);
+        if(s)break;
+        struct cb_reply_header h;
+        cb_copy(&h,client.result,sizeof(h));
+        if(!h.result_bytes)break;
+        if(h.result_bytes<8+(!cursor?64:0)){s=CB_BAD_REQUEST;
+            break;
+            }uint64_t next;
+        cb_copy(&next,cb_result(&client),8);
+        size_t bytes=h.result_bytes-8;unsigned char chunk[4096];if(bytes>sizeof(chunk)){s=CB_BAD_REQUEST;break;}cb_copy(chunk,(unsigned char *)cb_result(&client)+8,bytes);
+        if(!cursor){users.bytes=id_u64(chunk+16);
+            users.data=users.bytes<=SIZE_MAX?allocate(users.bytes):NULL;
+            if(!users.data){s=CB_RESOURCE_FAILURE;
+                break;
+                }}if(next!=cursor+bytes || bytes>users.bytes-at){s=CB_BAD_REQUEST;
+            break;
+            }cb_copy(users.data+at,chunk,bytes);
+        at+=bytes;
+        cursor=next;
+        }
+    if(!s && at!=users.bytes)s=CB_BAD_REQUEST;
+    if(!s)for(at=64;at<users.bytes;){const unsigned char *u=users.data+at;
+        size_t bytes=id_u32(u),n=id_u32(u+24);
+        if(bytes<32 || bytes>users.bytes-at || n!=bytes-32 || n>4095-6){s=CB_BAD_REQUEST;
+            break;
+            }uint64_t uid=id_u64(u+8);
+        if(uid){char path[4096];
+            cb_copy(path,"/home/",6);
+            cb_copy(path+6,u+32,n);
+            path[6+n]=0;
+            struct cb_filesystem_metadata m;
+            s=metadata(path,&m);
+            if(s==CB_NOT_FOUND)s=CB_OK;
+            else if(!s){if(!m.directory || m.uid!=uid)s=CB_DENIED;
+                else s=plan_home(a,path,uid,id_u64(u+16));
+                }if(s)break;
+            }at+=bytes;
+        }
+    release(users.data);
+    return s;
+    }
+static cb_status_t write_artifacts(struct action *a){
+    char path[4096];
+    struct bundle *b=&a->bundle;
+    phase=60;cb_status_t s=write_file(a->base,b->data+112+b->name+b->manifest,b->code,CB_FILE_RECREATE);
+    if(!s)s=assign(a->base,0,0,0555);
+    if(s)return s;
+    phase=61;s=suffix(path,a->base,".manifest.json");
+    if(!s)s=write_file(path,b->data+112+b->name,b->manifest,CB_FILE_RECREATE);
+    if(!s)s=assign(path,0,0,0444);
+    if(s)return s;
+    phase=62;s=suffix(path,a->base,".resources");
+    if(!s)s=directory(path);
+    if(!s)s=assign(path,0,0,0555);
+    if(s)return s;
+    size_t base=cb_length(path),at=b->resources_at;
+    for(uint64_t i=0;i<b->resources;++i){size_t n=cb_reg_u64(b->data+at),bytes=cb_reg_u64(b->data+at+8);
+        if(base+1+n>4095)return CB_BAD_REQUEST;
+        path[base]='/';
+        cb_copy(path+base+1,b->data+at+16,n);
+        path[base+1+n]=0;
+        for(size_t j=base+1;j<base+1+n;++j)if(path[j]=='/'){path[j]=0;
+            s=directory(path);
+            if(!s)s=assign(path,0,0,0555);
+            path[j]='/';
+            if(s)return s;
+            }phase=63;s=write_file(path,b->data+at+16+n,bytes,CB_FILE_RECREATE);
+        if(!s)s=assign(path,0,0,0444);
+        if(s)return s;
+        at+=16+n+bytes;
+        }
+    for(struct data_plan *p=a->plans;p;p=p->next)if(!p->existed){s=data_path(path,p->home,a->base);
+        if(!s)s=directory(path);
+        if(!s)s=assign(path,p->uid,p->gid,0700);
+        if(s)return s;
+        }
+    return CB_OK;
+    }
+static cb_status_t verify_artifacts(struct action *a){
+    struct bundle *b=&a->bundle;
+    char path[4096];
+    struct blob file={0};
+    cb_status_t s=read_file(a->base,&file);
+    if(!s && (file.bytes!=b->code || !cb_install_equal(file.data,b->data+112+b->name+b->manifest,b->code)))s=CB_DENIED;
+    release(file.data);
+    if(s)return s;
+    file=(struct blob){0};
+    s=suffix(path,a->base,".manifest.json");
+    if(!s)s=read_file(path,&file);
+    if(!s && (file.bytes!=b->manifest || !cb_install_equal(file.data,b->data+112+b->name,b->manifest)))s=CB_DENIED;
+    release(file.data);
+    if(s)return s;
+    s=suffix(path,a->base,".resources");
+    if(s)return s;
+    size_t base=cb_length(path),at=b->resources_at;
+    for(uint64_t i=0;i<b->resources;++i){size_t n=cb_reg_u64(b->data+at),bytes=cb_reg_u64(b->data+at+8);
+        if(base+1+n>4095)return CB_BAD_REQUEST;
+        path[base]='/';
+        cb_copy(path+base+1,b->data+at+16,n);
+        path[base+1+n]=0;
+        s=read_file(path,&file);
+        if(!s && (file.bytes!=bytes || !cb_install_equal(file.data,b->data+at+16+n,bytes)))s=CB_DENIED;
+        release(file.data);
+        if(s)return s;
+        at+=16+n+bytes;
+        }
+    return CB_OK;
+    }
+static cb_status_t cleanup_artifacts(struct action *a,int rollback){
+    char path[4096];
+    cb_status_t s=remove_tree(a->base);
+    if(s)return s;
+    s=suffix(path,a->base,".manifest.json");
+    if(!s)s=remove_tree(path);
+    if(s)return s;
+    s=suffix(path,a->base,".resources");
+    if(!s)s=remove_tree(path);
+    if(s)return s;
+    for(struct data_plan *p=a->plans;p;p=p->next)if(rollback?!p->existed:(a->options&CB_INSTALL_DELETE_DATA)!=0){s=data_path(path,p->home,a->base);
+        if(!s)s=remove_tree(path);
+        if(s)return s;
+        }return CB_OK;
+    }
+/* Indexes are derived display caches. Name discovery/authority use the registry. */
+static cb_status_t refresh_indexes(struct action *a){
+    for(struct data_plan *p=a->plans;p;p=p->next){if(registration_bytes>(SIZE_MAX-65536)/3)return CB_RESOURCE_FAILURE;
+        size_t capacity=registration_bytes*3+65536,used=0;
+        unsigned char *data=allocate(capacity);
+        if(!data)return CB_RESOURCE_FAILURE;
+        const char intro[]="{\"version\":1,\"entries\":[";
+        cb_copy(data,intro,sizeof(intro)-1);
+        used=sizeof(intro)-1;
+        uint64_t ordinal=0,generation=0;
+        unsigned count=0;
+        cb_status_t s=CB_OK;
+        for(;;){s=registry(CB_REGISTRY_LIST,p->uid,generation,ordinal,0,1,NULL,0);
+            if(s)break;
+            struct cb_reply_header h;
+            cb_copy(&h,client.result,sizeof(h));
+            if(!h.result_bytes)break;
+            struct cb_registry_entry e;
+            cb_copy(&e,cb_result(&client),sizeof(e));
+            if(e.name_bytes>220){s=CB_BAD_REQUEST;
+                break;
+                }char name[221],executable[4096],filename[256];
+            cb_copy(name,(unsigned char *)cb_result(&client)+sizeof(e),e.name_bytes);
+            name[e.name_bytes]=0;
+            generation=e.generation;
+            ordinal=e.cursor;
+            size_t fn=0;
+            static const char hex[]="0123456789abcdef";
+            if(e.dynamic){filename[fn++]='_';
+                for(unsigned i=0;i<16;++i){filename[fn++]=hex[e.installation[i]>>4];
+                    filename[fn++]=hex[e.installation[i]&15];
+                    }filename[fn++]='.';
+                }cb_copy(filename+fn,name,e.name_bytes+1);
+            fn+=e.name_bytes;
+            if(e.owner==CB_REGISTRY_SYSTEM){cb_copy(executable,"/system/apps/",13);
+                cb_copy(executable+13,filename,fn+1);
+                }else{size_t n=cb_length(p->home);
+                if(n+7+fn>4095){s=CB_BAD_REQUEST;
+                    break;
+                    }cb_copy(executable,p->home,n);
+                cb_copy(executable+n,"/_apps/",7);
+                cb_copy(executable+n+7,filename,fn+1);
+                }
+            size_t need=used+cb_length(executable)+e.name_bytes+100;
+            if(need>capacity){size_t next=need*2;
+                if(next<need){s=CB_RESOURCE_FAILURE;
+                    break;
+                    }unsigned char *larger=allocate(next);
+                if(!larger){s=CB_RESOURCE_FAILURE;
+                    break;
+                    }cb_copy(larger,data,used);
+                release(data);
+                data=larger;
+                capacity=next;
+                }
+            if(count++)data[used++]=',';
+            const char prefix[]="{\"app_id\":\"";
+            cb_copy(data+used,prefix,sizeof(prefix)-1);
+            used+=sizeof(prefix)-1;
+            for(unsigned i=0;i<16;++i){data[used++]=hex[e.installation[i]>>4];
+                data[used++]=hex[e.installation[i]&15];
+                }const char middle[]="\",\"name\":\"";
+            cb_copy(data+used,middle,sizeof(middle)-1);
+            used+=sizeof(middle)-1;
+            cb_copy(data+used,name,e.name_bytes);
+            used+=e.name_bytes;
+            const char inst[]="\",\"installation\":\"";
+            cb_copy(data+used,inst,sizeof(inst)-1);
+            used+=sizeof(inst)-1;
+            size_t n=cb_length(executable);
+            cb_copy(data+used,executable,n);
+            used+=n;
+            cb_copy(data+used,"\"}",2);
+            used+=2;
+            }
+        if(!s){cb_copy(data+used,"]}\n",3);
+            used+=3;
+            char path[4096];
+            s=suffix(path,p->home,"/_apps/_index");
+            if(!s)s=write_file(path,data,used,CB_FILE_RECREATE);
+            if(!s)s=assign(path,p->uid,p->gid,0600);
+            if(!s && a->owner==CB_REGISTRY_SYSTEM && !p->uid){s=write_file("/system/apps/_index",data,used,CB_FILE_RECREATE);if(!s)s=assign("/system/apps/_index",0,0,0644);}
+            }release(data);
+        if(s)return s;
+        }return CB_OK;
+    }

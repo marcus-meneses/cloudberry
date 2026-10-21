@@ -165,7 +165,8 @@ by trusted startup policy, never handles, kernel pointers or additional runtime
 authority. The keyboard provider selects/interprets its own config/layout within
 that envelope. This is separate from handle invocation and from format3 kmodule
 initialization. Readonly argv/cwd are carried by installed application startup frames; general
-environment and installer-managed runtime bundle policy remain future work.
+environment remains future work. The dedicated installer now owns signed local
+application bundles and publishes supplemental registrations.
 
 
 ## Installed application lifecycle
@@ -176,7 +177,8 @@ readonly argv/cwd startup data. `admission.h` decodes the broker-generated calle
 PID, installation ID and grant time. No payload field can replace those identities.
 Launch authority additionally requires the installation's launcher role; child
 operations require the caller owner. This initial installed policy is bound to the
-trusted build-owned image/catalog, without a general installer or signature checks. Sessions are a separate provider.
+trusted build-owned catalog for built-ins and pinned-issuer signed bundles for
+runtime apps. Sessions and installation are separate privileged providers.
 The [applications provider](../handlers/applications/README.md) owns runtime policy;
 `/@io` only bridges the catalog-bound process execution and completion mechanisms.
 
@@ -262,3 +264,10 @@ atomic private-IO transition. Session END now returns cb_session_status (64 byte
 STATUS optionally takes a SID and restricts inspection to matching UID or root.
 Queued/new resource calls fail REVOKED after closure; dispatched results can still
 be collected and replied to. All added operation numbers append existing interfaces.
+
+`registry.h` defines supplemental installation records and copied IO staging,
+publication and lookup frames. `installer.h` defines `/@installer` inspection,
+install/remove, listing and status. Installer mutation authority is bound to its
+admitted provider identity, independently of manifest text; normal users cannot
+submit a foreign UID. Applications RESOURCES (9), like DATA (8), resolves only
+the caller's registered location and conveys no extra filesystem permission.

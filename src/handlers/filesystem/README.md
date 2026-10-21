@@ -54,3 +54,8 @@ policy, in addition to runtime UID/GID/mode enforcement.
 
 File streams recheck the current caller identity and on-disk permissions on each
 operation. See [filesystem authorization](../../kmodules/shared/filesystem.md).
+
+`rmdir` removes an empty directory, distinct from file `remove`. It requires an
+explicit manifest grant and parent write/search authority; nonempty directories
+fail. Traversal/recursive cleanup belongs to userland. Backend ABI2 minor 1 adds
+this operation; minor 0 backends report UNAVAILABLE for it.

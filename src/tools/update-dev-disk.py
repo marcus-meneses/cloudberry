@@ -64,7 +64,10 @@ def export(fs,root):
 def merge(old,new,metadata):
     # System code/config come entirely from candidate. Persistent namespaces and
     # identity/root state come from old media. Temporary/recovery trees are fresh.
-    preserved=['/home','/volumes','/system/root','/system/config/identity']
+    installed=load('installation-state').verify(old,new)
+    preserved=['/home','/volumes','/system/root','/system/config/identity','/system/config/installations']
+    for record in installed:
+        if record['owner']==2**64-1:preserved.extend([record['installation'],record['installation']+'.manifest.json',record['installation']+'.resources'])
     for p in old.iterdir():
         if p.name not in ('home','volumes','boot','system','tmp','lost+found'):preserved.append('/'+p.name)
     authoritative_index=(new/'system/apps/_index').read_bytes()
@@ -82,10 +85,13 @@ def merge(old,new,metadata):
     homes=[new/'system/root']+[p for p in (new/'home').iterdir() if p.is_dir() and (p/'_apps').is_dir()]
     for home in homes:
         apps=home/'_apps';apps.mkdir(exist_ok=True);relative='/'+home.relative_to(new).as_posix();uid,gid,_=copied.get(relative,(0,0,0o40700))
-        (apps/'_index').write_bytes(authoritative_index);copied[relative+'/_apps/_index']=(uid,gid,0o100600)
+        additional=[dict(app_id=r['app_id'],name=r['name'],installation=r['installation']) for r in installed if r['owner'] in (uid,2**64-1)]
+        (apps/'_index').write_text(json.dumps(dict(version=1,entries=cache['entries']+additional),indent=2)+'\n');copied[relative+'/_apps/_index']=(uid,gid,0o100600)
         for record in cache['entries']:
             name=record['name'];path=apps/(name+'.data')
             if not path.exists():path.mkdir(mode=0o700);copied[relative+'/_apps/'+name+'.data']=(uid,gid,0o40700)
+    global_apps=[dict(app_id=r['app_id'],name=r['name'],installation=r['installation']) for r in installed if r['owner']==2**64-1]
+    (new/'system/apps/_index').write_text(json.dumps(dict(version=1,entries=cache['entries']+global_apps),indent=2)+'\n')
     return copied
 
 def update(candidate,old,output,allow_unversioned=False):

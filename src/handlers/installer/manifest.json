@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "registry"
+      ]
+    },
+    {
+      "name": "/@filesystem",
+      "operations": [
+        "open",
+        "stat",
+        "list",
+        "remove",
+        "mkdir",
+        "metadata",
+        "chmod",
+        "chown",
+        "rmdir"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "/@identity",
+      "operations": [
+        "users"
+      ]
+    },
+    {
+      "name": "/@installer",
+      "publish": true,
+      "operations": [
+        "inspect",
+        "install",
+        "remove",
+        "list",
+        "status"
+      ]
+    }
+  ]
+}
