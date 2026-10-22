@@ -11,6 +11,9 @@
 static inline uint64_t cb_reg_u64(const void *p){const unsigned char *b=(const unsigned char *)p;uint64_t n=0;for(unsigned i=0;i<8;++i)n|=(uint64_t)b[i]<<(i*8);return n;}
 static inline void cb_reg_put(void *p,uint64_t n){unsigned char *b=(unsigned char *)p;for(unsigned i=0;i<8;++i)b[i]=n>>(8*i);}
 enum {CB_REGISTRY_VERSION=1,CB_REGISTRY_LIST,CB_REGISTRY_CONTEXT,CB_REGISTRY_BEGIN,CB_REGISTRY_STAGE,CB_REGISTRY_PREPARE,CB_REGISTRY_COMMIT,CB_REGISTRY_ABORT,CB_REGISTRY_SOURCE};
+struct cb_registry_target {uint64_t owner;unsigned char installation[16];};
+/* PREPARE flags=1 appends target: require this installed app inactive even when
+ * only executable/resources change and registration metadata is identical. */
 struct cb_registry_request {uint64_t operation,flags,actor,token,offset,bytes;};
 /* LIST: offset ordinal, token optional expected generation; flags=1 selects a
  * UID in actor for identity/installer only, else actor is authenticated PID.
@@ -20,7 +23,8 @@ struct cb_install_context {uint64_t uid,gid,home_bytes,administrator;};
 /* CONTEXT returns this header + canonical home bytes, no NUL. BEGIN takes
  * expected generation in token, total staging bytes in bytes. STAGE appends
  * inline chunks at exact offsets. PREPARE validates and gates dynamic launches;
- * COMMIT swaps the prepared immutable snapshot without allocating. ABORT discards
+ * Guarded PREPARE (flags=1 + cb_registry_target) also refuses an active target
+ * when only executable/resources change. COMMIT swaps the prepared immutable snapshot without allocating. ABORT discards
  * staging. Only the installed installer may mutate, and only its caller's scope.
  * SOURCE takes actor PID and inline canonical path (bytes); it checks package
  * read access using the requesting app's policy, never installer privileges.

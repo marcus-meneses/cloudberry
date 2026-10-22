@@ -87,6 +87,13 @@ static int registry_resource(void *context,const char *name,const char *scope,in
     }
 static int registry_operation(void *context,const char *name){return !*(int *)context || mf_equal(name,"now_ns");
     }
+static int registry_in_use(uint64_t owner,const unsigned char identity[16]){
+    for(struct child *c=runtime.children;c;c=c->next)if(!c->reaped){struct process_info info;if(CALL(runtime.info,c->process,&info,0).status)return 1;
+        if(info.state==PROCESS_EXITED || info.state==PROCESS_FAULTED)continue;
+        unsigned char admitted[24];kernel_surface_call get=kernel_surface_find(runtime.hub,"handles.identity");
+        if(get && !get(c->process,(uintptr_t)admitted,sizeof(admitted),0,0,0).status && cb_install_equal(admitted,identity,16) && (owner==CB_REGISTRY_SYSTEM?cb_reg_u64(admitted+16)==0:cb_reg_u64(admitted+16)==owner))return 1;
+    }return 0;
+}
 static cb_status_t registry_validate(struct registry_snapshot *s,uint64_t uid,int admin,int restore){
     if(s->bytes<32 || cb_reg_u64(s->data)!=CB_REGISTRY_MAGIC || cb_reg_u64(s->data+8)!=s->bytes || (!restore && cb_reg_u64(s->data+16)!=registry_generation()+1) || (restore && cb_reg_u64(s->data+16)<registry_generation()) || !cb_reg_u64(s->data+16))return CB_BAD_REQUEST;
     uint64_t count=0;
@@ -267,7 +274,12 @@ static cb_status_t registry_invoke(struct io_invocation *r){
         runtime.registry_prepared=0;
         unlock(f);registry_drop(s);return CB_OK;
         }
-    else if(q.operation==CB_REGISTRY_PREPARE){if(runtime.registry_written!=s->bytes)goto done;
+    else if(q.operation==CB_REGISTRY_PREPARE){
+        if(q.flags>1 || r->bytes!=sizeof(q)+(q.flags?sizeof(struct cb_registry_target):0))goto done;
+        if(q.flags){struct cb_registry_target target;cb_install_copy(&target,(const unsigned char *)r->input+sizeof(q),sizeof(target));
+            if(!registry_find(runtime.registry,target.owner,target.installation))goto done;
+            if(registry_in_use(target.owner,target.installation)){status=CB_BUSY;goto done;}}
+        if(runtime.registry_written!=s->bytes)goto done;
         if(runtime.registry_prepared==1){status=CB_OK;
             goto done;
             }if(runtime.registry_loaders || (runtime.registry && runtime.registry->refs>1)){status=CB_BUSY;

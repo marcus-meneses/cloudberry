@@ -1324,7 +1324,7 @@ INSTALL_SIGNING_KEY ?= $(TOOLCHAIN_DIR)/signing/installer-development.pem
 $(BUILD)/installer-trusted-key.bin: tools/build-app-bundle.py $(wildcard $(INSTALL_SIGNING_KEY))
 	@mkdir -p $(@D)
 	python3 tools/build-app-bundle.py key --private "$(INSTALL_SIGNING_KEY)" --public "$@"
-$(BUILD)/apps/installer.elf: $(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o handlers/installer/bundle.h handlers/installer/files.inc handlers/installer/store.inc handlers/installer/operations.inc $(wildcard handlers/installer/vendor/monocypher/*)
+$(BUILD)/apps/installer.elf: $(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o handlers/installer/bundle.h handlers/installer/health.inc handlers/installer/files.inc handlers/installer/store.inc handlers/installer/operations.inc $(wildcard handlers/installer/vendor/monocypher/*)
 
 .PHONY: test-installation-registry
 test-installation-registry: $(BUILD)/src-handler-bundles/.ready
@@ -1336,13 +1336,13 @@ $(BUILD)/tests/apps/installed-sample.elf: tests/apps/installed-sample.c $(wildca
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
 
 .PHONY: installer-fixture
-installer-fixture: $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/apps/installed-sample.elf
+installer-fixture: $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/apps/installed-sample.elf $(BUILD)/tests/apps/installed-sample-v2.elf
 	python3 tests/installer-fixture.py $(BUILD) "$(INSTALL_SIGNING_KEY)"
 
 .PHONY: test-installer-store
 test-installer-store: installer-fixture $(BUILD)/tests/installer-monocypher.o $(BUILD)/tests/installer-ed25519.o
 	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/installer-store.c $(BUILD)/tests/installer-monocypher.o $(BUILD)/tests/installer-ed25519.o -Wl,--gc-sections -o $(BUILD)/tests/installer-store
-	$(BUILD)/tests/installer-store $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/installer/sample.cbp
+	$(BUILD)/tests/installer-store $(BUILD)/installer-trusted-key.bin $(BUILD)/tests/installer/sample.cbp $(BUILD)/tests/installer/sample-v2.cbp
 
 .PHONY: test-bundles
 test-bundles: installer-fixture
@@ -1361,3 +1361,18 @@ $(BUILD)/tests/installer-monocypher.o: handlers/installer/vendor/monocypher/mono
 $(BUILD)/tests/installer-ed25519.o: handlers/installer/vendor/monocypher/monocypher-ed25519.c handlers/installer/vendor/monocypher/monocypher-ed25519.h handlers/installer/vendor/monocypher/monocypher.h
 	@mkdir -p $(@D)
 	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections -c $< -o $@
+
+$(BUILD)/tests/apps/installed-sample-v2.elf: tests/apps/installed-sample.c sdk/system.c sdk/system.h sdk/stream.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -DCB_SAMPLE_REVISION=2 -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+
+# Fault injection is linked only into explicitly requested disposable test ELFs.
+$(BUILD)/tests/installer-cut-%.elf: handlers/installer/installer.c handlers/installer/bundle.h handlers/installer/health.inc handlers/installer/files.inc handlers/installer/store.inc handlers/installer/operations.inc $(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o sdk/system.c
+	@mkdir -p $(@D)
+	@cut_spec='$*'; cut_operation=$${cut_spec%-*}; cut_point=$${cut_spec#*-}; \
+	case "$$cut_operation:$$cut_point" in [123]:[123456]) ;; *) exit 2;; esac; \
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -DCB_INSTALL_CRASH_OPERATION=$$cut_operation -DCB_INSTALL_CRASH_POINT=$$cut_point -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,--gc-sections,-T,sdk/application.ld $< $(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o sdk/system.c -o $@
+
+.PHONY: test-installer-crash
+test-installer-crash: build installer-fixture $(addprefix $(BUILD)/tests/installer-cut-,$(addsuffix .elf,1-2 1-6 2-1 2-3 3-2 3-6))
+	python3 tests/installer-crash.py $(BUILD)

@@ -6,6 +6,7 @@ streams. Installation policy and filesystem work belong to the privileged provid
 ```text
 install inspect /path/application.cbp
 install add /path/application.cbp [--system|--user] [--reuse-data] [--yes]
+install upgrade /path/replacement.cbp [--system|--user] [--yes]
 install remove NAME [--system|--user] [--delete-data] [--yes]
 install list
 install status
@@ -20,7 +21,9 @@ home or `/system/packages`. Source bytes are signature-checked again at install.
 
 Only inactive apps can be removed. Stop them first if BUSY is returned. Retained
 data requires `--reuse-data` on a subsequent install; no silent discard occurs.
-To replace code, remove the inactive registration, then install a verified bundle.
+Use upgrade to replace an inactive app with the same name/installation ID. The
+transaction retains the old signed revision until commit and preserves private
+data. No private-data schema migration or post-success rollback history is added.
 Uncertain storage errors require checking provider health and recovery, not blind
 retry. STATUS exposes generation/health and the last diagnostic phase/status.
 

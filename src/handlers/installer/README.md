@@ -67,8 +67,8 @@ Phases: 1 verify, 2 private-data planning, 3 registry construction, 4 prepare,
 5 durable intent, 60 executable, 61 manifest, 62 resource directory, 63 resource
 file, 64 signed archive, 7 commit marker, 8 registry storage, 9 publication,
 10 removal cleanup, 11 derived indexes. A successful operation clears the phase.
-A successful removal requires the process to have stopped; BUSY does not kill it.
-Application renames, upgrade/version management, dependencies, network fetching,
+A successful removal or upgrade requires the process to have stopped; BUSY does not kill it.
+Application renames, semantic version/dependency management, network fetching,
 new trust-key enrollment and provider installation are later milestones.
 
 ## Durable publication and recovery
@@ -127,3 +127,39 @@ apps, performs an offline update and reboots to verify discovery/resources/data.
 It removes successful disposable media while retaining reports/logs. Failed media
 is retained for diagnosis. Candidate builds contain neither sample apps nor test
 packages; fixtures enter only copied test images.
+
+Startup containment: an invalid optional app is omitted from live discovery while
+verified apps remain usable. Its durable registration/files remain unchanged.
+`install status` lists unavailable apps and their errors; `install list` marks
+them unavailable. Mutations remain disabled until the damaged state is repaired.
+An untrusted registry or unresolved recovery failure leaves the installer available
+for status and starts immutable built-ins only. No disk state is guessed, erased
+or automatically reinstalled. Four-CPU TCG corruption checks passed in
+`console/aa1cae264e794094867a5dfc357646a0` (registry) and
+`console/c1b9e67eba73411abf4f1ab444258c2c` (one bad app plus one valid app).
+
+Inactive upgrades use `install upgrade PATH [--system|--user] [--yes]`. The bundle
+must retain the registered application name, installation ID and pinned issuer;
+the reviewed fingerprint binds the new executable, manifest and resources. The
+kernel's guarded PREPARE checks activity even if only code/resources change and
+the registry record is otherwise identical. New dynamic launches remain gated
+until publication or rollback. Private data is retained; no data migration runs.
+
+Upgrade intents use `CBINS002`: the existing 64-byte header plus an eight-byte
+previous-bundle length, followed by base path, plans, next registry, new signed
+bundle, previous signed bundle and checksum. Existing install/remove intents keep
+`CBINS001` and remain readable. The registry and bundle formats do not change.
+Before commit, recovery restores the previous signed executable/manifest/resources
+and archive. After commit, it finishes the new revision and archive. The old
+revision is retained in the WAL until completion; successful upgrades do not keep
+a historical rollback catalogue. This protects launch/publication and crash
+recovery; raw administrative filesystem reads are not snapshot-isolated during
+replacement. Both revisions must tolerate the retained data schema.
+
+`make -C src test-installer-crash` builds fault executables only under `bin/tests`,
+then exercises six durable cut/reboot cases on copied images. The marker and exit
+code are compiled out of candidate installer code. Independent ext4 checks and
+signed-content/data assertions run after recovery; successful media is cleaned.
+The model is abrupt provider exit at completed durable boundaries followed by VM
+restart, not arbitrary torn writes or physical controller power-loss acceptance.
+Four-CPU reports are recorded in the roadmap. A failed test preserves its media.

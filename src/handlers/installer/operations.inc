@@ -15,7 +15,7 @@ static cb_status_t new_registry(struct action *a,size_t old,const struct cb_inst
     if(!a->next)return CB_RESOURCE_FAILURE;
     size_t before=old==SIZE_MAX?registration_bytes:old;
     cb_copy(a->next,registrations,before);
-    if(removed)cb_copy(a->next+before,registrations+old+removed,registration_bytes-old-removed);
+    if(removed)cb_copy(a->next+before+entry,registrations+old+removed,registration_bytes-old-removed);
     if(entry){unsigned char *p=a->next+before;
         cb_reg_put(p,a->owner);
         cb_reg_put(p+8,0);
@@ -37,23 +37,27 @@ static cb_status_t new_registry(struct action *a,size_t old,const struct cb_inst
     return CB_OK;
     }
 static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *payload,size_t bytes,size_t *result){
-    if(operation==CB_INSTALLER_STATUS && !bytes){uint64_t state[4]={cb_reg_u64(registrations+16),failed,phase,last_status};
+    if(operation==CB_INSTALLER_STATUS && !bytes){uint64_t state[4]={registrations?cb_reg_u64(registrations+16):0,failed,phase,last_status};
         cb_copy(output,state,sizeof(state));
         *result=sizeof(state);
         return CB_OK;
         }
-    if(failed)return CB_RESOURCE_FAILURE;
+    if(failed && operation!=CB_INSTALLER_LIST && operation!=CB_INSTALLER_DIAGNOSTICS)return CB_RESOURCE_FAILURE;
     struct cb_install_context who;
     char home[4096];
     cb_status_t s=context(pid,&who,home);
     if(s)return s;
+    if(operation==CB_INSTALLER_DIAGNOSTICS && bytes==8){uint64_t cursor;cb_copy(&cursor,payload,8);uint64_t index=0;
+        for(struct rejected_app *p=rejected;p;p=p->next)if(p->owner==who.uid || p->owner==CB_REGISTRY_SYSTEM){if(index++==cursor){struct cb_install_diagnostic d={cursor+1,p->owner,p->status,p->bytes,{0}};cb_copy(d.installation,p->identity,16);cb_copy(output,&d,sizeof(d));cb_copy(output+sizeof(d),p->name,p->bytes);*result=sizeof(d)+p->bytes;break;}}
+        return CB_OK;
+        }
     if(operation==CB_INSTALLER_LIST && bytes==8){uint64_t cursor;
         cb_copy(&cursor,payload,8);
         uint64_t index=0;
         for(size_t at=32;at<registration_bytes;){struct cb_install_record r;
             cb_copy(&r,registrations+at+16,64);
             uint64_t uid=cb_reg_u64(registrations+at);
-            if(uid==who.uid || uid==CB_REGISTRY_SYSTEM){if(index++==cursor){struct cb_registry_entry e={cb_reg_u64(registrations+16),cursor+1,r.name_bytes,uid,{0},r.flags,1};
+            if(uid==who.uid || uid==CB_REGISTRY_SYSTEM){if(index++==cursor){struct cb_registry_entry e={cb_reg_u64(registrations+16),cursor+1,r.name_bytes,uid,{0},r.flags,unavailable(uid,r.installation)?2:1};
                     cb_copy(e.installation,r.installation,16);
                     cb_copy(output,&e,sizeof(e));
                     cb_copy(output+sizeof(e),registrations+at+80,r.name_bytes);
@@ -70,14 +74,14 @@ static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *
     cb_copy(name,payload+sizeof(q),q.name_bytes);
     name[q.name_bytes]=0;
     if(cb_length(name)!=q.name_bytes)return CB_BAD_REQUEST;
-    if(operation!=CB_INSTALLER_INSPECT && operation!=CB_INSTALLER_INSTALL && operation!=CB_INSTALLER_REMOVE)return CB_BAD_REQUEST;
+    if(operation!=CB_INSTALLER_INSPECT && operation!=CB_INSTALLER_INSTALL && operation!=CB_INSTALLER_REMOVE && operation!=CB_INSTALLER_UPGRADE)return CB_BAD_REQUEST;
     if(operation!=CB_INSTALLER_INSPECT && q.offset)return CB_BAD_REQUEST;
     if(q.options & ~(operation==CB_INSTALLER_REMOVE?CB_INSTALL_DELETE_DATA:operation==CB_INSTALLER_INSTALL?CB_INSTALL_REUSE_DATA:0))return CB_BAD_REQUEST;
     uint64_t owner=(q.scope==CB_INSTALL_SCOPE_SYSTEM || (!q.scope && !who.uid))?CB_REGISTRY_SYSTEM:who.uid;
     if(owner==CB_REGISTRY_SYSTEM && !who.administrator)return CB_DENIED;
     if(owner==0)return CB_DENIED;
     struct blob package={0};
-    struct action a={.operation=operation==CB_INSTALLER_REMOVE?2:1,.owner=owner,.options=q.options};
+    struct action a={.operation=operation==CB_INSTALLER_REMOVE?2:operation==CB_INSTALLER_UPGRADE?3:1,.owner=owner,.options=q.options};
     struct cb_install_record old_record={0};
     size_t old=SIZE_MAX;
     if(operation==CB_INSTALLER_REMOVE){old=installed(owner,(unsigned char *)name,q.name_bytes,&old_record);
@@ -114,12 +118,20 @@ static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *
         *result=sizeof(info)+a.bundle.name+n;
         goto done;
         }
-    if(operation==CB_INSTALLER_INSTALL){if(!cb_install_equal(q.expected_hash,a.bundle.fingerprint,64)){s=CB_DENIED;
+    if(operation==CB_INSTALLER_INSTALL || operation==CB_INSTALLER_UPGRADE){if(!cb_install_equal(q.expected_hash,a.bundle.fingerprint,64)){s=CB_DENIED;
             goto done;
             }old=installed(owner,a.bundle.data+112,a.bundle.name,&old_record);
-        if(old!=SIZE_MAX){s=CB_BUSY;
+        if(operation==CB_INSTALLER_INSTALL && old!=SIZE_MAX){s=CB_BUSY;
             goto done;
             }
+        if(operation==CB_INSTALLER_UPGRADE){
+            if(old==SIZE_MAX){s=CB_NOT_FOUND;goto done;}
+            if(!cb_install_equal(old_record.installation,a.bundle.data+64,16)){s=CB_DENIED;goto done;}
+            cb_copy(a.base,registrations+old+80+old_record.name_bytes,old_record.path_bytes);a.base[old_record.path_bytes]=0;
+            char saved[160];package_path(&a,saved);s=read_file(saved,&a.previous);if(s)goto done;
+            struct bundle prior;s=verify(&a.previous,&prior);if(s)goto done;
+            struct action existing=a;existing.bundle=prior;s=verify_artifacts(&existing);if(s)goto done;
+        }
         size_t at=0;
         if(owner==CB_REGISTRY_SYSTEM){cb_copy(a.base,"/system/apps/",13);
             at=13;
@@ -142,6 +154,7 @@ static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *
             }a.base[at++]='.';
         cb_copy(a.base+at,a.bundle.data+112,a.bundle.name);
         a.base[at+a.bundle.name]=0;
+        if(operation!=CB_INSTALLER_UPGRADE){
         const char *tails[]={"",".manifest.json",".resources"};
         for(unsigned i=0;i<3;++i){char path[4096];
             s=suffix(path,a.base,tails[i]);
@@ -153,6 +166,7 @@ static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *
                 }if(s!=CB_NOT_FOUND)goto done;
             s=CB_OK;
             }
+        }
         size_t base=cb_length(a.base)+11,offset=a.bundle.resources_at;
         for(uint64_t i=0;i<a.bundle.resources;++i){size_t n=cb_reg_u64(a.bundle.data+offset),data=cb_reg_u64(a.bundle.data+offset+8);
             if(base+n>4095){s=CB_BAD_REQUEST;
@@ -165,11 +179,12 @@ static cb_status_t operate(uint64_t pid,unsigned operation,const unsigned char *
     phase=3;s=new_registry(&a,old,&old_record);
     if(s)goto done;
     {uint64_t token;
-        phase=4;s=stage_registry(a.next,a.next_bytes,pid,0,&token);
+        phase=4;struct cb_registry_target guard={a.owner,{0}};cb_copy(guard.installation,a.bundle.data+64,16);
+        s=stage_registry_guarded(a.next,a.next_bytes,pid,0,&token,a.operation==3?&guard:NULL);
         if(!s)s=commit_action(&a,token);
         }
 done:free_plans(&a);
     release(a.next);
-    release(package.data);
+    release(package.data);release(a.previous.data);
     return s;
     }

@@ -9,8 +9,9 @@ application installation are implemented.
 See the closure at the end for validation. Earlier sections record chronological
 milestones and their limitations at that time; current contracts live beside code.
 
-Next bounded installation work: explicit upgrade/rollback policy and issuer-key
-enrollment/rotation, after the local install/remove contract is accepted.
+Remaining installation work: issuer enrollment/rotation, explicit version metadata
+and schema-aware post-success rollback policy. Inactive transactional upgrades,
+startup failure containment and guest-ext4 interruption checks are implemented.
 Explicit account revocation and foreground console authorization are implemented;
 secure-attention UI and a full compositor remain separate work. Explicit offline
 updates, app-specific data authorization and session resource revocation are closed.
@@ -1868,3 +1869,48 @@ resource reads and preserved data after candidate update. The updater's journal
 replay and independent e2fsck checks pass on copied media. Native KVM and physical
 hardware have not been requalified for this installer milestone. Successful
 disposable disks were cleaned; reports and logs remain.
+
+Startup failure-containment closure (2026-10-21): installer readiness no longer
+requires every optional app to be valid. Verified records alone enter live
+discovery; invalid apps retain diagnostics and unchanged durable state. Degraded
+installation state disables mutations. A corrupt registry leaves a built-in
+recovery terminal and installer status, without publishing untrusted dynamic apps.
+Host recovery checks and four-CPU TCG registry/quarantine boots passed:
+`console/aa1cae264e794094867a5dfc357646a0`,
+`console/c1b9e67eba73411abf4f1ab444258c2c`.
+
+
+Guest installer crash/recovery closure (2026-10-21): isolated fault executables
+exit the provider after durable transaction boundaries, then the runner stops and
+reboots the VM. Candidate executables contain no fault path. Four-CPU TCG checks
+passed for install after artifacts/before commit and during registry rewrite,
+remove before/after commit, and upgrade before commit/during registry rewrite.
+Reports: `installer-crash/d3d2d3bd90654495a34cfad387c6ee02` and
+`installer-crash/af8a4515dbfa4f63b6701b269a72b4dd`. Recovered signed code, manifests,
+resources, private data and empty journals agree with the expected outcome;
+independent journal replay/e2fsck passes on disposable copies. This validates the
+provider transaction over actual guest ext4; it is not torn-sector or physical
+storage power-loss qualification. `make test-installer-crash` reproduces six cases.
+
+Inactive upgrade closure: `install upgrade PATH` requires the same scope/name/ID
+and pinned issuer, reviews/binds the signed replacement fingerprint and preserves
+private data. Guarded registry PREPARE rejects live targets even when only code or
+resources change. CBINS002 retains old/new signed bundles through commit, with
+rollback before commit and completion after commit. Existing CBINS001 install and
+remove journals remain readable. Executable/manifest inodes are retained during
+replacement; obsolete resources are removed. New launches are gated, but arbitrary
+administrative raw filesystem reads are not snapshot-isolated. No data migration,
+running-app replacement or historical rollback catalogue is introduced.
+Host tests pass six upgrade cuts, including interrupted registry truncation, with
+old/new signed content and unchanged private data. Normal four-CPU guest upgrade,
+live-target refusal and resource/data retention passed in
+`console/e9251ee3b2764974a91335359a435f89`; guest crash/reboot checks cover both
+upgrade outcomes. Native KVM and physical hardware remain separate acceptance.
+
+Upgrade persistence acceptance also passed after offline candidate update in
+`console/d995a5ca5a1843d7900e6db7b0b0a2b1`: revision 2, upgraded resources and the
+existing 26-byte private-data history survived. Corrupt-registry handling retains
+an incomplete journal unchanged when no trustworthy prior registry exists; a
+focused host check covers that refusal. Candidate builds and C/C++ ABI, signature,
+registry, filesystem-backend and transaction checks pass. Successful disposable
+media is cleaned with reports retained.

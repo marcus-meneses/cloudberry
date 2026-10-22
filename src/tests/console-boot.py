@@ -3,10 +3,11 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['create','verify']);p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
 focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
 if sum(focused_modes)>1:p.error('choose only one focused run mode')
 if a.installer_phase=='create' and not a.fixtures:p.error('installer create requires isolated fixtures')
+if a.installer_cut and (not a.fixtures or not a.installer_cut.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests')):p.error('installer-cut requires fixtures and an isolated test ELF')
 if a.disk_source and (a.fixtures or a.startup_trace):p.error('--disk-source cannot rebuild fixtures')
 if a.disk_source and not a.disk_source.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests'):p.error('disk-source must be isolated inside bin/tests')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
@@ -24,13 +25,14 @@ if a.fixtures or a.startup_trace:
         paths=list(stage.rglob('bootstrap.kmod'));assert len(paths)==1;shutil.copy2(build/'tests/startup-bootstrap.kmod',paths[0])
     bundles=work/'bundles';shutil.copytree(build/'src-handler-bundles',bundles)
     if a.fixtures:
+        if a.installer_cut:shutil.copy2(a.installer_cut,bundles/'installer/installer.elf')
         directory=bundles/'graphics-check';directory.mkdir();shutil.copy2(build/'tests/apps/graphics-check.elf',directory/'graphics-check.elf')
         operations=['info','fill','glyph','surface_create','surface_release','surface_info','state','line','rectangle','ellipse','arc','bezier','path','bitmap','blit','present']
         (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@graphics',operations=operations),dict(name='/@applications',operations=['launch','wait','release','processes']),dict(name='/@keyboard',scope='boot-input',operations=['read','focus_claim','focus_release']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@text',operations=['write','clear']),dict(name='/@io',scope='self',operations=['now_ns']),dict(name='/@filesystem',operations=['open','stat','remove'])])))
         records=json.loads((root/'src/apps/installed.json').read_text());records.append(dict(name='graphics-check',executable='/system/apps/graphics-check',manifest='graphics-check/manifest.json',installation_id='636c6f756462657272792e6766786368',flags=3,cpu=0,stack_bytes=262144));
         if a.installer_phase:
             packages=bundles/'packages';packages.mkdir()
-            for name in ('sample.cbp','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
+            for name in ('sample.cbp','sample-v2.cbp','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
         if a.private_check:
             directory=bundles/'private-check';directory.mkdir();shutil.copy2(build/'tests/apps/private-check.elf',directory/'private-check.elf')
             (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@filesystem',operations=['open','metadata','chmod']),dict(name='/@applications',operations=['data','launch','wait','release']),dict(name='/@sessions',operations=['begin','end','status']),dict(name='/@streams',operations=['read','write'])])))
@@ -157,6 +159,43 @@ try:
         def installed_command(command,expected,timeout=100):
             type_line('clear');wait_for(lambda text:text.count(prompt)==1 and text.rstrip().endswith(prompt),45)
             type_line(command);wait_for(lambda text:expected in text and text.count(prompt)>=2 and text.rstrip().endswith(prompt),timeout)
+        if a.installer_phase.startswith('cut-'):
+            if a.installer_phase!='cut-install':
+                installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+                installed_command('sample','sample data 0')
+            command={'cut-install':'install add /system/packages/sample.cbp --yes','cut-remove':'install remove sample --delete-data --yes','cut-upgrade':'install upgrade /system/packages/sample-v2.cbp --yes'}[a.installer_phase]
+            installed_command(command,'install: status 10')
+            raise ProfileComplete()
+        if a.installer_phase in ('recover-installed','recover-empty','recover-old','recover-new'):
+            installed_command('install status','; ready')
+            if a.installer_phase=='recover-empty':installed_command('sample','not found')
+            else:
+                expected='sample data 0' if a.installer_phase=='recover-installed' else 'sample data 13'
+                installed_command('sample',expected)
+                assert ('sample revision 2' in screen())==(a.installer_phase=='recover-new')
+                assert ('sample resource upgraded payload' if a.installer_phase=='recover-new' else 'sample resource resource payload') in screen()
+            raise ProfileComplete()
+        if a.installer_phase=='upgrade-verify':
+            installed_command('install status','; ready');installed_command('sample','sample data 26')
+            assert 'sample revision 2' in screen() and 'sample resource upgraded payload' in screen()
+            raise ProfileComplete()
+        if a.installer_phase=='upgrade':
+            installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+            installed_command('sample','sample data 0')
+            type_line('clear');wait_for(lambda text:text.count('/ >')==1,45)
+            type_line('sample hold |> install upgrade /system/packages/sample-v2.cbp --yes');wait_for(lambda text:'install: status 11' in text,100)
+            send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':'d'}],.06);wait_for(lambda text:text.rstrip().endswith('/ >'),60)
+            installed_command('install upgrade /system/packages/sample-v2.cbp --yes','Upgraded.')
+            installed_command('sample','sample data 13');assert 'sample revision 2' in screen() and 'sample resource upgraded payload' in screen()
+            raise ProfileComplete()
+        if a.installer_phase in ('rescue','quarantine'):
+            installed_command('install status','recovery required')
+            if a.installer_phase=='quarantine':
+                assert 'Unavailable: sample' in screen()
+                installed_command('sample','not found')
+                installed_command('shared','sample data 0')
+            installed_command('pwd','\n/\n')
+            raise ProfileComplete()
         if a.installer_phase=='create':
             installed_command('install add /system/packages/bad.cbp --yes','install: status 1')
             installed_command('install add /system/packages/sample.cbp --yes','Installed.')

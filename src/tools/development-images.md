@@ -71,3 +71,10 @@ and retained outside Git/images; back it up separately if retaining installed
 apps. A rebuilt candidate with a different key cannot silently inherit those apps.
 Only the raw public key is included in the installer startup resources. See the
 [installer](../handlers/installer/README.md) for bundle creation and guest commands.
+
+Guest inactive upgrades retain the same installation ID/name and private-data
+location. Their CBINS002 journal includes old/new signed bundles until commit
+completion; interrupted transactions require guest recovery before offline update,
+just like CBINS001 install/remove transactions. A quarantined or corrupt installed
+application is not silently repaired by the offline updater. The guest can still
+start built-in recovery tools with installation mutations disabled.

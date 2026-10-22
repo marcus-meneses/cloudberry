@@ -5,6 +5,8 @@ manifest=work/'manifest.json';manifest.write_text(json.dumps(dict(version=1,reso
 resources=work/'resources';(resources/'sub').mkdir(parents=True,exist_ok=True);(resources/'sub/hello.txt').write_text('resource payload\n')
 tool.build('sample','112233445566778899aabbccddeeff00',build/'tests/apps/installed-sample.elf',manifest,resources,sys.argv[2],work/'sample.cbp')
 tool.build('shared','2233445566778899aabbccddeeff0011',build/'tests/apps/installed-sample.elf',manifest,resources,sys.argv[2],work/'shared.cbp')
+(resources/'sub/hello.txt').write_text('upgraded payload\n')
+tool.build('sample','112233445566778899aabbccddeeff00',build/'tests/apps/installed-sample-v2.elf',manifest,resources,sys.argv[2],work/'sample-v2.cbp')
 valid=(work/'sample.cbp').read_bytes();bad=bytearray(valid);bad[-1]^=1;(work/'bad.cbp').write_bytes(bad)
 public=(build/'installer-trusted-key.bin').read_bytes();assert tool.verify_bundle(valid,public)['name']=='sample'
 try:tool.verify_bundle(bytes(bad),public)

@@ -271,3 +271,9 @@ install/remove, listing and status. Installer mutation authority is bound to its
 admitted provider identity, independently of manifest text; normal users cannot
 submit a foreign UID. Applications RESOURCES (9), like DATA (8), resolves only
 the caller's registered location and conveys no extra filesystem permission.
+
+Installer DIAGNOSTICS (6) returns copied unavailable-app records; STATUS/LIST remain
+available when storage is degraded. UPGRADE (7) requires the inspected fingerprint,
+same registered name/ID and an inactive app, preserving private data. Guarded
+registry PREPARE additionally checks target activity for code/resource-only changes.
+These appended operations preserve the existing install/remove/status ABI.

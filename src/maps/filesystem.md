@@ -95,8 +95,8 @@ the protected versioned `registry.bin`. The applications kmodule owns immutable,
 refcounted live snapshots. Only the privileged [installer](../handlers/installer/README.md)
 may publish a validated replacement. Launch, discovery and private-data policy
 use the same registry; admitted installation identity/scope stays stable across
-credential changes. Existing app replacement is refused while registered; remove
-an inactive app before reinstalling. Reusing retained data requires explicit
+credential changes. Existing names cannot be installed again with `add`; `upgrade` replaces an
+inactive app with the same name/ID while retaining private data. Reusing retained data requires explicit
 `--reuse-data`; removal retains it unless `--delete-data` is selected.
 
 Each `_index` is a derived JSON version 1 display cache with `app_id`, `name` and

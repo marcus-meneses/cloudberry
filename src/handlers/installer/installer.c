@@ -109,6 +109,7 @@ static cb_status_t verify(struct blob *file,struct bundle *b){cb_status_t status
     release(json);
     return valid?CB_OK:CB_BAD_REQUEST;
     }
+#include "health.inc"
 #include "files.inc"
 #include "store.inc"
 #include "operations.inc"
@@ -122,24 +123,25 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     filesystem=cb_acquire(CB_FILESYSTEM_NAME,(struct cb_interface_id)CB_FILESYSTEM_INTERFACE_ID);
     io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
     identity=cb_acquire(CB_IDENTITY_NAME,(struct cb_interface_id)CB_IDENTITY_INTERFACE_ID);
-    CB_REQUIRE(load_store()==CB_OK);
-    static const char *names[]={"inspect","install","remove","list","status"};
-    publication=cb_publish(&client,CB_INSTALLER_NAME,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,names,5);
+    (void)initialize_store();
+    static const char *names[]={"inspect","install","remove","list","status","diagnostics","upgrade"};
+    publication=cb_publish(&client,CB_INSTALLER_NAME,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,names,7);
     for(;;){uint64_t bytes;
         CB_REQUIRE(cb_system_receive(input,sizeof(input),&bytes,0)==CB_OK && bytes>=sizeof(struct cb_delivery_header));
         struct cb_delivery_header d;
         cb_copy(&d,input,sizeof(d));
         CB_REQUIRE(d.context_bytes<=bytes-sizeof(d) && d.call.payload_bytes==bytes-sizeof(d)-d.context_bytes);
-        if(d.call.flags==(CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT)){if(d.call.operation==CB_HANDLE_RELEASE && !d.call.handle){release(registrations);
+        if(d.call.flags==(CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT)){if(d.call.operation==CB_HANDLE_RELEASE && !d.call.handle){release(registrations);clear_rejected();
                 cb_system_release(publication);
                 cb_exit(0);
                 }continue;
             }
         struct cb_admission actor;
         size_t result=0;
+        unsigned was_degraded=failed;
         cb_status_t status=CB_DENIED;
         if(d.call.flags==CB_CALL_PROVIDER_DELIVERY && d.call.handle==publication && cb_admission_parse(input+sizeof(d),d.context_bytes,&actor))status=operate(actor.process,d.call.operation,input+sizeof(d)+d.context_bytes,d.call.payload_bytes,&result);
-        if(d.call.operation!=CB_INSTALLER_STATUS){last_status=status;if(!status)phase=0;}
+        if(!was_degraded && d.call.operation!=CB_INSTALLER_STATUS && d.call.operation!=CB_INSTALLER_DIAGNOSTICS && d.call.operation!=CB_INSTALLER_LIST){last_status=status;if(!status)phase=0;}
         cb_status_t sent=cb_respond(&responder,&d,status,output,result);
         CB_REQUIRE(sent==CB_OK || sent==CB_BAD_REQUEST);
         }

@@ -277,7 +277,7 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
-| Applications | Privileged userland lifecycle, versioned installed-app registry, signed local install/remove, per-user/global scopes, stable identity and private data | Pinned development issuer; no in-place upgrades, forced termination or automatic manager recovery |
+| Applications | Privileged userland lifecycle, versioned installed-app registry, signed local install/remove/upgrade, per-user/global scopes, stable identity and private data | Pinned development issuer; no running-app upgrades or forced termination or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Built-in and signed runtime installation bindings; one boot input domain; no general approval UI, automatic rebind, vows or C++ wrappers |
 | Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU or window/compositor model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
@@ -422,7 +422,7 @@ src/
 │   └── hid-report.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
-│   ├── installer/ (README.md, installer.c, bundle.h, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
+│   ├── installer/ (README.md, installer.c, bundle.h, health.inc, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
 │   ├── sessions/ (README.md, sessions.c, manifest.json, provider.cnf)
 │   ├── identity/ (README.md, identity.c, auth.inc, home.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
 │   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
@@ -801,6 +801,8 @@ src/
 │   ├── installation-state.py
 │   ├── installer-fixture.py
 │   ├── persistent-installations.py
+│   ├── installer-crash.py
+│   ├── installer-media.py
 │   ├── bundle-check.c
 │   ├── bundles.py
 │   ├── installations.py
@@ -1132,7 +1134,7 @@ snapshots shared by launch, discovery and filesystem policy. Private-data reuse
 requires explicit consent. Writes use a recoverable intent/commit journal; offline
 development updates preserve verified runtime apps with their registrations/data.
 Only a pinned host development issuer is supported; this is not Secure Boot or a
-public package trust system. There is no provider installation, in-place upgrade,
+public package trust system. There is no provider installation, running-app upgrade,
 network repository, dependency solver or forced termination in this milestone.
 See [installer](handlers/installer/README.md), [CLI](apps/install/README.md),
 [filesystem layout](maps/filesystem.md) and [development media](tools/development-images.md).

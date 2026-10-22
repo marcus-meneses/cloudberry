@@ -46,7 +46,7 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
     out=cb_standard(1);
     in=cb_standard(0);
     const char *op=cb_application_argument(&start,1),*name=cb_application_argument(&start,2);
-    if(!op){say("install inspect PATH | add PATH | remove NAME | list | status\nOptions: --system | --user; --yes; add --reuse-data; remove --delete-data\n");
+    if(!op){say("install inspect PATH | add PATH | upgrade PATH | remove NAME | list | status\nOptions: --system | --user; --yes; add --reuse-data; remove --delete-data\n");
         cb_exit(0);
         }service=cb_acquire(CB_INSTALLER_NAME,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID);
     if(equal(op,"status")){cb_status_t s=cb_invoke(&calls,service,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,CB_INSTALLER_STATUS,NULL,0,0);
@@ -56,6 +56,7 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
         say("Installer generation ");
         number(values[0]);
         say(values[1]?"; recovery required\n":"; ready\n");say("Last phase ");number(values[2]);say(" status ");number(values[3]);say("\n");
+        uint64_t cursor=0;for(;;){cb_status_t d=cb_invoke(&calls,service,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,CB_INSTALLER_DIAGNOSTICS,&cursor,8,0);if(d)finish(d);struct cb_reply_header h;cb_copy(&h,calls.result,sizeof(h));if(!h.result_bytes)break;struct cb_install_diagnostic item;cb_copy(&item,cb_result(&calls),sizeof(item));CB_REQUIRE(h.result_bytes==sizeof(item)+item.name_bytes);say("Unavailable: ");CB_REQUIRE(cb_write_all(&console,out,(unsigned char *)cb_result(&calls)+sizeof(item),item.name_bytes)==CB_OK);say(" status ");number(item.status);say("\n");cursor=item.cursor;}
         cb_exit(0);
         }
     if(equal(op,"list")){uint64_t cursor=0;
@@ -68,11 +69,12 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
             cb_copy(&e,cb_result(&calls),sizeof(e));
             CB_REQUIRE(e.name_bytes<=220 && h.result_bytes==sizeof(e)+e.name_bytes);
             CB_REQUIRE(cb_write_all(&console,out,(unsigned char *)cb_result(&calls)+sizeof(e),e.name_bytes)==CB_OK);
+            if(e.dynamic==2)say(" [unavailable]");
             say(e.owner==CB_REGISTRY_SYSTEM?" (system)\n":" (user)\n");
             cursor=e.cursor;
             }cb_exit(0);
         }
-    if(!name || (!equal(op,"inspect") && !equal(op,"add") && !equal(op,"remove")))finish(CB_BAD_REQUEST);
+    if(!name || (!equal(op,"inspect") && !equal(op,"add") && !equal(op,"upgrade") && !equal(op,"remove")))finish(CB_BAD_REQUEST);
     struct cb_installer_request r={0};
     int yes=0;
     for(uint64_t i=3;i<start.header.argc;++i){const char *a=cb_application_argument(&start,i);
@@ -126,11 +128,11 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
         }
     if(equal(op,"inspect")){say("\n");
         cb_exit(0);
-        }if(!yes){say("\nInstall this manifest in the selected scope.\n");
+        }if(!yes){say(equal(op,"upgrade")?"\nUpgrade this inactive app; preserve private data.\n":"\nInstall this manifest in the selected scope.\n");
         if(!confirm())cb_exit(0);
         }cb_copy(r.expected_hash,fingerprint,64);
-    cb_status_t s=request(CB_INSTALLER_INSTALL,&r,path);
+    cb_status_t s=request(equal(op,"upgrade")?CB_INSTALLER_UPGRADE:CB_INSTALLER_INSTALL,&r,path);
     if(s)finish(s);
-    say("Installed.\n");
+    say(equal(op,"upgrade")?"Upgraded.\n":"Installed.\n");
     cb_exit(0);
     }

@@ -6,6 +6,7 @@ struct action {uint64_t operation,owner,options;
     char base[4096];
     struct data_plan *plans;
     struct bundle bundle;
+    struct blob previous;
     unsigned char *next;
     size_t next_bytes;
     };

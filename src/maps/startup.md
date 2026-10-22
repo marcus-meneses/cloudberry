@@ -374,7 +374,10 @@ ancestors; other sessions cannot draw through a lower rendering layer. Only the
 bound upstream renderers have chain exemptions. Owned offscreen graphics do not
 require foreground access; copying pixels from the screen does.
 
-The installer starts before the application manager. It reads the protected
+The installer starts before the application manager. An untrusted registry leaves
+only immutable built-ins and read-only installer diagnostics available. Invalid
+optional apps are excluded while verified apps remain available; mutations are
+disabled until the damaged state is repaired. It reads the protected
 supplemental registry, verifies saved signed packages and installed code/resources,
 recovers an outstanding intent, then publishes a generation and its ready handle.
 Normal boot does not discover/install loose bundles. Only explicit `install`

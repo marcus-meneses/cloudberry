@@ -51,7 +51,9 @@
         "install",
         "remove",
         "list",
-        "status"
+        "status",
+        "diagnostics",
+        "upgrade"
       ]
     }
   ]
