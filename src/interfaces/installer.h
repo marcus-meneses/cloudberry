@@ -3,12 +3,12 @@
 #include "registry.h"
 #define CB_INSTALLER_NAME "/@installer"
 #define CB_INSTALLER_INTERFACE_ID {{0x43,0x42,0x49,0x4e,0x53,0x54,0x41,0x31,0x91,0xe1,0x40,0x0a,0x1c,0x87,0xc0,0x17}}
-enum {CB_INSTALLER_INSPECT=1,CB_INSTALLER_INSTALL,CB_INSTALLER_REMOVE,CB_INSTALLER_LIST,CB_INSTALLER_STATUS,CB_INSTALLER_DIAGNOSTICS,CB_INSTALLER_UPGRADE};
+enum {CB_INSTALLER_INSPECT=1,CB_INSTALLER_INSTALL,CB_INSTALLER_REMOVE,CB_INSTALLER_LIST,CB_INSTALLER_STATUS,CB_INSTALLER_DIAGNOSTICS,CB_INSTALLER_UPGRADE,CB_INSTALLER_REPAIR,CB_INSTALLER_PERMISSIONS,CB_INSTALLER_APPROVE,CB_INSTALLER_METADATA};
 enum {CB_INSTALL_SCOPE_AUTO=0,CB_INSTALL_SCOPE_SYSTEM,CB_INSTALL_SCOPE_USER};
-enum {CB_INSTALL_REUSE_DATA=1,CB_INSTALL_DELETE_DATA=2};
+enum {CB_INSTALL_REUSE_DATA=1,CB_INSTALL_DELETE_DATA=2,CB_INSTALL_ALLOW_DOWNGRADE=4,CB_INSTALL_APPROVAL_FILE=8,CB_INSTALL_SHOW_REQUESTED=16};
 struct cb_installer_request {uint64_t scope,options,name_bytes,offset;unsigned char expected_hash[64];};
 /* Inline canonical bundle path (inspect/install) or registered friendly name
- * (remove). Install/upgrade require the SHA-512 fingerprint returned by INSPECT.
+ * (remove/permissions/approve). Install/upgrade/repair require the approval-bound fingerprint from INSPECT.
  * Signature/key/name/manifest/resources are verified before touching storage.
  * Caller scope is derived from authenticated PID, never a supplied UID.
  * Existing data requires explicit REUSE or DELETE; removal keeps data unless
@@ -22,8 +22,12 @@ struct cb_bundle_info {uint64_t name_bytes,manifest_bytes,code_bytes,resources,f
  * last_phase, last_status. Phase zero means no retained operation failure. */
 struct cb_install_diagnostic {uint64_t cursor,owner,status,name_bytes;unsigned char installation[16];};
 /* DIAGNOSTICS takes an ordinal and returns this header + name, or EOF.
- * LIST marks quarantined entries with dynamic=2. Mutations are disabled while
- * recovery is required; immutable built-ins and verified apps remain usable. */
-#define CB_BUNDLE_HEADER 112
+ * LIST marks quarantined entries with dynamic=2. Only explicit repair/removal of quarantined entries is allowed in state 1;
+ * state 2 (untrusted/uncertain) refuses mutations; immutable built-ins and verified apps remain usable. */
+struct cb_release_info {uint64_t revision,installed_revision,owner;unsigned char issuer[32],fingerprint[64];};
+/* APPROVAL_FILE adds u64 path length + canonical policy-file path after name.
+ * INSPECT/PERMISSIONS fingerprint binds bundle and canonical approved subset.
+ * APPROVE/REPAIR/UPGRADE must present that fingerprint. Changes require idle. */
+#define CB_BUNDLE_HEADER 120
 #define CB_BUNDLE_SIGNATURE 64
 #endif

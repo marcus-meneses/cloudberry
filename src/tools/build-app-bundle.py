@@ -14,9 +14,9 @@ def key(public, private):
     if not public.exists() or public.read_bytes()!=data:public.write_bytes(data)
     return data
 
-def build(name,identity,executable,manifest,resources,private,output,launcher=False,stack=262144):
+def build(name,identity,executable,manifest,resources,private,output,launcher=False,stack=262144,revision=1):
     identity=bytes.fromhex(identity)
-    if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,206}',name) or len(identity)!=16 or not any(identity) or stack<4096:raise ValueError('invalid name, identity or stack')
+    if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,206}',name) or len(identity)!=16 or not any(identity) or stack<4096 or not 1<=revision<2**64:raise ValueError('invalid name, identity or stack')
     code=pathlib.Path(executable).read_bytes();metadata=pathlib.Path(manifest).read_bytes();policy=json.loads(metadata)
     if set(policy)!={'version','resources'} or policy['version']!=1:raise ValueError('invalid manifest')
     for r in policy['resources']:
@@ -33,24 +33,26 @@ def build(name,identity,executable,manifest,resources,private,output,launcher=Fa
                 entries.append(struct.pack('<QQ',len(n),len(data))+n+data)
     with tempfile.TemporaryDirectory() as temporary:
         pub=key(pathlib.Path(temporary)/'pub',private)
-        payload=name.encode()+metadata+code+b''.join(entries);total=112+len(payload)+64
-        header=b'CBPKG001'+struct.pack('<QQQQQQQ',total,len(name),len(metadata),len(code),len(entries),3 if launcher else 1,stack)+identity+pub
-        assert len(header)==112
+        payload=name.encode()+metadata+code+b''.join(entries);total=120+len(payload)+64
+        header=b'CBPKG002'+struct.pack('<QQQQQQQ',total,len(name),len(metadata),len(code),len(entries),3 if launcher else 1,stack)+identity+pub+struct.pack('<Q',revision)
+        assert len(header)==120
         message=pathlib.Path(temporary)/'message';message.write_bytes(header+payload)
         signature=subprocess.check_output(['openssl','pkeyutl','-sign','-rawin','-inkey',str(private),'-in',str(message)])
         if len(signature)!=64:raise ValueError('invalid signature size')
         pathlib.Path(output).write_bytes(header+payload+signature)
 def verify_bundle(data,public):
-    if len(data)<176 or data[:8]!=b'CBPKG001':raise ValueError('invalid signed bundle header')
+    header=120 if data[:8]==b'CBPKG002' else 112
+    revision=struct.unpack_from('<Q',data,112)[0] if header==120 and len(data)>=120 else 1
+    if len(data)<header+64 or (header==112 and data[:8]!=b'CBPKG001') or not revision:raise ValueError('invalid signed bundle header')
     total,nb,mb,cb,count,flags,stack=struct.unpack_from('<QQQQQQQ',data,8)
-    if total!=len(data) or not 1<=nb<=207 or not mb or not cb or flags not in (1,3) or stack<4096 or 112+nb+mb+cb>len(data)-64 or not any(data[64:80]) or data[80:112]!=public:raise ValueError('invalid bundle fields or untrusted signing key')
+    if total!=len(data) or not 1<=nb<=207 or not mb or not cb or flags not in (1,3) or stack<4096 or header+nb+mb+cb>len(data)-64 or not any(data[64:80]) or data[80:112]!=public:raise ValueError('invalid bundle fields or untrusted signing key')
     with tempfile.TemporaryDirectory() as temporary:
         root=pathlib.Path(temporary);(root/'key.der').write_bytes(bytes.fromhex('302a300506032b6570032100')+public);(root/'message').write_bytes(data[:-64]);(root/'signature').write_bytes(data[-64:])
         result=subprocess.run(['openssl','pkeyutl','-verify','-rawin','-pubin','-keyform','DER','-inkey',str(root/'key.der'),'-in',str(root/'message'),'-sigfile',str(root/'signature')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if result.returncode:raise ValueError('invalid bundle signature')
-    name=data[112:112+nb].decode('ascii')
+    name=data[header:header+nb].decode('ascii')
     if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,206}',name):raise ValueError('invalid application name')
-    manifest=data[112+nb:112+nb+mb];code=data[112+nb+mb:112+nb+mb+cb];at=112+nb+mb+cb;resources={}
+    manifest=data[header+nb:header+nb+mb];code=data[header+nb+mb:header+nb+mb+cb];at=header+nb+mb+cb;resources={}
     for _ in range(count):
         if at+16>len(data)-64:raise ValueError('truncated resource')
         n,b=struct.unpack_from('<QQ',data,at);at+=16
@@ -60,12 +62,12 @@ def verify_bundle(data,public):
         if any(path==old or path.startswith(old+'/') or old.startswith(path+'/') for old in resources):raise ValueError('resource path collision')
         resources[path]=data[at+n:at+n+b];at+=n+b
     if at!=len(data)-64:raise ValueError('trailing bundle bytes')
-    return dict(name=name,manifest=manifest,code=code,resources=resources,identity=data[64:80],flags=flags,stack=stack)
+    return dict(name=name,manifest=manifest,code=code,resources=resources,identity=data[64:80],flags=flags,stack=stack,revision=revision,issuer=data[80:112])
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest='command',required=True)
     k=sub.add_parser('key');k.add_argument('--private',required=True);k.add_argument('--public',required=True)
-    b=sub.add_parser('build');b.add_argument('--name',required=True);b.add_argument('--identity',required=True);b.add_argument('--executable',required=True);b.add_argument('--manifest',required=True);b.add_argument('--resources');b.add_argument('--key',required=True);b.add_argument('--output',required=True);b.add_argument('--launcher',action='store_true');b.add_argument('--stack',type=int,default=262144)
+    b=sub.add_parser('build');b.add_argument('--name',required=True);b.add_argument('--identity',required=True);b.add_argument('--executable',required=True);b.add_argument('--manifest',required=True);b.add_argument('--resources');b.add_argument('--key',required=True);b.add_argument('--output',required=True);b.add_argument('--launcher',action='store_true');b.add_argument('--stack',type=int,default=262144);b.add_argument('--revision',type=int,default=1)
     a=p.parse_args()
     if a.command=='key':key(a.public,a.private)
-    else:build(a.name,a.identity,a.executable,a.manifest,a.resources,a.key,a.output,a.launcher,a.stack)
+    else:build(a.name,a.identity,a.executable,a.manifest,a.resources,a.key,a.output,a.launcher,a.stack,a.revision)

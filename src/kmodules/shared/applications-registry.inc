@@ -95,14 +95,14 @@ static int registry_in_use(uint64_t owner,const unsigned char identity[16]){
     }return 0;
 }
 static cb_status_t registry_validate(struct registry_snapshot *s,uint64_t uid,int admin,int restore){
-    if(s->bytes<32 || cb_reg_u64(s->data)!=CB_REGISTRY_MAGIC || cb_reg_u64(s->data+8)!=s->bytes || (!restore && cb_reg_u64(s->data+16)!=registry_generation()+1) || (restore && cb_reg_u64(s->data+16)<registry_generation()) || !cb_reg_u64(s->data+16))return CB_BAD_REQUEST;
+    if(s->bytes<32 || !cb_registry_magic(cb_reg_u64(s->data)) || cb_reg_u64(s->data+8)!=s->bytes || (!restore && cb_reg_u64(s->data+16)!=registry_generation()+1) || (restore && cb_reg_u64(s->data+16)<registry_generation()) || !cb_reg_u64(s->data+16))return CB_BAD_REQUEST;
     uint64_t count=0;
     for(size_t at=32;at<s->bytes;){if(s->bytes-at<80)return CB_BAD_REQUEST;
         const unsigned char *p=s->data+at;
         uint64_t owner=cb_reg_u64(p);
         struct cb_install_record r;
         cb_install_copy(&r,p+16,sizeof(r));
-        if(cb_reg_u64(p+8) || r.bytes<64 || r.bytes>s->bytes-at-16 || !r.name_bytes || r.name_bytes>207 || !r.path_bytes || r.path_bytes>4095 || !cb_frame_fits(64,r.name_bytes,r.path_bytes,r.bytes) || r.manifest_bytes!=r.bytes-64-r.name_bytes-r.path_bytes || !r.manifest_bytes || (r.flags!=1 && r.flags!=3) || r.cpu || r.stack_bytes<4096)return CB_BAD_REQUEST;
+        if((cb_reg_u64(s->data)==CB_REGISTRY_MAGIC?cb_reg_u64(p+8)!=0:cb_reg_u64(p+8)==0) || r.bytes<64 || r.bytes>s->bytes-at-16 || !r.name_bytes || r.name_bytes>207 || !r.path_bytes || r.path_bytes>4095 || !cb_frame_fits(64,r.name_bytes,r.path_bytes,r.bytes) || r.manifest_bytes!=r.bytes-64-r.name_bytes-r.path_bytes || !r.manifest_bytes || (r.flags!=1 && r.flags!=3) || r.cpu || r.stack_bytes<4096)return CB_BAD_REQUEST;
         const unsigned char *name=p+80,*path=name+r.name_bytes;
         unsigned any=0;
         for(unsigned i=0;i<16;++i)any|=r.installation[i];
@@ -128,7 +128,7 @@ static cb_status_t registry_validate(struct registry_snapshot *s,uint64_t uid,in
             prev+=16+q.bytes;
             }
         const unsigned char *old=registry_find(runtime.registry,owner,r.installation);
-        int changed=!old || cb_reg_u64(old+16)!=r.bytes || !cb_install_equal(old,p,16+r.bytes);
+        int changed=!old || cb_reg_u64(old+16)!=r.bytes || !cb_install_equal(old+16,p+16,r.bytes) || (cb_reg_u64(runtime.registry->data)==CB_REGISTRY_MAGIC?1:cb_reg_u64(old+8))!=(cb_reg_u64(s->data)==CB_REGISTRY_MAGIC?1:cb_reg_u64(p+8));
         if(!restore && changed && !(owner==uid || (owner==CB_REGISTRY_SYSTEM && admin)))return CB_DENIED;
         char *json=allocate(r.manifest_bytes+1);
         if(!json)return CB_RESOURCE_FAILURE;
@@ -147,7 +147,7 @@ static cb_status_t registry_validate(struct registry_snapshot *s,uint64_t uid,in
         cb_install_copy(&r,old+16,64);
         uint64_t owner=cb_reg_u64(old);
         const unsigned char *next=registry_find(s,owner,r.installation);
-        int changed=!next || cb_reg_u64(next+16)!=r.bytes || !cb_install_equal(old,next,16+r.bytes);
+        int changed=!next || cb_reg_u64(next+16)!=r.bytes || !cb_install_equal(old+16,next+16,r.bytes) || (cb_reg_u64(runtime.registry->data)==CB_REGISTRY_MAGIC?1:cb_reg_u64(old+8))!=(cb_reg_u64(s->data)==CB_REGISTRY_MAGIC?1:cb_reg_u64(next+8));
         if(changed){if(!restore && !(owner==uid || (owner==CB_REGISTRY_SYSTEM && admin)))return CB_DENIED;
             uint64_t guard=lock();
             for(struct child *c=runtime.children;c;c=c->next)if(!c->reaped){struct process_info info;

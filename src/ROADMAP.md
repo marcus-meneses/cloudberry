@@ -3,14 +3,15 @@
 Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
 Kmodules are coupled kernel mechanisms; isolated handlers use a separate handle layer.
 
-Current closure (2026-10-21): ownership management, explicit account homes,
+Current closure (2026-10-22): ownership management, explicit account homes,
 nested interactive login, persistent development media and signed local
 application installation are implemented.
 See the closure at the end for validation. Earlier sections record chronological
 milestones and their limitations at that time; current contracts live beside code.
 
-Remaining installation work: issuer enrollment/rotation, explicit version metadata
-and schema-aware post-success rollback policy. Inactive transactional upgrades,
+Remaining installation work: issuer enrollment/rotation and schema-aware
+post-success rollback policy. Signed numeric revisions, explicit quarantine
+repair/removal and persistent approved permission subsets are implemented. Inactive transactional upgrades,
 startup failure containment and guest-ext4 interruption checks are implemented.
 Explicit account revocation and foreground console authorization are implemented;
 secure-attention UI and a full compositor remain separate work. Explicit offline
@@ -1914,3 +1915,137 @@ an incomplete journal unchanged when no trustworthy prior registry exists; a
 focused host check covers that refusal. Candidate builds and C/C++ ABI, signature,
 registry, filesystem-backend and transaction checks pass. Successful disposable
 media is cleaned with reports retained.
+
+
+Installation maintenance closure (2026-10-21):
+
+1. Explicit repair/removal is authorized from validated registry ownership only.
+   Quarantined entries can be repaired from same-or-newer signed bytes or removed
+   even if their archive is missing. Untrusted registry state remains restricted.
+   Existing data is retained by default; other quarantines stay excluded.
+2. CBPKG002 signs nonzero numeric revisions; V2 registry records persist them.
+   Legacy formats remain readable as revision 1 without a boot migration. Upgrade
+   requires increasing revisions unless an explicit downgrade option is supplied.
+   Name/ID/scope and the pinned issuer remain fixed. Multi-issuer enrollment/key
+   rotation, dependencies and data-schema rollback remain later work.
+3. Signed requested manifests and persistent approved subsets are separate.
+   Upgrade/repair default to their intersection, retaining denials. The ordinary
+   CLI can inspect and explicitly approve a subset from a caller-readable file;
+   the review hash binds both package and grants. Kernel immutable admission uses
+   the approved manifest. Permission changes require an inactive target and take
+   effect on next launch; live handle revocation/general consent UI remains future.
+
+Validation: candidate build, C/C++ ABI, bundle signatures/legacy format, registry
+policy, offline revision/approval preservation and UBSan provider tests pass.
+Public request tests cover downgrade consent, scope, inactive approval, policy-file
+changes and empty-file rejection. Host recovery tests add six cut points each for
+repair, removal without an archive and metadata-only approval, preserving private
+data and publishing only healthy entries. Four-CPU TCG guest flows pass:
+`console/d96ed27f2eff40db867ddb563548e9b6` (upgrade, denied new grants, explicit
+approval and downgrade), `console/59be900b1b134b97a5cc1c68f4d420da` (same-revision
+quarantine repair with another healthy app), and
+`console/745750d930e1437ebabe31bc27bd26bd` (quarantine removal with a corrupt
+saved archive, healthy app retained). Test media is synchronized before guest
+flush deadlines begin; offline fixture edits also fsync their output. Earlier
+fixture mount failures were isolated to a failing first flush barrier and resolved
+after this synchronization. Candidate storage behavior and deadlines are unchanged.
+Successful and resolved diagnostic media were cleaned, retaining reports/logs.
+Native KVM/physical hardware are not requalified here.
+
+
+Permission enforcement acceptance also passed in four-CPU TCG report
+`console/3b37d7fff57b4d8c8c2def11a1b8a06f`: restricting stdout prevents launching
+the app with inherited output streams; explicit reapproval restores execution,
+with private data unchanged. Newly requested operations remain denied on upgrade
+until explicit approval. The same flow verifies downgrade refusal/consent and
+returns installer health to ready. Disposable media was removed.
+
+
+CPU investigation (2026-10-22): the accounting/scheduler/monitor formulas were not
+changed by installer maintenance. Accounting host checks pass. A serial four-CPU
+TCG comparison against d11e0b2 did not reproduce a general steady-state increase:
+host idle 2.0% vs 1.5%; installer quiet samples 0.0% on both revisions. One pair
+is diagnostic only, not native acceptance. A reproducible alternating KVM runner
+now records host CPU/wall time, per-app monitor samples and clock diagnostics.
+See tests/cpu-profiling.md. The later user-host native acceptance below closes
+this comparison; `/dev/kvm` remains absent in the agent environment. No speculative
+performance change was made.
+
+Registry containment closure (2026-10-22): recovery now finishes all disk work
+before final publication. The installer prepares the verified healthy snapshot,
+rebuilds presentation indexes from that snapshot and clears the WAL, then commits
+the kernel registry as its last step. Failure aborts staging before empty
+containment. The kernel's restore-over-live prohibition remains unchanged.
+Provider requests routed through actual kernel admission verify index-write and
+journal-clear failures, preserved/replayed intent, and VERSION/COMMIT refusal.
+Readiness requires successful initialization or verified containment; STATUS keeps
+the original storage error. This supersedes the earlier mock-only claim that
+matching a live registry's generation was sufficient for restore.
+
+
+Maintenance interruption closure (2026-10-22):
+`make -C src test-installer-maintenance-crash` passes all six four-CPU TCG cases
+in `installer-crash/3a56ea2839b3476eae1523827381adcc` (twelve VM boots).
+Actions 4/5/6 are interrupted before/after the commit footer. Repair rolls back to
+quarantine or finishes the verified newer revision. Removal without a usable
+archive retains quarantine or removes the app while preserving private data.
+Approval rolls back to prior grants or enforces the reduced policy at next launch;
+stdout delegation is denied after committed removal of output permission.
+Each reboot verifies healthy-app availability; independent ext4 replay/e2fsck,
+registry checksum, signed bytes/resources, effective grants and exact private data
+agree with the expected outcome. The durable intent is cleared after recovery.
+All successful VM media is cleaned, with logs/reports retained. Fault executables
+remain separate from candidate builds. Host registry tests verify restore BEGIN is rejected over an ordinary live
+registry. Startup completes recovery I/O before publishing, as described above. Native KVM CPU reproduction is recorded in the following acceptance entry.
+
+
+Native CPU comparison acceptance (2026-10-22): user-host KVM session
+`cpu-comparison/20261022T035706.000427Z` passes three runs per revision, alternating
+six four-core boots on Ryzen 5 5500U. The measured production-source fingerprint was stable and
+matched the candidate at that time; the subsequent startup-order fix is outside
+that performance comparison. The clean-image workload did not reproduce a
+general steady-state CPU increase: host idle rounds to zero CPU ticks in both;
+installer quiet guest usage rounds to 0.0% in every run. Terminal host median is
+40.06% before / 36.82% after, batch monitor-to-file 58.17% / 58.84%, live monitor
+7.74% / 9.24% of one host core. Live monitor's +1.50 percentage-point median has
+overlapping ranges (7.50–8.99% vs 6.99–9.99%), so observer cost remains a limited
+follow-up rather than a confirmed general regression. All boots retain HPET source
+2/flags 187 with SMP TSC inactive; no measured source transition occurred.
+This closes the external CPU comparison for the tested configuration, not physical
+hardware or every persistent installation. See tests/cpu-profiling.md. Successful
+media is cleaned and full reports/clock diagnostics are retained.
+
+
+Per-user installation lifecycle closure (2026-10-22):
+`installer-user-lifecycle/e33d49a21c0740d9aa5bd6e08d5bbd9e` passes three isolated
+four-CPU TCG boots: install/approve/upgrade, reboot, then explicit offline candidate
+update and another boot. UID 1 installs only in its own home; system scope is
+refused. Removing filesystem `stat` permission survives the signed revision-3
+upgrade, and newly requested `mkdir` remains denied. Both operations are exercised
+through the real app's acquired filesystem handle before and after persistence.
+Root's ordinary name lookup does not acquire that user's app. Independent ext4
+replay/e2fsck verifies V2 generation 4, owner 1, revision 3, signed code/resources,
+requested manifest versus approved subset, root-owned executable mode 0555,
+user-owned private directory 0700 and state file 0600. Exactly one 13-byte state
+record survives; no global installation or root-private copy is created. The
+per-user index contains the app and root's index does not. All successful media
+is removed; reports/logs remain. The repeatable target is
+`make -C src test-installer-user-lifecycle`. No boot migration or candidate fixture
+was added. The earlier KVM CPU comparison remains tied to its recorded source;
+this startup-order change has build, host admission and guest functional coverage.
+
+The README introduction/tree and installer contract now reflect the current
+providers, approved-policy admission, restore gate and recovery publication order.
+Historical native-pending statements in the recent CPU investigation are reconciled
+with the subsequent user-host acceptance; its limits remain explicit.
+
+
+Final recovery-order acceptance: four-CPU TCG interruption case 4-3 passes in
+`installer-crash/ce9645ab73194b57925668573ba5edaa` (two boots). A repair interrupted
+after its commit footer completes at reboot with the new publication order,
+healthy-app availability and exact private-data preservation. Independent ext4
+replay/e2fsck and signed registry/artifact checks pass; successful media is removed.
+Candidate build, C/C++ ABI, CPU accounting/process samples, bundle verification,
+offline revision/approval checks and UBSan provider/real-kernel admission checks
+pass. Snapshot-derived index enumeration matches real kernel LIST for root and
+another UID. Native/physical acceptance is not inferred from these TCG results.

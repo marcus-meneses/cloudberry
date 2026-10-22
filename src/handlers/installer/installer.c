@@ -100,8 +100,8 @@ static cb_status_t verify(struct blob *file,struct bundle *b){cb_status_t status
     if(!code || !json){release(code);
         release(json);
         return CB_RESOURCE_FAILURE;
-        }cb_copy(code,b->data+112+b->name+b->manifest,b->code);
-    cb_copy(json,b->data+112+b->name,b->manifest);
+        }cb_copy(code,b->data+b->header+b->name+b->manifest,b->code);
+    cb_copy(json,b->data+b->header+b->name,b->manifest);
     int is_io=0;
     struct manifest_parser p={(char *)json,(char *)json+b->manifest,&is_io,manifest_resource,manifest_operation};
     int valid=process_elf_valid(code,b->code) && manifest_parse(&p);
@@ -109,6 +109,7 @@ static cb_status_t verify(struct blob *file,struct bundle *b){cb_status_t status
     release(json);
     return valid?CB_OK:CB_BAD_REQUEST;
     }
+#include "permissions.inc"
 #include "health.inc"
 #include "files.inc"
 #include "store.inc"
@@ -123,9 +124,9 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     filesystem=cb_acquire(CB_FILESYSTEM_NAME,(struct cb_interface_id)CB_FILESYSTEM_INTERFACE_ID);
     io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
     identity=cb_acquire(CB_IDENTITY_NAME,(struct cb_interface_id)CB_IDENTITY_INTERFACE_ID);
-    (void)initialize_store();
-    static const char *names[]={"inspect","install","remove","list","status","diagnostics","upgrade"};
-    publication=cb_publish(&client,CB_INSTALLER_NAME,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,names,7);
+    CB_REQUIRE(initialize_store()==CB_OK);
+    static const char *names[]={"inspect","install","remove","list","status","diagnostics","upgrade","repair","permissions","approve","metadata"};
+    publication=cb_publish(&client,CB_INSTALLER_NAME,(struct cb_interface_id)CB_INSTALLER_INTERFACE_ID,names,11);
     for(;;){uint64_t bytes;
         CB_REQUIRE(cb_system_receive(input,sizeof(input),&bytes,0)==CB_OK && bytes>=sizeof(struct cb_delivery_header));
         struct cb_delivery_header d;
@@ -141,7 +142,7 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
         unsigned was_degraded=failed;
         cb_status_t status=CB_DENIED;
         if(d.call.flags==CB_CALL_PROVIDER_DELIVERY && d.call.handle==publication && cb_admission_parse(input+sizeof(d),d.context_bytes,&actor))status=operate(actor.process,d.call.operation,input+sizeof(d)+d.context_bytes,d.call.payload_bytes,&result);
-        if(!was_degraded && d.call.operation!=CB_INSTALLER_STATUS && d.call.operation!=CB_INSTALLER_DIAGNOSTICS && d.call.operation!=CB_INSTALLER_LIST){last_status=status;if(!status)phase=0;}
+        if((!was_degraded || !failed) && d.call.operation!=CB_INSTALLER_STATUS && d.call.operation!=CB_INSTALLER_DIAGNOSTICS && d.call.operation!=CB_INSTALLER_LIST && d.call.operation!=CB_INSTALLER_PERMISSIONS && d.call.operation!=CB_INSTALLER_INSPECT && d.call.operation!=CB_INSTALLER_METADATA){last_status=status;if(!status)phase=0;}
         cb_status_t sent=cb_respond(&responder,&d,status,output,result);
         CB_REQUIRE(sent==CB_OK || sent==CB_BAD_REQUEST);
         }

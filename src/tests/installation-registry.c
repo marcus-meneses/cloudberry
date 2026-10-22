@@ -27,6 +27,10 @@ int main(int argc,char **argv){assert(argc==2);FILE *f=fopen(argv[1],"rb");asser
     uint64_t token=prepare(data,size,4);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_DENIED);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);
     token=prepare(data,size,3);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_OK);assert(invoke(CB_REGISTRY_COMMIT,0,token,0,NULL,0,0,1,NULL)==CB_OK);assert(registry_generation()==2);assert(invoke(CB_REGISTRY_COMMIT,0,token,0,NULL,0,0,1,NULL)==CB_OK);
     struct installation_ref ref;assert(installation_lookup(1,name,strlen(name),NULL,&ref) && ref.owner==1);char own[4096];assert(installation_data_path(3,&ref,own)==CB_OK && strstr(own,"_99000000000000000000000000000000.sample.data"));installation_drop(&ref);assert(!installation_lookup(2,name,strlen(name),NULL,&ref));
+    /* Restore is bootstrap/recovery-only, never a replacement over a live registry. */
+    struct cb_registry_request restore={.operation=CB_REGISTRY_BEGIN,.flags=1,.actor=0,.token=registry_generation(),.bytes=32};
+    struct io_invocation restore_call={.process=20,.operation=CB_IO_REGISTRY,.input=&restore,.bytes=sizeof(restore),.authority=1};
+    assert(registry_invoke(&restore_call)==CB_BUSY && !runtime.staging && registry_generation()==2);
     struct installation_ref launcher;assert(installation_lookup(1,"terminal",8,NULL,&launcher));
     assert(installation_access(3,path,FS_EXEC,&launcher)==CB_OK);
     assert(installation_access(3,path,FS_READ,&launcher)==CB_DENIED);
@@ -35,6 +39,11 @@ int main(int argc,char **argv){assert(argc==2);FILE *f=fopen(argv[1],"rb");asser
     assert(installation_process(99,&ref) && ref.owner==1);installation_drop(&ref);
     /* Resource/code-only upgrade: identical registry record still requires idle. */
     struct child guarded_child={.process=99};runtime.children=&guarded_child;running=1;cb_reg_put(data+16,3);token=prepare(data,size,3);assert(guarded(token)==CB_BUSY);running=0;assert(guarded(token)==CB_OK);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);runtime.children=NULL;
+    /* Format-only legacy conversion is not another user's mutation; revision changes are. */
+    cb_reg_put(data,CB_REGISTRY_MAGIC_V2);cb_reg_put(data+40,1);token=prepare(data,size,4);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_OK);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);
+    cb_reg_put(data+40,2);token=prepare(data,size,4);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_DENIED);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);
+    token=prepare(data,size,3);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_OK);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);
+    cb_reg_put(data+40,0);token=prepare(data,size,3);assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_BAD_REQUEST);assert(invoke(CB_REGISTRY_ABORT,0,token,0,NULL,0,0,1,NULL)==CB_OK);cb_reg_put(data,CB_REGISTRY_MAGIC);
     unsigned char empty[32];cb_reg_put(empty,CB_REGISTRY_MAGIC);cb_reg_put(empty+8,32);cb_reg_put(empty+16,3);cb_reg_put(empty+24,0);
     token=prepare(empty,32,3);struct registry_snapshot *old=registry_pin();assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_BUSY);registry_drop(old);
     struct child child={.process=99};runtime.children=&child;running=1;assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_BUSY);running=0;assert(invoke(CB_REGISTRY_PREPARE,0,token,0,NULL,0,0,1,NULL)==CB_OK);old=registry_pin();assert(invoke(CB_REGISTRY_COMMIT,0,token,0,NULL,0,0,1,NULL)==CB_OK && registry_generation()==3 && cb_reg_u64(old->data+16)==2);registry_drop(old);

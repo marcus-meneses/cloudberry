@@ -277,3 +277,19 @@ available when storage is degraded. UPGRADE (7) requires the inspected fingerpri
 same registered name/ID and an inactive app, preserving private data. Guarded
 registry PREPARE additionally checks target activity for code/resource-only changes.
 These appended operations preserve the existing install/remove/status ABI.
+
+
+Installer REPAIR (8) requires a trusted quarantined record and matching signed
+identity at the same or a newer numeric revision. PERMISSIONS (9) pages signed
+requests/current or proposed approvals for an installed name; APPROVE (10)
+transactionally changes only the approved manifest on an inactive app. METADATA
+(11) returns signed/installed revisions, scope owner and pinned issuer public key.
+INSPECT/PERMISSIONS review hashes bind the signed bundle fingerprint plus canonical
+approved JSON. APPROVAL_FILE appends a counted canonical policy-file path, read
+under original-caller authority. SHOW_REQUESTED selects the ceiling for inspection.
+Upgrade intersects prior approvals by default, requiring explicit subset approval
+for new grants; ALLOW_DOWNGRADE explicitly permits a lower, never equal revision.
+The V2 registry persists revisions and effective grants; legacy entries retain
+revision 1 semantics. Permission changes apply at next launch, without live handle
+revocation. Recovery state 1 permits explicit quarantine repair/removal only; state
+2 (untrusted or uncertain) refuses mutations. See the installer provider contract.

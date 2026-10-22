@@ -6,7 +6,8 @@ struct action {uint64_t operation,owner,options;
     char base[4096];
     struct data_plan *plans;
     struct bundle bundle;
-    struct blob previous;
+    struct blob previous,approved;
+    unsigned char identity[16];
     unsigned char *next;
     size_t next_bytes;
     };
@@ -161,11 +162,11 @@ static cb_status_t data_plans(struct action *a,const struct cb_install_context *
 static cb_status_t write_artifacts(struct action *a){
     char path[4096];
     struct bundle *b=&a->bundle;
-    phase=60;cb_status_t s=write_file(a->base,b->data+112+b->name+b->manifest,b->code,CB_FILE_RECREATE);
+    phase=60;cb_status_t s=write_file(a->base,b->data+b->header+b->name+b->manifest,b->code,CB_FILE_RECREATE);
     if(!s)s=assign(a->base,0,0,0555);
     if(s)return s;
     phase=61;s=suffix(path,a->base,".manifest.json");
-    if(!s)s=write_file(path,b->data+112+b->name,b->manifest,CB_FILE_RECREATE);
+    if(!s)s=write_file(path,b->data+b->header+b->name,b->manifest,CB_FILE_RECREATE);
     if(!s)s=assign(path,0,0,0444);
     if(s)return s;
     phase=62;s=suffix(path,a->base,".resources");
@@ -200,13 +201,13 @@ static cb_status_t verify_artifacts(struct action *a){
     char path[4096];
     struct blob file={0};
     cb_status_t s=read_file(a->base,&file);
-    if(!s && (file.bytes!=b->code || !cb_install_equal(file.data,b->data+112+b->name+b->manifest,b->code)))s=CB_DENIED;
+    if(!s && (file.bytes!=b->code || !cb_install_equal(file.data,b->data+b->header+b->name+b->manifest,b->code)))s=CB_DENIED;
     release(file.data);
     if(s)return s;
     file=(struct blob){0};
     s=suffix(path,a->base,".manifest.json");
     if(!s)s=read_file(path,&file);
-    if(!s && (file.bytes!=b->manifest || !cb_install_equal(file.data,b->data+112+b->name,b->manifest)))s=CB_DENIED;
+    if(!s && (file.bytes!=b->manifest || !cb_install_equal(file.data,b->data+b->header+b->name,b->manifest)))s=CB_DENIED;
     release(file.data);
     if(s)return s;
     s=suffix(path,a->base,".resources");
@@ -241,7 +242,21 @@ static cb_status_t cleanup_artifacts(struct action *a,int rollback){
         }return CB_OK;
     }
 /* Indexes are derived display caches. Name discovery/authority use the registry. */
-static cb_status_t refresh_indexes(struct action *a){
+/* Startup cache enumeration uses the prepared, verified snapshot, never a
+ * prematurely published registry. These indexes remain non-authoritative. */
+static cb_status_t index_snapshot(uint64_t uid,uint64_t ordinal,const unsigned char *snapshot,size_t bytes,struct cb_registry_entry *entry,char name[221]){
+    uint64_t index=0;struct cb_install_record record;const unsigned char *found=NULL;uint64_t owner=CB_REGISTRY_SYSTEM;unsigned dynamic=0;
+    if(builtin){struct cb_install_catalog h;cb_copy(&h,builtin,sizeof(h));
+        for(size_t at=sizeof(h);at<h.bytes;){cb_copy(&record,builtin+at,64);if((record.flags&CB_INSTALL_APPLICATION) && index++==ordinal){found=builtin+at+64;break;}at+=record.bytes;}}
+    if(!found)for(size_t at=32;at<bytes;){cb_copy(&record,snapshot+at+16,64);uint64_t u=cb_reg_u64(snapshot+at);
+        if((u==uid || u==CB_REGISTRY_SYSTEM) && index++==ordinal){found=snapshot+at+80;owner=u;dynamic=1;break;}at+=16+record.bytes;}
+    if(!found){*entry=(struct cb_registry_entry){0};return CB_OK;}
+    if(record.name_bytes>220)return CB_BAD_REQUEST;
+    *entry=(struct cb_registry_entry){cb_reg_u64(snapshot+16),ordinal+1,record.name_bytes,owner,{0},record.flags,dynamic};
+    cb_copy(entry->installation,record.installation,16);cb_copy(name,found,record.name_bytes);name[record.name_bytes]=0;return CB_OK;
+}
+static cb_status_t refresh_indexes_from(struct action *a,const unsigned char *snapshot,size_t bytes){
+
     for(struct data_plan *p=a->plans;p;p=p->next){if(registration_bytes>(SIZE_MAX-65536)/3)return CB_RESOURCE_FAILURE;
         size_t capacity=registration_bytes*3+65536,used=0;
         unsigned char *data=allocate(capacity);
@@ -252,20 +267,14 @@ static cb_status_t refresh_indexes(struct action *a){
         uint64_t ordinal=0,generation=0;
         unsigned count=0;
         cb_status_t s=CB_OK;
-        for(;;){s=registry(CB_REGISTRY_LIST,p->uid,generation,ordinal,0,1,NULL,0);
-            if(s)break;
-            struct cb_reply_header h;
-            cb_copy(&h,client.result,sizeof(h));
-            if(!h.result_bytes)break;
-            struct cb_registry_entry e;
-            cb_copy(&e,cb_result(&client),sizeof(e));
-            if(e.name_bytes>220){s=CB_BAD_REQUEST;
-                break;
-                }char name[221],executable[4096],filename[256];
-            cb_copy(name,(unsigned char *)cb_result(&client)+sizeof(e),e.name_bytes);
-            name[e.name_bytes]=0;
-            generation=e.generation;
-            ordinal=e.cursor;
+        for(;;){struct cb_registry_entry e;char name[221],executable[4096],filename[256];
+            if(snapshot){s=index_snapshot(p->uid,ordinal,snapshot,bytes,&e,name);if(s || !e.name_bytes)break;}
+            else {s=registry(CB_REGISTRY_LIST,p->uid,generation,ordinal,0,1,NULL,0);
+                if(s)break;
+                struct cb_reply_header h;cb_copy(&h,client.result,sizeof(h));if(!h.result_bytes)break;
+                cb_copy(&e,cb_result(&client),sizeof(e));if(e.name_bytes>220){s=CB_BAD_REQUEST;break;}
+                cb_copy(name,(unsigned char *)cb_result(&client)+sizeof(e),e.name_bytes);name[e.name_bytes]=0;}
+            generation=e.generation;ordinal=e.cursor;
             size_t fn=0;
             static const char hex[]="0123456789abcdef";
             if(e.dynamic){filename[fn++]='_';
@@ -326,3 +335,5 @@ static cb_status_t refresh_indexes(struct action *a){
         if(s)return s;
         }return CB_OK;
     }
+
+static cb_status_t refresh_indexes(struct action *a){return refresh_indexes_from(a,NULL,0);}

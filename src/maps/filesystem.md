@@ -97,7 +97,12 @@ may publish a validated replacement. Launch, discovery and private-data policy
 use the same registry; admitted installation identity/scope stays stable across
 credential changes. Existing names cannot be installed again with `add`; `upgrade` replaces an
 inactive app with the same name/ID while retaining private data. Reusing retained data requires explicit
-`--reuse-data`; removal retains it unless `--delete-data` is selected.
+`--reuse-data`; removal retains it unless `--delete-data` is selected. Signed release
+revisions and approved permission subsets persist in the registry. The installed
+`.manifest.json` remains the signed requested ceiling; the immutable registry
+contains the effective policy used at launch. Permission changes require an
+inactive app and apply at next launch. Quarantine repair/removal requires trusted
+registry ownership; no directory scan creates installation authority.
 
 Each `_index` is a derived JSON version 1 display cache with `app_id`, `name` and
 `installation`; editing it grants no rights. The build supplies built-in caches;

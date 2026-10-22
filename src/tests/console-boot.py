@@ -3,8 +3,8 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['user-maint-create','user-maint-reboot','user-maint-verify','create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify','policy','repair','quarantine-remove','cut-repair','cut-forget','cut-approve','recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--cpu-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.cpu_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
 if sum(focused_modes)>1:p.error('choose only one focused run mode')
 if a.installer_phase=='create' and not a.fixtures:p.error('installer create requires isolated fixtures')
 if a.installer_cut and (not a.fixtures or not a.installer_cut.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests')):p.error('installer-cut requires fixtures and an isolated test ELF')
@@ -32,7 +32,7 @@ if a.fixtures or a.startup_trace:
         records=json.loads((root/'src/apps/installed.json').read_text());records.append(dict(name='graphics-check',executable='/system/apps/graphics-check',manifest='graphics-check/manifest.json',installation_id='636c6f756462657272792e6766786368',flags=3,cpu=0,stack_bytes=262144));
         if a.installer_phase:
             packages=bundles/'packages';packages.mkdir()
-            for name in ('sample.cbp','sample-v2.cbp','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
+            for name in ('sample.cbp','sample-v2.cbp','sample-v3.cbp','approved.json','approved-full.json','maintenance-approved.json','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
         if a.private_check:
             directory=bundles/'private-check';directory.mkdir();shutil.copy2(build/'tests/apps/private-check.elf',directory/'private-check.elf')
             (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@filesystem',operations=['open','metadata','chmod']),dict(name='/@applications',operations=['data','launch','wait','release']),dict(name='/@sessions',operations=['begin','end','status']),dict(name='/@streams',operations=['read','write'])])))
@@ -55,8 +55,13 @@ if a.fixtures or a.startup_trace:
         (bundles/'pipe-source.bin').write_bytes(bytes((i*37+11)%256 for i in range(65536+317)))
     subprocess.run(['python3',str(root/'src/tools/build-boot-image.py'),str(stage),str(image),'--drivers-source',str(bundles)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 else:subprocess.run(['cp','--reflink=auto','--sparse=always',str(a.disk_source.resolve() if a.disk_source else build/'cloudberry.iso'),str(image)],check=True)
+if a.installer_phase in ('repair','quarantine-remove','cut-repair','cut-forget','cut-approve'):
+    spec=importlib.util.spec_from_file_location('installer_media',root/'src/tests/installer-media.py');media=importlib.util.module_from_spec(spec);spec.loader.exec_module(media);media.preset(image,build,corrupt=a.installer_phase!='cut-approve',history=a.installer_phase.startswith('cut-'))
+    if a.installer_phase in ('quarantine-remove','cut-forget'):media.edit(image,{'/system/config/installations/packages/ffffffffffffffff-112233445566778899aabbccddeeff00.cbp':b'bad archive'})
+# Complete host-side fixture writes before guest flush deadlines start.
+with image.open('r+b') as prepared:os.fsync(prepared.fileno())
 qmp=work/'qmp.sock';log=work/'boot.log';screenshot=work/'screen.ppm'
-command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',str(a.cpus),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
+command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',(f'cpus={a.cpus},sockets=1,cores={a.cpus},threads=1' if a.cpu_only else str(a.cpus)),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
 if a.diagnostics:command+=['-gdb','unix:'+str(work/'gdb.sock')+',server=on,wait=off']
 if a.mmio_trace:command+=['-trace','enable=memory_region_ops_read','-trace','enable=memory_region_ops_write','-trace','file='+str(work/'mmio.log')]
 if a.storage_devices:
@@ -159,12 +164,48 @@ try:
         def installed_command(command,expected,timeout=100):
             type_line('clear');wait_for(lambda text:text.count(prompt)==1 and text.rstrip().endswith(prompt),45)
             type_line(command);wait_for(lambda text:expected in text and text.count(prompt)>=2 and text.rstrip().endswith(prompt),timeout)
-        if a.installer_phase.startswith('cut-'):
-            if a.installer_phase!='cut-install':
+        if a.installer_phase.startswith('user-maint-'):
+            create=a.installer_phase=='user-maint-create'
+            if create:
+                installed_command('accounts useradd alice','Updated.')
+                installed_command('accounts home alice','/home/alice')
+                type_line('accounts passwd alice');wait_for(lambda text:'New password:' in text,45);type_line('x');wait_for(lambda text:'Confirm password:' in text,45);type_line('x');wait_for(lambda text:'Password updated.' in text and text.rstrip().endswith('/ >'),120)
+            type_line('accounts login alice');wait_for(lambda text:'Password:' in text,45);type_line('x');prompt='/home/alice >';wait_for(lambda text:text.rstrip().endswith(prompt),120)
+            if create:
+                installed_command('install add /system/packages/sample.cbp --system --yes','install: status 1')
                 installed_command('install add /system/packages/sample.cbp --yes','Installed.')
                 installed_command('sample','sample data 0')
-            command={'cut-install':'install add /system/packages/sample.cbp --yes','cut-remove':'install remove sample --delete-data --yes','cut-upgrade':'install upgrade /system/packages/sample-v2.cbp --yes'}[a.installer_phase]
+                installed_command('install approve sample --permissions /system/packages/maintenance-approved.json --yes','Permissions updated.')
+                installed_command('sample stat-check','stat status 1')
+                installed_command('install upgrade /system/packages/sample-v3.cbp --yes','Upgraded.')
+            installed_command('install list','sample (user)')
+            installed_command('install permissions sample','Approved permissions:')
+            requested,approved=screen().split('Signed requested permissions:',1)[1].split('Approved permissions:',1)
+            assert 'stat' in requested and 'mkdir' in requested and 'stat' not in approved and 'mkdir' not in approved
+            installed_command('sample stat-check','stat status 1')
+            installed_command('sample mkdir-check','mkdir status 1')
+            type_line('exit');prompt='/ >';wait_for(lambda text:text.rstrip().endswith(prompt),60)
+            installed_command('sample','not found')
+            base='/home/alice/_apps/_112233445566778899aabbccddeeff00.sample'
+            installed_command('fsctl stat '+base,'uid=0 gid=0 mode=555')
+            installed_command('fsctl stat '+base+'.data','uid=1 gid=2 mode=700')
+            installed_command('fsctl stat '+base+'.data/state','uid=1 gid=2 mode=600')
+            raise ProfileComplete()
+        if a.installer_phase.startswith('cut-'):
+            if a.installer_phase in ('cut-remove','cut-upgrade'):
+                installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+                installed_command('sample','sample data 0')
+            command={'cut-install':'install add /system/packages/sample.cbp --yes','cut-remove':'install remove sample --delete-data --yes','cut-upgrade':'install upgrade /system/packages/sample-v2.cbp --yes','cut-repair':'install repair /system/packages/sample-v2.cbp --yes','cut-forget':'install remove sample --yes','cut-approve':'install approve sample --permissions /system/packages/approved.json --yes'}[a.installer_phase]
             installed_command(command,'install: status 10')
+            raise ProfileComplete()
+        if a.installer_phase in ('recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved'):
+            installed_command('install status','recovery required' if a.installer_phase=='recover-quarantined' else '; ready')
+            if a.installer_phase in ('recover-quarantined','recover-forgotten'):installed_command('sample','not found')
+            elif a.installer_phase=='recover-approved':installed_command('sample','permission denied')
+            else:
+                installed_command('sample','sample data 13')
+                assert ('sample revision 2' in screen())==(a.installer_phase=='recover-repaired')
+            installed_command('shared','sample data 13')
             raise ProfileComplete()
         if a.installer_phase in ('recover-installed','recover-empty','recover-old','recover-new'):
             installed_command('install status','; ready')
@@ -174,6 +215,30 @@ try:
                 installed_command('sample',expected)
                 assert ('sample revision 2' in screen())==(a.installer_phase=='recover-new')
                 assert ('sample resource upgraded payload' if a.installer_phase=='recover-new' else 'sample resource resource payload') in screen()
+            raise ProfileComplete()
+        if a.installer_phase=='policy':
+            installed_command('install add /system/packages/sample.cbp --yes','Installed.')
+            installed_command('install upgrade /system/packages/sample-v3.cbp --yes','Upgraded.')
+            installed_command('install permissions sample','Approved permissions:')
+            requested,approved=screen().split('Signed requested permissions:',1)[1].split('Approved permissions:',1)
+            assert 'mkdir' in requested and 'mkdir' not in approved
+            installed_command('install approve sample --permissions /system/packages/approved.json --yes','Permissions updated.')
+            installed_command('sample','permission denied')
+            installed_command('install approve sample --permissions /system/packages/approved-full.json --yes','Permissions updated.')
+            installed_command('sample','sample data 0')
+            installed_command('install upgrade /system/packages/sample-v2.cbp --yes','install: status 1')
+            installed_command('install upgrade /system/packages/sample-v2.cbp --allow-downgrade --yes','Upgraded.')
+            installed_command('install status','; ready')
+            raise ProfileComplete()
+        if a.installer_phase in ('repair','quarantine-remove'):
+            installed_command('install status','recovery required');assert 'Unavailable: sample' in screen()
+            installed_command('sample','not found');installed_command('shared','sample data 0')
+            if a.installer_phase=='repair':
+                installed_command('install repair /system/packages/sample.cbp --yes','Repaired.')
+                installed_command('sample','sample data 0')
+            else:installed_command('install remove sample --delete-data --yes','Removed.')
+            installed_command('install status','; ready')
+            installed_command('shared','sample data 13')
             raise ProfileComplete()
         if a.installer_phase=='upgrade-verify':
             installed_command('install status','; ready');installed_command('sample','sample data 26')
@@ -305,6 +370,32 @@ try:
         type_line('identity-check');wait_for(lambda text:'IDENTITY PASS' in text and text.count('/ >')>=2,150)
         type_line('cat /system/config/identity/credentials.bin');wait_for(lambda text:'cat: permission denied' in text and text.count('/ >')>=3,30)
         type_line('pwd');wait_for(lambda text:'\n/\n/ >' in text and text.count('/ >')>=4,30)
+        raise ProfileComplete()
+    if a.cpu_only:
+        if a.diagnostics:
+            capture_diagnostics();shutil.copy2(work/'performance-state.json',work/'cpu-clock-start.json')
+        def host_cpu():
+            fields=pathlib.Path('/proc/'+str(proc.pid)+'/stat').read_text().rsplit(')',1)[1].split()
+            return (int(fields[11])+int(fields[12]))/os.sysconf('SC_CLK_TCK')
+        measurements={}
+        def measured(label,action):
+            before=host_cpu();start=time.monotonic();action();elapsed=time.monotonic()-start
+            measurements[label]=dict(wall_seconds=elapsed,host_cpu_seconds=host_cpu()-before)
+            measurements[label]['host_cpu_percent']=100*measurements[label]['host_cpu_seconds']/elapsed
+        def ready_command(text):
+            type_line('clear');wait_for(lambda t:t.strip()=='/ >',45)
+            type_line(text);wait_for(lambda t:t.count('/ >')>=2 and t.rstrip().endswith('/ >'),120)
+        measured('idle',lambda:time.sleep(4))
+        measured('quiet_monitor',lambda:ready_command('monitor -n 3 => /cpu-quiet.txt'))
+        def terminal_work():
+            for command_text in ('pwd','ls /system/apps','help')*2:ready_command(command_text)
+        measured('terminal',terminal_work)
+        ready_command('monitor -n 2 => /cpu-after-terminal.txt')
+        type_line('clear');wait_for(lambda t:t.strip()=='/ >',45);type_line('monitor')
+        wait_for(lambda t:'Cloudberry monitor |' in t and 'Page 1/' in t,60)
+        measured('live_monitor',lambda:time.sleep(4))
+        (work/'cpu-live.txt').write_text(screen());send_keys([{'type':'qcode','data':'esc'}]);wait_for(lambda t:t.strip()=='/ >',45)
+        (work/'cpu-host.json').write_text(json.dumps(measurements,indent=2)+'\n')
         raise ProfileComplete()
     if a.monitor_only:
         type_line('monitor -n 2')
@@ -468,7 +559,7 @@ try:
     status='passed'
 except ProfileComplete:
     status="passed"
-    if a.diagnostics and (a.profile_only or a.render_only):
+    if a.diagnostics and (a.profile_only or a.render_only or a.cpu_only):
         try:capture_diagnostics()
         except Exception as error:(work/'diagnostics-error.txt').write_text(str(error))
 except Exception as e:
@@ -500,6 +591,25 @@ finally:
     if status=='passed' and a.identity_only:
         try:subprocess.run(['python3',str(root/'src/tests/identity-image.py'),str(image)],check=True)
         except Exception as error:status='failed';failure='durable identity check: '+str(error)
+    if status=='passed' and a.cpu_only:
+        try:
+            spec=importlib.util.spec_from_file_location('cpu_media',root/'src/tests/installer-media.py');media=importlib.util.module_from_spec(spec);spec.loader.exec_module(media)
+            spec=importlib.util.spec_from_file_location('cpu_report',root/'src/tests/cpu-report.py');report=importlib.util.module_from_spec(spec);spec.loader.exec_module(report)
+            part=next(p for p in media.image.partitions(image) if p['index']==4);raw=work/'cpu.ext4';media.updater.extract(image,part,raw,recover=True)
+            records={}
+            for label in ('quiet','after-terminal'):
+                text=subprocess.check_output(['debugfs','-R','cat /cpu-'+label+'.txt',str(raw)],stderr=subprocess.DEVNULL,text=True);(work/('cpu-'+label+'.txt')).write_text(text);records[label]=report.rows(text)
+                if not records[label] or not report.summaries(records[label]):raise RuntimeError('missing monitor CPU samples: '+label)
+            records['live']=report.rows((work/'cpu-live.txt').read_text())
+            result=dict(version=1,cpus=a.cpus,accelerator=a.accel,host=json.loads((work/'cpu-host.json').read_text()),records=records,summary={k:report.summaries(v) for k,v in records.items()})
+            if a.diagnostics:
+                initial=json.loads((work/'cpu-clock-start.json').read_text());final=json.loads((work/'performance-state.json').read_text())
+                result['clock_start']=initial;result['clock_end']=final
+                if 'error' in initial or 'error' in final:raise RuntimeError('clock diagnostic unavailable')
+                fields=('source','flags','tsc_hz','smp_tsc')
+                if any(initial['clock'][key]!=final['clock'][key] for key in fields):raise RuntimeError('clock source changed during CPU measurement')
+            (work/'cpu.json').write_text(json.dumps(result,indent=2)+'\n');raw.unlink()
+        except Exception as error:status='failed';failure='CPU report: '+str(error)
     (work/'result.json').write_text(json.dumps(dict(status=status,error=failure,cpus=a.cpus,accelerator=a.accel,storage_devices=a.storage_devices,diagnostic_kernel=str(a.kernel) if a.kernel else None,mmio_trace=a.mmio_trace),indent=2)+'\n')
 if status=='passed' and not a.keep_artifacts:
     subprocess.run(['python3',str(root/'src/tools/clean-tests.py'),'--root',str(work)],check=True)

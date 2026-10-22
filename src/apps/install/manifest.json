@@ -10,7 +10,11 @@
         "list",
         "status",
         "diagnostics",
-        "upgrade"
+        "upgrade",
+        "repair",
+        "permissions",
+        "approve",
+        "metadata"
       ]
     },
     {

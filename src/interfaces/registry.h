@@ -2,11 +2,14 @@
 #define CLOUDBERRY_INTERFACE_REGISTRY_H
 #include "installations.h"
 /* Supplemental registrations: explicit little-endian u64 fields. Header is
- * magic/version 0x314745524243, total bytes, generation, count (32 bytes).
- * Each entry is owner UID, reserved zero, then the existing 64-byte installation
- * record and its name/path/manifest bytes. UINT64_MAX means system-wide.
+ * magic/version 0x324745524243, total bytes, generation, count (32 bytes).
+ * Each entry is owner UID, nonzero signed revision, then the existing 64-byte
+ * record and name/path/approved manifest. Legacy 0x314745524243 uses reserved
+ * zero, interpreted as revision 1. UINT64_MAX means system-wide.
  * Built-in entries never appear here and cannot be replaced. */
 #define CB_REGISTRY_MAGIC UINT64_C(0x314745524243)
+#define CB_REGISTRY_MAGIC_V2 UINT64_C(0x324745524243)
+static inline int cb_registry_magic(uint64_t magic){return magic==CB_REGISTRY_MAGIC || magic==CB_REGISTRY_MAGIC_V2;}
 #define CB_REGISTRY_SYSTEM UINT64_MAX
 static inline uint64_t cb_reg_u64(const void *p){const unsigned char *b=(const unsigned char *)p;uint64_t n=0;for(unsigned i=0;i<8;++i)n|=(uint64_t)b[i]<<(i*8);return n;}
 static inline void cb_reg_put(void *p,uint64_t n){unsigned char *b=(unsigned char *)p;for(unsigned i=0;i<8;++i)b[i]=n>>(8*i);}

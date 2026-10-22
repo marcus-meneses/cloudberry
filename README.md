@@ -13,22 +13,26 @@ resource handlers, user processes or isolation boundaries. Existing method calls
 stay synchronous; a separate threads API explicitly creates saved contexts.
 Private lower-half address spaces can be attached to kernel threads through
 request ABI2, with ownership, leases, context-switch root selection and targeted
-TLB invalidation. [Protected processes](kmodules/shared/process.md) now load static
-ELF executables from ext4, enter ring 3 and contain user faults. Application
-handle transport now uses copied, manifest-authorized capability calls; the first
-keyboard handler now runs as an isolated disk-loaded process. See [mem spaces](kmodules/shared/mem-spaces.md).
-The [application handle contract](interfaces/README.md) now defines the C boundary
-and the first provider, a privileged [keyboard handler](handlers/keyboard/README.md)
-publishing `/@keyboard`. Headers are compile-tested in C/C++20; the [C system library and handle broker](kmodules/shared/handles.md) implement initial boot-policy authorization and isolated request/reply.
-The provider decodes descriptor-defined keyboard reports with bundled IBM/ABNT2 layouts.
-Bootstrap reads generic provider descriptors/startup files; keyboard interprets
-its own config.cnf. Lifecycle owners stop/reap explicitly, and status snapshots
-contain no reclaimable record pointers.
+TLB invalidation. [Protected processes](src/kmodules/shared/process.md) load static
+ELF executables from ext4, enter ring 3 and contain user faults. Isolated providers
+serve keyboard, mouse, filesystem, text/graphics/display, applications,
+identity, sessions and installation through copied, manifest-authorized calls.
+See [memory spaces](src/kmodules/shared/mem-spaces.md) and the
+[C handle contract](src/interfaces/README.md). Headers are compile-tested in C/C++20;
+the [system library and broker](src/kmodules/shared/handles.md) provide acquisition,
+filtered reflection and request/reply transport. Installation admission combines
+immutable built-ins with validated supplemental records and approved permissions.
+
+The privileged [keyboard provider](src/handlers/keyboard/README.md) publishes
+`/@keyboard` and decodes descriptor-defined HID reports using configurable layouts
+(default ABNT2). Keyboard and mouse share HID transport through kernel demultiplexing.
+Bootstrap loads provider descriptors and startup resources; lifecycle owners stop
+and reap explicitly. Status snapshots contain no reclaimable record pointers.
 CPU and IOMMU alternatives are selected at boot behind shared contracts; see
 [platform portability](kmodules/shared/portability.md).
 
 Application handles now provide process-local acquisition, filtered reflection,
-self-owned memory and scoped I/O. Privileged HID decoding runs in that isolated keyboard provider. The xHCI transport supplies root/downstream
+self-owned memory and scoped I/O. Privileged HID decoding runs in isolated input providers. The xHCI transport supplies root/downstream
 slot/endpoint and asynchronous transfer operations for USB core and hub policy. NVMe and AHCI are kernel-only block backends. The superseded implementation is preserved locally in `../.src_old/`, excluded
 from Git and from this build.
 
@@ -422,7 +426,7 @@ src/
 │   └── hid-report.h
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
-│   ├── installer/ (README.md, installer.c, bundle.h, health.inc, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
+│   ├── installer/ (README.md, installer.c, bundle.h, health.inc, permissions.inc, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
 │   ├── sessions/ (README.md, sessions.c, manifest.json, provider.cnf)
 │   ├── identity/ (README.md, identity.c, auth.inc, home.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
 │   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
@@ -795,8 +799,11 @@ src/
 │   ├── cpu-topology.c
 │   ├── cpu-tsc.c
 │   ├── cpu-profile.c
+│   ├── bench-cpu.py / cpu-report.py / cpu-profiling.md
 │   ├── installation-contract.c
 │   ├── installation-registry.c
+│   ├── installer-registry-bridge.c
+│   ├── installer-user-lifecycle.py
 │   ├── installer-store.c
 │   ├── installation-state.py
 │   ├── installer-fixture.py
@@ -1144,14 +1151,38 @@ Focused host checks: `make -C src test-session-policy test-credentials test-hand
 ## Signed local installation
 
 The continuously running installer provider publishes `/@installer`; the ordinary
-`install` app inspects, installs, lists and removes signed native bundles. Normal
+`install` app inspects, installs, upgrades, repairs and removes signed native bundles,
+and reviews persistent approved permission subsets. Normal
 users install only into their own `_apps`; root/admin may select global scope.
 Built-in admission remains immutable. Supplemental records are refcounted registry
 snapshots shared by launch, discovery and filesystem policy. Private-data reuse
 requires explicit consent. Writes use a recoverable intent/commit journal; offline
 development updates preserve verified runtime apps with their registrations/data.
+Signed numeric revisions reject accidental downgrades; an explicit option permits
+them without converting private data. Trusted quarantined entries support explicit
+owner-authorized repair/removal, while an untrusted registry stays restricted.
+Upgrade/repair preserve prior denials unless a permission subset is explicitly approved.
 Only a pinned host development issuer is supported; this is not Secure Boot or a
 public package trust system. There is no provider installation, running-app upgrade,
 network repository, dependency solver or forced termination in this milestone.
 See [installer](handlers/installer/README.md), [CLI](apps/install/README.md),
 [filesystem layout](maps/filesystem.md) and [development media](tools/development-images.md).
+
+
+CPU regression measurements use `./scripts/bench-cpu-kvm.sh --runs 3` on a KVM
+host. It compares an isolated previous revision against the candidate under the
+same configuration, retaining JSON results and cleaning successful media. See
+[CPU measurement](src/tests/cpu-profiling.md) for observer costs and local evidence.
+
+Targeted guest interruption checks for repair, quarantined removal and permission
+approval: `make -C src test-installer-maintenance-crash`. These use only copied
+media and fault executables under `bin/tests`, followed by independent ext4 checks.
+
+
+Startup recovery completes filesystem work before publishing the final live
+application registry. An initialization failure must either publish verified empty
+containment or stop provider readiness; an ordinary live registry cannot be
+replaced through bootstrap restore. The focused provider test exercises actual
+kernel admission as well as injected index/journal failures.
+`make -C src test-installer-user-lifecycle` checks per-user V2 approval reductions
+through upgrade, reboot and offline candidate update on disposable media.

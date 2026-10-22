@@ -31,9 +31,9 @@ Root has no personal installation scope. No request can nominate another UID.
 Package source reads are checked against the original caller's filesystem policy
 and mode bits, so installer privileges cannot copy another app's private bundle.
 Runtime bundles may contain ordinary apps or launchers, never providers/managers,
-OS resource publications or private IO authority. The explicit manifest is the
-permission ceiling. The CLI displays it and asks for consent unless `--yes` is
-supplied; this does not implement a general interactive permission-prompt broker.
+OS resource publications or private IO authority. The signed manifest is the
+requested permission ceiling. The registry holds the approved subset used at launch.
+The CLI displays both and asks for consent unless `--yes` is supplied; this does not implement a general interactive permission-prompt broker.
 
 ## Layout and interfaces
 
@@ -58,9 +58,10 @@ also includes already registered system apps. `applications.resources` resolves
 an app's resource directory; `applications.data` resolves its private directory.
 JSON `_index` files are derived listing caches and convey no execution authority.
 
-INSPECT returns verified metadata, a SHA-512 bundle fingerprint and paged manifest
-bytes. INSTALL must present that fingerprint, binding consent to the verified
-bytes. Existing retained data requires explicit `--reuse-data`. REMOVE keeps data
+INSPECT returns paged requested or approved JSON and a SHA-512 fingerprint of
+the signed-bundle fingerprint plus canonical approved JSON. Mutations present that
+review fingerprint, binding consent to both package bytes and effective grants.
+METADATA returns signed/installed revision, scope owner and issuer public key. Existing retained data requires explicit `--reuse-data`. REMOVE keeps data
 unless `--delete-data` is requested. LIST shows visible dynamic registrations.
 STATUS reports generation, recovery-required state and last operation phase/status.
 Phases: 1 verify, 2 private-data planning, 3 registry construction, 4 prepare,
@@ -79,10 +80,12 @@ Protected `/system/config/installations/` contains:
 - `transaction.bin`: a checksummed intent and optional `COMMIT01` footer.
 - `packages/<owner-hex>-<identity-hex>.cbp`: verified signed originals for recovery.
 
-The registry header is four u64s: magic `0x314745524243`, total payload bytes,
-generation and count. Each record is owner UID (UINT64_MAX for system-wide), a zero
-reserved u64, then the documented 64-byte installation record and name/path/JSON
-manifest bytes. All fields have explicit sizes/byte order; no pointers persist.
+The registry header is four u64s: magic `0x324745524243`, total payload bytes,
+generation and count. Each record is owner UID (UINT64_MAX for system-wide), a
+nonzero signed release revision, then the documented 64-byte installation record
+and name/path/approved JSON bytes. Legacy `0x314745524243` records with reserved
+zero remain readable as revision 1. Explicit mutations write the new format; boot
+does not migrate it. The physical `.manifest.json` stays the signed requested ceiling. All fields have explicit sizes/byte order; no pointers persist.
 The public ABI is in `interfaces/installer.h` and `interfaces/registry.h`.
 
 The provider validates and prepares a new kernel snapshot before filesystem work.
@@ -104,7 +107,7 @@ publication was prepared, dynamic launches remain gated pending recovery.
 
 Tests use disposable files/images. Host tests cover signature/format refusals,
 scope/role policy, reader retirement, active removal, and install/remove crashes at
-five transaction boundaries. Guest tests exercise actual ext4, pipes, registration,
+six transaction boundaries. Guest tests exercise actual ext4, pipes, registration,
 resources, private data, per-user visibility and reboot/offline-update persistence.
 
 The committed intent also repairs a registry file interrupted during its rewrite;
@@ -131,7 +134,9 @@ packages; fixtures enter only copied test images.
 Startup containment: an invalid optional app is omitted from live discovery while
 verified apps remain usable. Its durable registration/files remain unchanged.
 `install status` lists unavailable apps and their errors; `install list` marks
-them unavailable. Mutations remain disabled until the damaged state is repaired.
+them unavailable. When the full registry is trustworthy, explicit owner-authorized
+repair/removal of quarantined entries is allowed; ordinary mutations stay blocked
+until quarantine is cleared.
 An untrusted registry or unresolved recovery failure leaves the installer available
 for status and starts immutable built-ins only. No disk state is guessed, erased
 or automatically reinstalled. Four-CPU TCG corruption checks passed in
@@ -148,7 +153,7 @@ until publication or rollback. Private data is retained; no data migration runs.
 Upgrade intents use `CBINS002`: the existing 64-byte header plus an eight-byte
 previous-bundle length, followed by base path, plans, next registry, new signed
 bundle, previous signed bundle and checksum. Existing install/remove intents keep
-`CBINS001` and remain readable. The registry and bundle formats do not change.
+`CBINS001` and remain readable. Current bundle/registry revisions are described below.
 Before commit, recovery restores the previous signed executable/manifest/resources
 and archive. After commit, it finishes the new revision and archive. The old
 revision is retained in the WAL until completion; successful upgrades do not keep
@@ -163,3 +168,118 @@ signed-content/data assertions run after recovery; successful media is cleaned.
 The model is abrupt provider exit at completed durable boundaries followed by VM
 restart, not arbitrary torn writes or physical controller power-loss acceptance.
 Four-CPU reports are recorded in the roadmap. A failed test preserves its media.
+
+
+## Signed revisions and approval maintenance
+
+New bundles use `CBPKG002`: the original 112-byte header followed by a signed,
+nonzero little-endian u64 release revision at offset 112, then name, requested
+manifest, executable, resources and Ed25519 signature. The host builder accepts
+`--revision N`, default 1. Legacy `CBPKG001` bundles remain readable as revision 1.
+Identity belongs to the pinned issuer; upgrades keep issuer, ID, name and scope.
+The CLI prints the issuer public key and signed/installed revision. Enrollment,
+issuer substitution and key rotation remain unsupported, rather than silently
+reassigning an identity. Offline updates refuse a changed pinned key with installed apps.
+
+Upgrade requires a greater revision. Equal revisions are rejected; an explicit
+`--allow-downgrade` permits a lower revision and warns that retained private data
+may have an incompatible schema. This is a numeric release counter, not semantic
+versioning, dependency resolution, anti-rollback hardware or private-data migration.
+
+Install defaults to the requested policy after installation consent. Upgrade and
+repair default to the intersection of previous approvals and new requests: removed
+operations disappear, newly requested and previously denied operations stay denied.
+`install permissions NAME` shows signed requests and current grants.
+`install approve NAME --permissions PATH` reviews and transactionally replaces the
+grants with a JSON subset of the signed ceiling. The same `--permissions PATH`
+option selects grants during install/upgrade/repair. Use manifest JSON syntax;
+resource scope and publication metadata must match the ceiling, and unknown or
+duplicate resources/operations are refused. An empty resources array denies all.
+The source file is read under the original caller's access policy, copied and
+validated; a changed policy between review and mutation fails the review hash.
+
+The approved manifest in the immutable kernel registry is the admission policy
+used by handle acquisition/reflection. Changing grants requires an inactive app;
+the new snapshot applies at next launch. This does not implement live revocation
+of an already acquired handle or an automatic authorization dialog.
+Metadata-only approval transactions use CBINS001 action 6 and never rewrite signed
+artifacts or private data.
+
+## Explicit quarantine repair and removal
+
+`install repair PATH` requires a quarantined entry in a fully validated registry,
+the same owner/name/ID/pinned issuer and a revision at least the installed revision.
+It replaces executable, requested manifest, resources and archive with verified
+bytes, preserves existing private data and retains the approval intersection unless
+an explicit subset is selected. Other quarantined entries stay unpublished; healthy
+apps stay available. No loose executable is scanned for identity or trusted as a
+repair source. A healthy app uses upgrade instead of same-revision repair.
+
+Repair uses action 4 with CBINS001: before commit recovery removes replacement
+artifacts/archive and newly provisioned data, leaving the app unavailable; after
+commit it finishes publication. Existing private data survives either outcome.
+Explicit repair can replace damaged evidence; it is never attempted automatically.
+
+Removal of a quarantined app does not require a readable saved package. CBINS003
+uses a 72-byte header (previous-registry length at offset 64), action 5, no bundle,
+and the trusted previous registry after the next registry. Recovery validates the
+exact single-record removal and canonical owner/ID-derived paths before cleanup.
+The journal retains that authority through registry overwrite. Default removal
+retains data; `--delete-data` explicitly removes it. This grants no authority to
+remove unrelated sidecars or another account's installation.
+
+STATUS distinguishes quarantine-only state 1 from untrusted/uncertain state 2.
+State 2 permits diagnostics/listing but no repair/removal; no registry is inferred
+from disk contents. Successful repair/removal clears only the target diagnostic.
+Host UBSan checks cover public request authorization/review, revision policy,
+permission subsets and six interruption boundaries each for repair, quarantined
+removal and approval, in addition to existing install/remove/upgrade recovery.
+
+
+Focused guest maintenance checks (isolated fixtures, four CPUs):
+
+```sh
+python3 src/tests/console-boot.py bin --fixtures --installer-phase policy --cpus 4
+python3 src/tests/console-boot.py bin --fixtures --installer-phase repair --cpus 4
+python3 src/tests/console-boot.py bin --fixtures --installer-phase quarantine-remove --cpus 4
+```
+
+These pass on TCG; report IDs are recorded in the roadmap. The runner synchronizes
+host fixture writes before launching the VM so preparing a test image does not
+leave host writeback outstanding when guest flush deadlines start. This is separate
+from filesystem/controller power-loss validation. Successful media is removed.
+
+
+Containment readiness: startup validates the full registry, verifies signed
+artifacts, prepares the healthy snapshot, repairs derived indexes and clears the
+recovered WAL **before** the final kernel publication. COMMIT is the last step;
+no fallible filesystem operation follows it. Index rebuilding uses the prepared
+snapshot plus immutable built-ins, with the same per-user visibility as LIST.
+Indexes remain presentation caches and never authorize execution.
+
+An initialization failure aborts staging and publishes a verified empty snapshot
+at the current kernel generation. The kernel continues to reject restore BEGIN
+over an ordinary live registry; the installer does not bypass that gate. Failure
+to obtain the generation or publish containment prevents provider readiness.
+STATUS retains the original storage failure. Outstanding recovery intent is kept
+when index rebuilding or WAL cleanup fails, so a later boot can retry safely.
+Host tests route actual installer transport requests through the kernel registry
+implementation, including both failure sites and VERSION/COMMIT refusal.
+
+`make -C src test-installer-maintenance-crash` runs only the six maintenance
+interruption cases: repair (action 4), quarantine removal without a usable archive
+(action 5), and approval-only publication (action 6), each before and after the
+commit footer. Fault ELFs live under `bin/tests`; candidate executables contain no
+cut code. Each case reboots the copied disk, checks registry visibility and real
+permission enforcement through the terminal, then independently replays/checks
+ext4 and verifies registry, artifacts, grants and retained private data. Successful
+media is removed after each case. The older `test-installer-crash` target retains
+its original six install/remove/upgrade cases. This is provider interruption at
+durable boundaries, not arbitrary controller/sector power-loss acceptance.
+
+
+`make -C src test-installer-user-lifecycle` checks a normal user's signed V2
+installation, denied operations, inactive upgrade, reboot and offline candidate
+update. It checks effective handle authorization, scope isolation, signed revision,
+approved JSON, inode ownership/modes and exact private-data preservation on copied
+media. Test applications and packages never enter the candidate image.

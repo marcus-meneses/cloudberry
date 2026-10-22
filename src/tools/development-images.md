@@ -77,4 +77,16 @@ location. Their CBINS002 journal includes old/new signed bundles until commit
 completion; interrupted transactions require guest recovery before offline update,
 just like CBINS001 install/remove transactions. A quarantined or corrupt installed
 application is not silently repaired by the offline updater. The guest can still
-start built-in recovery tools with installation mutations disabled.
+start built-in recovery tools. A trusted registry permits explicit quarantine repair
+or removal through the guest installer; an untrusted registry remains read-only.
+Offline preservation validates signed release revisions and approved permission
+subsets, retaining the signed requested manifest separately. No boot-time migration
+or offline automatic repair is added.
+
+
+`make -C src test-installer-user-lifecycle` exercises signed per-user revision and
+approval preservation across reboot and this offline updater. It verifies effective
+denials, registry/signed artifacts, UID/GID/modes and private bytes on disposable
+media, then removes successful images while keeping reports. Startup recovery
+finishes index/WAL disk work before the final kernel registry publication; no
+ordinary image update or layout migration occurs during boot.
