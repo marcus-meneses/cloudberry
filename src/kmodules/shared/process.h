@@ -3,10 +3,15 @@
 #include "module.h"
 #include "../../interfaces/credentials.h"
 enum process_state {PROCESS_LOADING=1,PROCESS_READY,PROCESS_RUNNING,PROCESS_EXITED,PROCESS_FAULTED,PROCESS_REAPING,PROCESS_CLEANUP};
-struct process_request {uint32_t abi,cpu;uint64_t filesystem;const char *path;uint64_t argument,stack_bytes;const void *startup;uint64_t startup_bytes;};
+enum process_flags {PROCESS_MIGRATABLE=1};
+struct process_request {uint32_t abi,cpu;uint64_t filesystem;const char *path;uint64_t argument,stack_bytes;const void *startup;uint64_t startup_bytes;uint64_t flags;};
 struct process_info {uint64_t id,thread,address_space;uint32_t state,cpu;uint64_t exit_code,fault_vector,fault_address,fault_rip,switches,stop_requested;};
-/* Trusted bootstrap facilities. Static ELF64 ET_EXEC, one pinned thread per
+/* Trusted bootstrap facilities. Static ELF64 ET_EXEC, one preemptible thread per
  * process; load(request) -> ID, start(id), info(id,out), reap(id) after exit.
+ * Request ABI3 appends flags; PROCESS_MIGRATABLE permits clean user-return
+ * migration. ABI1/2 and zero flags retain explicit CPU affinity.
+ * terminate(id) requests revocation and exit 137 at a clean user boundary;
+ * in-flight kernel work must return normally before execution/resources unwind.
  * User faults terminate only their process; kernel exceptions remain fatal.
  * copy(id,user,buffer,bytes,write) validates each user mapping and copies through
  * owned physical aliases. No caller virtual pointer is passed to a provider.
@@ -17,8 +22,10 @@ struct process_info {uint64_t id,thread,address_space;uint32_t state,cpu;uint64_
 struct kernel_surface_result process_surface_init(MODULE_ARGS);
 struct kernel_surface_result process_surface_load(MODULE_ARGS);
 struct kernel_surface_result process_surface_start(MODULE_ARGS);
+struct kernel_surface_result process_surface_terminate(MODULE_ARGS);
 struct kernel_surface_result process_surface_stop(MODULE_ARGS);
 struct kernel_surface_result process_surface_run(MODULE_ARGS);
+struct kernel_surface_result process_surface_user_return(MODULE_ARGS);
 struct kernel_surface_result process_surface_gate(MODULE_ARGS);
 struct kernel_surface_result process_surface_fault(MODULE_ARGS);
 struct kernel_surface_result process_surface_info(MODULE_ARGS);

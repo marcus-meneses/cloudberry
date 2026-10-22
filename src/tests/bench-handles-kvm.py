@@ -79,6 +79,7 @@ def main():
         archive=Path(str(session)+'.tar.gz');failure=None
         try:
             names=('tests/apps/application-runtime.elf','tests/apps/handle-stress.elf','cloudberry.iso','tests/src-process-kernel.elf','kmodules/probe.kmod','tests/apps/process-probe.elf','tests/apps/handles-probe.elf','tests/apps/keyboard-client.elf','tests/apps/keyboard-fault.elf','tests/apps/handle-bench.elf','tests/apps/startup.elf')
+            names+=('tests/apps/execution-probe.elf',)
             if args.profile_handles:names+=('tests/handles-profile.kmod',)
             command=['make','-C','src',f'-j{args.jobs}',f'BUILD={build}',f'ISO={build}/cloudberry.iso',f'KERNEL={build}/kernel.elf',f'STAGE={build}/src-iso-root']+[str(build/n) for n in names]
             logged(command,session/'build.log')

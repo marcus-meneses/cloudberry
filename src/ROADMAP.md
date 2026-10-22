@@ -16,13 +16,65 @@ startup failure containment and guest-ext4 interruption checks are implemented.
 Explicit account revocation and foreground console authorization are implemented;
 secure-attention UI and a full compositor remain separate work. Explicit offline
 updates, app-specific data authorization and session resource revocation are closed.
-Session stop remains cooperative; forced termination and a secure compositor are
-not provided by this milestone. Hardware/native KVM validation remains separate.
+Session stop remains cooperative by default; explicit owner-scoped user-process
+termination now exits at a safe boundary. Automatic escalation and a secure
+compositor remain separate work. Hardware/native KVM validation remains separate.
 
 Completed foundation: dynamic ABI3 hub and provider ownership/draining, heap, hardware/MMIO inventory, clock/RTC,
 vector and CMOS/NMI ownership, APIC timers, deadline callbacks, owned page reuse,
-guarded stacks, CPU-pinned preemptible threads, AP startup, per-CPU descriptor
+guarded stacks, preemptible threads with conservative user-boundary migration,
+explicit kernel/provider affinity, AP startup, per-CPU descriptor
 tables/stacks/timers, wake IPIs and acknowledged shared-address-space shootdown.
+
+Closed execution priorities (2026-10-22; validation details at the end):
+
+1. Placement and core binding: ordinary apps use runnable/running pressure first,
+   then live occupancy. Opted-in detached user-return continuations may be stolen
+   by an idle CPU from an overloaded donor. Arbitrary kernel continuations and
+   explicitly pinned providers/workers stay on their original CPU. ABI3 request
+   flags preserve ABI1/2 affinity. THREAD_LOAD reports per-CPU runnable/running/
+   blocked counts, migration counters and synchronized runnable-wait metrics.
+2. User-process lifecycle: manifest-authorized applications.terminate is scoped to
+   the authenticated launcher's own children. Revocation wakes pending work; a
+   clean return to CPL3 unwinds through normal process exit (status 137). Kernel
+   continuations/file workers return normally before resource reclamation. STOP
+   and session close retain their graceful/cooperative policy. No arbitrary
+   kernel-thread kill or automatic manager escalation is introduced.
+3. Hostile behavior validation: uneven CPU-bound loops, distinct address-space/SIMD
+   guards, forced exit, blocked pipe reads, dispatched caller death and late reply
+   rejection now join existing privilege/fault/malformed-request/stalled-provider
+   checks. Deterministic physical/metadata/mapping exhaustion verifies partial
+   allocation rollback and preservation of prior user memory. Owned page/stack
+   counts return to baseline after execution cases.
+4. Provider recovery contract: recovery.md classifies state ownership and restart
+   eligibility. Explicit quiescent keyboard fault/restart and broker epoch tests
+   preserve queued/dispatched outcomes. Old capabilities stay tied to the failed
+   publication; fresh acquisition reauthorizes against a new epoch. No generic
+   automatic restart/rebind or side-effect retry is claimed. Stateful-provider
+   reconstruction remains a separate milestone.
+
+Current next priorities (2026-10-22):
+
+1. Native execution acceptance: `scripts/check-execution-kvm.sh` builds isolated
+   media and checks one/four-CPU migration/termination plus console/input wake.
+   Functional acceptance is independent of timestamp qualification. First live
+   failures capture scheduler/broker/HID state before shutdown. User-host AMD KVM
+   acceptance passed on the matching source fingerprint; see the closure below.
+   Native Intel CPU and physical-device acceptance remain separate.
+2. Runtime foundation audit: [runtime-port.md](sdk/runtime-port.md) pins QuickJS
+   2026-06-04 as a single-threaded, non-JIT reference. The reproducible dependency
+   inventory records the official archive hash and host whole-core externals,
+   separately probing missing target headers. Existing async/stream/lifecycle
+   mechanisms are distinguished from missing allocator, C/math/time support and
+   host adapters. Unsupported public MEMORY_RESIZE is removed; ID 3 stays reserved.
+3. JavaScript shell: **deferred until all mandatory foundation gates in that audit
+   are implemented and validated**. No engine/interpreter is installed or built
+   into candidate boot. Do not substitute an audit or host link for a guest port.
+
+User threads/TLS, richer public memory/filesystem contracts, networking and full
+V8/Node support remain later extensions; the selected smaller interpreter does
+not require those unrelated milestones up front.
+Local issuer rotation and command-output polish remain later work.
 
 Closed priorities:
 
@@ -2049,3 +2101,80 @@ Candidate build, C/C++ ABI, CPU accounting/process samples, bundle verification,
 offline revision/approval checks and UBSan provider/real-kernel admission checks
 pass. Snapshot-derived index enumeration matches real kernel LIST for root and
 another UID. Native/physical acceptance is not inferred from these TCG results.
+
+
+Execution closure (2026-10-22): focused UBSan host checks pass for pressure-aware
+placement, detached-boundary exclusions, wait/completion ownership, termination
+under OOM, allocation rollback, CPU accounting, C/C++ ABI and installation binding.
+The real broker test republishes a name under a fresh provider, verifies a new
+epoch and filtered grants, and proves the old capability still fails against its
+old publication rather than reconnecting to an unrelated replacement.
+
+Isolated process suites pass with one CPU (run c2435f3331d64a3190d4d0a4fcb713a1)
+and four CPUs (run d7354ca0685e47118f85a07c4fad4aef), TCG/max/no IOMMU, under
+bin/tests/isolated/tests/process-{1,4}cpu-none/report.json. Four spinners begin
+assigned to CPU0; three migrate to CPUs1/2/3 with distinct memory/SIMD guards intact.
+One CPU reports zero migrations. Seven added process cases restore owned page and
+stack counts. Public runtime tests reject another launcher's terminate request,
+terminate an owned stubborn child with status 137 and preserve ordinary wait/reap.
+Existing kernel/RO/NX/unmapped/CLI fault containment, queued/dispatched timeout,
+slow-provider concurrency, keyboard unplug/replug and two provider fault/restart
+cycles remain passing. Per-CPU queue/wait/migration measurements are retained in
+boot.log; they are diagnostics, not native performance or hard latency bounds.
+
+The suite now joins/reaps the existing bootstrap worker before baseline capture;
+READY volume selection can precede worker exit. HID info can be unavailable in the
+legitimate unplug window while the provider/publication stay alive. Runtime app
+fixtures use normal flat /system/apps installation and executable permissions;
+missing installations correctly expect NOT_FOUND. These fix stale test assumptions
+without relaxing production access policy or resource-baseline equality. Fixtures,
+fault cases and probe executables remain outside the candidate. Native KVM and
+physical migration/termination acceptance are not inferred from these TCG runs.
+
+
+Candidate acceptance: normal four-CPU console report
+console/5aa7fce63f404ab09abd9dd1e7ab6187 passes pipelines, recreate/append,
+interactive stdin/EOF, protected-boot refusal, delegated private-data denial,
+three/four-column ls/hidden entries and input after idle. Focused four-CPU wake
+report console/519d2185ec494f95a3436f9dfedef8d6 also passes delayed stdout/stderr,
+stdin/EOF, pipeline completion and wake after idle without recurring polling.
+The first full console attempt timed out around injected stdin without a kernel
+snapshot; that timeout was not reproduced in the later diagnostic/full/focused
+input checks, and no keyboard-code change is claimed as its fix. The diagnostic
+run instead exposed the stale expectation that echo could write terminal-private
+data. The smoke now asserts that delegated cross-app write remains denied, with
+successful public-file writes as a positive control. Candidate build passes.
+Successful/resolved disposable media is cleaned; reports, GDB snapshots and logs
+remain.
+
+Runtime-foundation sequencing (2026-10-22): candidate build and C/C++ ABI,
+threads-state, process-memory exhaustion, waitset and real-broker host checks pass.
+The new focused acceptance harness passes end to end under TCG in
+`execution-acceptance/20261022T152404.535828Z/session.json`: one CPU reports zero
+migrations, four CPUs report three, both process suites pass, then normal console
+and focused input/wake pass. Successful disposable media is cleaned; reports and
+build caches remain. The default KVM invocation fails before building because
+/dev/kvm does not exist here; native acceptance remains open and the command is
+ready for the user host. There is no silent fallback or timing-quality gate in
+this correctness runner.
+
+The reproducible pinned QuickJS audit reports 55 whole-core host external symbols
+and fails the separate target-header probe at stdlib.h. Host-only audit objects
+remain under bin/tests and never enter candidate boot. Missing C/math/allocator,
+time and reusable host adapters are explicit prerequisites in sdk/runtime-port.md;
+the JavaScript shell remains deferred. No new runtime or handler was installed.
+
+User-host native execution acceptance (2026-10-22):
+`execution-acceptance/20261022T163746.733190Z/session.json` passes with explicit KVM
+on Ryzen 5 5500U. Its source fingerprint
+`f5a15f8ab067536a393d8ae9c599d9d3ea9a57e98faa6e3a023ee1e8e5297250`
+matches the workspace before this documentation-only closure. One CPU reports
+zero migrations; four CPUs report three with memory/SIMD guards intact.
+Both process suites pass forced termination, blocked/dispatched caller cleanup,
+late-reply rejection, resource-baseline restoration and keyboard hotplug/restart.
+The normal four-CPU console and focused input/wake reports also pass. TSC is
+active at approximately 2.0964 GHz in both process runs. This closes priority 1
+for the tested AMD KVM configuration, not performance bounds, Intel hardware or
+physical devices. The earlier isolated input timeout was not reproduced here;
+its original cause remains unclassified. Runtime foundations remain the next
+implementation work; the JavaScript shell gate stays closed.

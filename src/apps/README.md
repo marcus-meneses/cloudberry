@@ -24,7 +24,8 @@ The trusted build-generated `/system/handlers/applications.resources/initial.bin
 builds. Disposable tests replace it; no test app enters the candidate catalog.
 The C startup helper preserves argv/cwd; standard handles are obtained from the
 system library, not copied from parent numeric tokens. Ordinary apps receive
-kernel-selected initial placement and remain single-threaded/pinned thereafter.
+kernel-selected runnable-pressure placement and remain single-threaded. Eligible
+user-return contexts may migrate; kernel/provider affinity stays explicit.
 
 See [terminal behavior and limits](terminal/README.md) and [stream contracts](../sdk/streams.md).
 

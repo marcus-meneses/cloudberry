@@ -539,10 +539,14 @@ try:
     send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':'d'}],.06)
     wait_for(lambda text:text.count('/ >')>=(10 if a.fixtures else 8))
     prompts=10 if a.fixtures else 8
-    type_line('echo saved-history => /system/root/_apps/terminal.data/history')
+    # Terminal can prepare its own private file, but delegating the stream must
+    # not let echo write another application's private data. Public writes above
+    # are the positive control; the protected file stays empty.
+    type_line('echo private-write-probe => /system/root/_apps/terminal.data/delegated-write')
     wait_for(lambda text:text.count('/ >')>=prompts+1)
-    type_line('cat /system/root/_apps/terminal.data/history')
-    wait_for(lambda text:'\nsaved-history\n' in text and text.count('/ >')>=prompts+2)
+    type_line('cat /system/root/_apps/terminal.data/delegated-write')
+    wait_for(lambda text:text.count('/ >')>=prompts+2)
+    assert screen().count('private-write-probe')==1, 'delegated writer bypassed private-data policy'
     type_line('ls /system/root/_apps')
     wait_for(lambda text:text.count('/ >')>=prompts+3)
     assert '_index' not in screen(), 'default listing exposed hidden index'

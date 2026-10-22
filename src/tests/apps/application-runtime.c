@@ -19,14 +19,15 @@ static uint64_t now(void){cb_handle_t io;CHECK(cb_system_get_handle(CB_IO_NAME,s
 __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     struct cb_application_start start;CHECK(cb_application_start(packet,&start) && start.header.argc);const char *self=cb_application_argument(&start,0);
     if(same(self,"runtime-context")){CHECK(start.header.argc==3 && same(cb_application_argument(&start,1),"hello world") && same(cb_application_argument(&start,2),"CaseSensitive"));CHECK(start.header.cwd_bytes==14);for(unsigned i=0;i<14;++i)CHECK(start.cwd[i]==(unsigned char)"/example space"[i]);cb_handle_t memory;CHECK(cb_system_get_handle(CB_MEMORY_NAME,sizeof(CB_MEMORY_NAME)-1,&(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,1,0,&memory)==CB_DENIED);cb_exit(0);}
+    if(same(self,"runtime-stubborn")){for(;;)__asm__ volatile("pause");}
     if(same(self,"runtime-fault")){__asm__ volatile("ud2");cb_exit(99);}
     if(same(self,"runtime-cooperative")){uint64_t bytes;CHECK(cb_system_receive(frame,sizeof(frame),&bytes,0)==CB_OK);struct cb_delivery_header d;COPY(&d,frame,sizeof(d));CHECK(d.call.flags==(CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT) && !d.call.handle && d.call.operation==CB_HANDLE_RELEASE);cb_exit(7);}
     CHECK(cb_system_get_handle(CB_APPLICATIONS_NAME,sizeof(CB_APPLICATIONS_NAME)-1,&(struct cb_interface_id)CB_APPLICATIONS_INTERFACE_ID,1,0,&applications)==CB_OK);
     const char *context_args[]={"runtime-context","hello world","CaseSensitive"};
     if(same(self,"runtime-abandon")){uint64_t child;CHECK(launch("runtime-context",context_args,3,"/example space",&child)==CB_OK);cb_exit(0);}
-    if(same(self,"runtime-attacker")){CHECK(start.header.argc==2);uint64_t pid=0;const char *p=cb_application_argument(&start,1);for(;*p;++p){CHECK(*p>='0'&&*p<='9');pid=pid*10+*p-'0';}struct cb_application_ref ref={pid};for(unsigned op=CB_APPLICATION_INFO;op<=CB_APPLICATION_RELEASE;++op)CHECK(call(op,&ref,sizeof(ref))==CB_DENIED);const char *args[]={"true"};CHECK(launch("true",args,1,"/",NULL)==CB_DENIED);cb_exit(0);}
+    if(same(self,"runtime-attacker")){CHECK(start.header.argc==2);uint64_t pid=0;const char *p=cb_application_argument(&start,1);for(;*p;++p){CHECK(*p>='0'&&*p<='9');pid=pid*10+*p-'0';}struct cb_application_ref ref={pid};for(unsigned op=CB_APPLICATION_INFO;op<=CB_APPLICATION_RELEASE;++op)CHECK(call(op,&ref,sizeof(ref))==CB_DENIED);CHECK(call(CB_APPLICATION_TERMINATE,&ref,sizeof(ref))==CB_DENIED);const char *args[]={"true"};CHECK(launch("true",args,1,"/",NULL)==CB_DENIED);cb_exit(0);}
     CHECK(same(self,"runtime-probe"));uint64_t child;
-    const char *truth[]={"true"};CHECK(launch("not-installed",truth,1,"/",NULL)==CB_DENIED);CHECK(launch("applications",truth,1,"/",NULL)==CB_DENIED);CHECK(launch("../true",truth,1,"/",NULL)==CB_BAD_REQUEST);
+    const char *truth[]={"true"};CHECK(launch("not-installed",truth,1,"/",NULL)==CB_NOT_FOUND);CHECK(launch("applications",truth,1,"/",NULL)==CB_DENIED);CHECK(launch("../true",truth,1,"/",NULL)==CB_BAD_REQUEST);
     uint64_t peers[3];for(unsigned i=0;i<3;++i)CHECK(launch("runtime-context",context_args,3,"/example space",&peers[i])==CB_OK);for(unsigned i=0;i<3;++i){wait_for(peers[i],CB_APPLICATION_EXITED,0);drop(peers[i]);}
     const char *launcher[]={"launch","true"};CHECK(launch("launch",launcher,2,"/",&child)==CB_OK);wait_for(child,CB_APPLICATION_EXITED,0);drop(child);
     const char *fault[]={"runtime-fault"};CHECK(launch("runtime-fault",fault,1,"/",&child)==CB_OK);struct cb_application_status status=wait_for(child,CB_APPLICATION_FAULTED,134);CHECK(status.fault_vector==6);drop(child);
@@ -36,6 +37,7 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     char digits[24],decimal[24];unsigned count=0;uint64_t n=child;do{digits[count++]='0'+n%10;n/=10;}while(n);for(unsigned i=0;i<count;++i)decimal[i]=digits[count-1-i];decimal[count]=0;const char *attacker[]={"runtime-attacker",decimal};uint64_t attack;CHECK(launch("runtime-attacker",attacker,2,"/",&attack)==CB_OK);wait_for(attack,CB_APPLICATION_EXITED,0);drop(attack);
     CHECK(call(CB_APPLICATION_STOP,&ref,sizeof(ref))==CB_OK && call(CB_APPLICATION_STOP,&ref,sizeof(ref))==CB_OK);status=wait_for(child,CB_APPLICATION_EXITED,7);CHECK(status.stop_requested);
     CHECK(invoke(CB_APPLICATION_WAIT,&ref,sizeof(ref),0,timed.request,1,1)==CB_OK);drop(child);
+    const char *stubborn[]={"runtime-stubborn"};CHECK(launch("runtime-stubborn",stubborn,1,"/",&child)==CB_OK);ref.process=child;CHECK(call(CB_APPLICATION_TERMINATE,&ref,sizeof(ref))==CB_OK);status=wait_for(child,CB_APPLICATION_EXITED,CB_APPLICATION_TERMINATED);CHECK(status.stop_requested);CHECK(call(CB_APPLICATION_TERMINATE,&ref,sizeof(ref))==CB_OK);drop(child);
     const char *abandon[]={"runtime-abandon"};CHECK(launch("runtime-abandon",abandon,1,"/",&child)==CB_OK);wait_for(child,CB_APPLICATION_EXITED,0);drop(child);
     CHECK(cb_system_release(applications)==CB_OK);cb_exit(0);
 }

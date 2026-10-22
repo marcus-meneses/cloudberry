@@ -56,6 +56,10 @@
     {
       "name": "inthandle.user_fault",
       "symbol": "inthandle_surface_user_fault"
+    },
+    {
+      "name": "inthandle.user_return",
+      "symbol": "inthandle_surface_user_return"
     }
   ]
 }

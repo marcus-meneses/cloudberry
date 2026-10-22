@@ -18,12 +18,13 @@ switches, including timer preemption and yield/block/exit, select the saved root
 dispatchers restore the kernel root. These are still kernel-mode threads, not
 user processes. See [private address spaces](mem-spaces.md).
 
-`threads.run(budget)` dispatches at most budget contexts pinned to the calling
-CPU. Runnable records rotate to the list tail. Each dispatch arms a 2 ms local
+`threads.run(budget)` dispatches at most budget contexts assigned to the calling
+CPU (including eligible user contexts stolen from an overloaded CPU). Runnable records rotate to the list tail. Each dispatch arms a 2 ms local
 APIC one-shot. Normal C contexts save RSP, callee-saved registers and flags;
 hardware entry also saves the interrupted general-register frame. An IRQ can
 suspend a thread and return to its dispatcher; the retained interrupt frame is
-restored when that same CPU resumes it. CPU-local current/dispatcher transitions
+restored when the context resumes. Kernel continuations stay on their original CPU;
+clean user-return continuations may migrate as described below. CPU-local current/dispatcher transitions
 run with IRQs disabled. No stack is freed while still executing.
 
 `threads.control(op,id,out)` supports:
@@ -39,7 +40,9 @@ run with IRQs disabled. No stack is freed while still executing.
 - CURRENT: current thread ID, zero on the dispatcher.
 - INFO: copy ID, process owner, CPU, lifecycle state, dispatch count and result.
 - REAP: free an exited thread's stack, copied payload and record; stale IDs fail.
-- READY: number of runnable threads pinned to the caller CPU; used before idle.
+- READY: local runnable work plus eligible remote work; used before idle.
+- SELECT_CPU: choose runnable/running pressure first, with live occupancy as tie-breaker.
+- LOAD(cpu,out): runnable/running/blocked/live counts, migrations and wait metrics.
 
 Yield/block fail outside a thread, with IRQs disabled or inside a kernel critical
 section. BLOCKING is published before switching away; BLOCKED is committed under
@@ -54,8 +57,8 @@ only EXITED can be reaped. REAPING claims exclusive cleanup ownership while
 stack unmapping/sanitization runs outside the thread-list lock; failed cleanup
 returns the record to EXITED for retry. If mem reports a failed allocation rollback, create
 propagates its failure/cleanup ID for retry through mem.stack_free with the same
-owner; a failed result is never a thread ID. There is no forced cancellation, process termination,
-join API or migration yet. Process IDs are ownership
+owner; a failed result is never a thread ID. There is no arbitrary kernel-thread cancellation. THREAD_WAIT is a kernel join;
+user-process termination and eligible user-context migration are described below. Process IDs are ownership
 metadata; scheduler.remove_process removes callbacks, not threads.
 
 `threads.tick(frame)` is timer's allocation-free IRQ hook, after EOI. It suspends
@@ -78,7 +81,7 @@ shared mutable state and declare their IRQ/reentrancy contract.
 The BSP event loop dispatches one thread context per step. Separate workers
 execute scheduler callbacks and IRQ notifications; long callbacks do not retain
 the event stack. Both BSP and AP idle paths arm blocked-thread deadlines. AP loops
-run their pinned threads and idle with adjacent STI/HLT when empty. READY is
+run assigned threads (including eligible stolen user work) and idle with adjacent STI/HLT when empty. READY is
 checked under disabled IRQs to avoid losing a wake before BSP idle. Empty loops
 have no recurring polling timer.
 
@@ -117,3 +120,30 @@ or failure invalidates the cumulative measurement. Totals saturate on overflow.
 No new timestamp reads are added to the dispatch path: accounting uses its
 existing dispatch/return clock samples. This includes the thread's syscall time,
 not CPU-local dispatcher work or other kernel threads.
+
+
+## Placement and conservative user migration
+
+Request ABI3 appends `flags`; `THREAD_MIGRATABLE` requires a process-owned private
+address space. ABI1/2 and zero flags preserve affinity. Applications opts ordinary
+apps into process ABI3; boot providers, the lifecycle manager and kernel workers
+remain pinned. Each process still has one user thread.
+
+Timer delivery from CPL3 marks preemption pending, acknowledges the timer and
+returns through the device callback. Inthandle then invokes the boot-pinned
+`process.user_return` hook with IF clear. `THREAD_USER_RETURN` suspends at this
+clean boundary, where no device callback remains on the saved stack. A dispatcher
+may steal only a runnable, opted-in boundary context detached from **every** CPU.
+RUNNING/BLOCKING/EXITING, blocked waits and arbitrary kernel continuations never
+move. Source root restoration, xstate save, accounting closure and current/active
+stack clearing precede visibility to another dispatcher. Target dispatch restores
+xstate, address-space ownership and TSS RSP0 before the user return completes.
+
+Idle CPUs pull from donors with more than one runnable/running context. Publication
+of an eligible detached continuation wakes an idle CPU; no periodic idle polling
+is added. Pressure is snapshotted once per decision rather than rescanning the
+whole list for each candidate. Explicit affinity remains unchanged. Monotonic
+`clock.now_ns` supplies accounting/deadlines through either qualified shared TSC
+or guarded HPET; migration does not require activating an unqualified TSC.
+`THREAD_LOAD` exposes per-CPU counts, incoming/outgoing migrations, wait samples,
+total wait and maximum wait. These are diagnostics, not hard latency guarantees.

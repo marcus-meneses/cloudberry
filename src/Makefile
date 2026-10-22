@@ -972,7 +972,7 @@ $(BUILD)/kmodules/process-entry.o: kmodules/shared/process-entry.S
 $(BUILD)/kmodules/process.elf: $(BUILD)/kmodules/process-pic.o $(BUILD)/kmodules/process-entry.o $(BUILD)/kmodules/process.exports.o kmodules/shared/module.ld
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack -Wl,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
 
-$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe-handle-stress.inc tests/probe-applications.inc tests/handles-profile.h tests/probe.h kmodules/shared/process.h
+$(BUILD)/kmodules/probe-process-pic.o: tests/probe-process.c tests/probe-handle-stress.inc tests/probe-applications.inc tests/probe-execution.inc tests/handles-profile.h tests/probe.h kmodules/shared/process.h
 	@mkdir -p $(@D)
 	$(CC) $(MODULE_CFLAGS) -c $< -o $@
 $(BUILD)/tests/apps/process-probe.elf: tests/apps/process.c sdk/application.ld
@@ -1385,3 +1385,14 @@ test-installer-maintenance-crash: build installer-fixture $(addprefix $(BUILD)/t
 .PHONY: test-installer-user-lifecycle
 test-installer-user-lifecycle: build installer-fixture
 	python3 tests/installer-user-lifecycle.py $(BUILD)
+
+$(BUILD)/tests/apps/execution-probe.elf: tests/apps/execution.c sdk/system.c sdk/service.h sdk/stream.h sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+_test-process-boot: $(BUILD)/tests/apps/execution-probe.elf
+
+.PHONY: test-process-memory
+test-process-memory:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/process-memory.c -Wl,--gc-sections -o $(BUILD)/tests/process-memory
+	$(BUILD)/tests/process-memory

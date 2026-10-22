@@ -71,12 +71,18 @@ static int benchmark(const struct kernel_surfaces *hub,uint64_t filesystem,struc
 }
 #include "probe-handle-stress.inc"
 #include "probe-applications.inc"
+#include "probe-execution.inc"
 struct kernel_surface_result probe_process_call(MODULE_ARGS){
     MODULE_UNUSED();struct probe_process *probe=(void *)a;const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
     kernel_surface_call boot_info=kernel_surface_find(hub,"bootstrap.info"),load=kernel_surface_find(hub,"process.load"),start=kernel_surface_find(hub,"process.start"),info=kernel_surface_find(hub,"process.info"),reap=kernel_surface_find(hub,"process.reap"),control=kernel_surface_find(hub,"threads.control"),clock=kernel_surface_find(hub,"clock.now_ns"),pages=kernel_surface_find(hub,"mem.pages_info");
     CHECK(clock_diagnostic(hub,0));
     struct bootstrap_info volume;uint64_t boot_deadline=CALL(clock,0,0,0).value+UINT64_C(30000000000);
     for(;;){CHECK(!CALL(boot_info,&volume,0,0).status);if(volume.state==BOOTSTRAP_READY)break;CHECK(volume.state!=BOOTSTRAP_FAILED && volume.state!=BOOTSTRAP_DISCONNECTED && CALL(clock,0,0,0).value<boot_deadline);CHECK(!CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
+    /* READY publishes the selected volume before its startup worker returns.
+       Join that existing worker, then let INFO reap it before baseline capture. */
+    struct kernel_surface_result startup_worker=CALL(kernel_surface_find(hub,"bootstrap.start"),0,0,0);CHECK(!startup_worker.status);
+    if(startup_worker.value){struct thread_info worker;if(!CALL(control,THREAD_INFO,startup_worker.value,&worker).status)CHECK(!CALL(control,THREAD_WAIT,startup_worker.value,0).status);}
+    CHECK(!CALL(boot_info,&volume,0,0).status);
     struct mem_pages_info before,after;CHECK(!CALL(pages,&before,0,0).status);
     struct process_request request={.abi=1,.filesystem=volume.filesystem.cookie,.path="/system/kmodules/drivers/invalid.elf",.stack_bytes=65536};
     CHECK(CALL(load,&request,0,0).status);
@@ -128,7 +134,12 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
     request.argument=2;struct kernel_surface_result hot=CALL(load,&request,0,0);CHECK(!hot.status && admit_file(hub,volume.filesystem.cookie,hot.value,policies[0]) && !CALL(start,hot.value,0,0).status);
     for(;;){CHECK(!CALL(inspect,"/@keyboard",&publication,1).status);if(publication.pending)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     text("READY keyboard unplug\n");
-    for(;;){struct io_provider_info current;CHECK(!CALL(io_info,keyboard.value,&current,0).status && !CALL(inspect,"/@keyboard",&publication,1).status);if(current.device!=original.device && current.active && publication.pending && publication.last_operation==2)break;CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
+    /* The HID link may be absent between removal and reattachment. The
+       provider/publication must survive, but a device-info gap is expected. */
+    for(;;){struct io_provider_info current={0};struct kernel_surface_result device=CALL(io_info,keyboard.value,&current,0);struct process_info provider;
+        CHECK(!CALL(info,keyboard.value,&provider,0).status && provider.state==PROCESS_RUNNING && !CALL(inspect,"/@keyboard",&publication,1).status);
+        if(!device.status && current.device!=original.device && current.active && publication.pending && publication.last_operation==2)break;
+        CHECK(CALL(clock,0,0,0).value<deadline && !CALL(control,THREAD_BLOCK_UNTIL,CALL(clock,0,0,0).value+1000000,0).status);}
     text("READY keyboard replug input\n");CHECK(finished(hub,hot.value,deadline,probe));
     CHECK(!CALL(decommission,keyboard.value,0,0).status && !CALL(decommission,keyboard.value,0,0).status);
     struct bootstrap_apps_info app_status;CHECK(!CALL(kernel_surface_find(hub,"bootstrap.apps_info"),&app_status,0,0).status && app_status.state==4);
@@ -150,6 +161,7 @@ struct kernel_surface_result probe_process_call(MODULE_ARGS){
         CHECK(!CALL(decommission,keyboard.value,0,0).status && finished(hub,keyboard.value,deadline,probe) && !CALL(kernel_surface_find(hub,"bootstrap.release"),keyboard.value,0,0).status);
         CHECK(!CALL(pages,&after,0,0).status && after.stacks==stack_baseline);
     }
+    CHECK(execution_test(hub,volume.filesystem.cookie,probe));
     CHECK(benchmark(hub,volume.filesystem.cookie,probe));
     CHECK(handle_stress(hub,volume.filesystem.cookie,probe));
     CHECK(application_runtime(hub,volume.filesystem.cookie,probe));

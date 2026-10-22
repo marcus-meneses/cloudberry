@@ -64,6 +64,10 @@
     {
       "name": "handles.revoke",
       "symbol": "handles_surface_revoke"
+    },
+    {
+      "name": "handles.terminate",
+      "symbol": "handles_surface_terminate"
     }
   ]
 }

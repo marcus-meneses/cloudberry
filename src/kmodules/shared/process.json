@@ -80,6 +80,14 @@
     {
       "name": "process.active",
       "symbol": "process_surface_active"
+    },
+    {
+      "name": "process.user_return",
+      "symbol": "process_surface_user_return"
+    },
+    {
+      "name": "process.terminate",
+      "symbol": "process_surface_terminate"
     }
   ]
 }

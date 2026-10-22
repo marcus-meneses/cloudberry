@@ -15,10 +15,11 @@ addresses or execute kernel methods directly. The C contract lives in
 - `wait`: synchronous to the caller. The handler retains the delivered request
   and continues receiving other calls; completion events trigger its reply.
 - `stop`: cooperative base-release notification, idempotent. No forced unwind.
+- `terminate`: manifest-authorized forced termination of an owned child at a clean user-return boundary; exit status 137.
 - `release`: relinquish a terminal result record. Running children return BUSY.
 - `list`: enumerate installed ordinary application names with an opaque cursor.
 
-Info/wait/stop/release require the process ID to belong to the authenticated
+Info/wait/stop/terminate/release require the process ID to belong to the authenticated
 caller. IDs are not authority. The broker supplies PID, installation identity
 and grant time in its admission context; caller payload cannot replace them.
 Completion follows full thread exit, rather than the earlier process exit flag.
@@ -52,8 +53,8 @@ completion event. They do not poll the scheduler or allocate in an IRQ callback.
 Physical process reap and notification/result release are distinct operations.
 If the manager exits, the kernel requests cooperative stop for all surviving
 children and retains their resources until quiescence. An uncooperative child can
-therefore delay manager reap. Automatic manager recovery and forced termination
-remain separate work; running stacks are never freed as an emergency shortcut.
+therefore delay manager reap. Automatic manager recovery remains separate work; explicit child termination
+is available, while manager-exit stop policy remains cooperative. running stacks are never freed as an emergency shortcut.
 
 ## Installation and current limits
 
@@ -77,7 +78,8 @@ work. Launch ABI 1.1 supplies explicit parent-owned standard-stream endpoints. T
 kernel validates and delegates new child-local handles before start, intersecting
 the child manifest. The system library retrieves these bindings; raw parent
 tokens are cleared from child startup data. Processes still have one user thread;
-the kernel selects its initial CPU by live process occupancy and then pins it. This handler and the device
+the kernel selects its initial CPU by runnable pressure, and eligible user contexts
+may migrate at clean user-return boundaries. This handler and the device
 I/O execution path currently run on CPU0. The catalog and handler child/wait
 records are dynamically sized. Built-ins are immutable and boot-pinned;
 supplemental registrations use refcounted immutable generations.
@@ -140,3 +142,12 @@ registered resource directory, alongside the existing private `data` resolver.
 The manager delegates list/launch decisions through IO; identity home provisioning
 queries that registry too. Installed app scope, metadata and lifetime rules are
 specified by the [installer](../../handlers/installer/README.md).
+
+
+`terminate` is operation 10, appended without renumbering existing operations.
+It requests authority revocation and forced user exit, never an asynchronous unwind
+of kernel work. Dispatched side effects may still commit. Completion/wait remains
+available and execution must reach thread EXITED before reap. STOP remains graceful
+and no automatic escalation policy is implied. See [process mechanics](../../kmodules/shared/process.md)
+and [handler recovery](../recovery.md). Core binding is a scheduler mechanism;
+this provider remains pinned to CPU0.

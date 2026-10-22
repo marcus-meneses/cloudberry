@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused actual NVMe/AHCI boot plus GPT/ext4, using only disposable media."""
-import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket,struct
+import argparse,json,pathlib,shutil,subprocess,sys,time,uuid,datetime,fcntl,socket,struct,os
 p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--backend',choices=('nvme','sata','usb'),required=True);p.add_argument('--cpus',type=int,default=1);p.add_argument('--iommu',choices=('none','intel','amd'),default='none');p.add_argument('--accel',choices=('tcg','kvm'),default='tcg');p.add_argument('--cpu',default='max');p.add_argument('--disk-success',action='store_true');p.add_argument('--disk-modules',action='store_true');p.add_argument('--bootstrap',action='store_true');p.add_argument('--duplicate',action='store_true');p.add_argument('--multi',action='store_true');p.add_argument('--spaces-only',action='store_true');p.add_argument('--process-only',action='store_true');p.add_argument('--profile-handles',action='store_true');p.add_argument('--hub-only',action='store_true');args=p.parse_args()
 if args.profile_handles and not 1<=args.cpus<=4:p.error('test-only handle profiling supports one to four CPUs')
 root=pathlib.Path(__file__).resolve().parents[2];build=args.build.resolve()
@@ -30,7 +30,7 @@ try:
         for name in ('stress-client.json','stress-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
         shutil.copy2(build/'tests/apps/handle-bench.elf',fixture/'handle-bench.elf')
         for name in ('bench-client.json','bench-server.json'):shutil.copy2(root/'src/tests/apps'/name,fixture/name)
-        shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
+        shutil.copy2(build/'tests/apps/execution-probe.elf',fixture/'execution-probe.elf');shutil.copy2(build/'tests/apps/process-probe.elf',fixture/'process-probe.elf');shutil.copy2(build/'tests/apps/handles-probe.elf',fixture/'handles-probe.elf');shutil.copy2(root/'src/tests/apps/handles-server.json',fixture/'handles-server.json');shutil.copy2(root/'src/tests/apps/handles-client.json',fixture/'handles-client.json');(fixture/'invalid.elf').write_bytes(b'not an ELF')
     if args.process_only:
         shutil.copytree(build/'src-handler-bundles/keyboard',fixture/'keyboard',dirs_exist_ok=True);shutil.copy2(build/'tests/apps/keyboard-client.elf',fixture/'keyboard-client.elf')
         plain=fixture/'startup-check';plain.mkdir(exist_ok=True)
@@ -74,7 +74,9 @@ try:
         else:cmd+=['-device','ich9-ahci,id=controller1','-device','ide-hd,bus=controller1.0,drive=data0','-device','ide-hd,bus=controller1.1,drive=data1','-device','ide-hd,bus=ide.0,drive=data2']
     if args.iommu!='none':cmd+=['-device',f'{args.iommu}-iommu,intremap=off']
     qmp_path=test/'qmp.sock';qmp_path.unlink(missing_ok=True)
-    if args.process_only:cmd+=['-qmp',f'unix:{qmp_path},server=on,wait=off']
+    if args.process_only:
+        for name in ('gdb.sock','diagnostics.log','diagnostics-error.txt','execution-state.json'):(test/name).unlink(missing_ok=True)
+    if args.process_only:cmd+=['-qmp',f'unix:{qmp_path},server=on,wait=off','-gdb',f'unix:{test / "gdb.sock"},server=on,wait=off']
     log=test/'boot.log'
     with log.open('w') as output:
         process=subprocess.Popen(['bash',str(root/'src/boot/run-qemu.sh')]+cmd,cwd=root/'src',stdout=output,stderr=subprocess.STDOUT)
@@ -103,7 +105,21 @@ try:
                 if process.poll() is not None:raise RuntimeError(f'QEMU exited {process.returncode}: {text[-2000:]}')
                 time.sleep(.1)
             else:raise RuntimeError('boot timeout: '+log.read_text()[-3000:])
+        except BaseException:
+            # Snapshot before stopping QEMU. Diagnostics never execute guest
+            # methods and never turn a failed functional check into success.
+            if args.process_only and process.poll() is None:
+                try:
+                    commands=test/'diagnostics.gdb'
+                    commands.write_text('file '+str(build/'tests/src-process-kernel.elf')+'\nset pagination off\nset print elements 12\nset architecture i386:x86-64\ntarget remote '+str(test/'gdb.sock')+'\nsource '+str(root/'src/tests/console-diagnostics.py')+'\ndetach\nquit\n')
+                    with (test/'diagnostics.log').open('w') as diagnostic:
+                        subprocess.run(['gdb-multiarch','-nx','-batch','-x',str(commands)],env=dict(os.environ,CB_DIAG_BUILD=str(build),CB_DIAG_REPORT=str(test/'execution-state.json')),stdout=diagnostic,stderr=subprocess.STDOUT,timeout=30,check=True)
+                except Exception as error:(test/'diagnostics-error.txt').write_text(str(error))
+            raise
         finally:
+            if args.process_only:
+                if qmp_file:qmp_file.close()
+                if qmp:qmp.close()
             process.terminate()
             try:process.wait(timeout=5)
             except subprocess.TimeoutExpired:process.kill();process.wait()
@@ -123,4 +139,4 @@ try:
     subprocess.run([sys.executable,str(root/'src/tests/boot-image.py'),str(image)],check=True)
     result['status']='passed';result['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat();save();report.write_text(json.dumps(result,indent=2)+'\n');print('PASS isolated',('protected processes' if args.process_only else 'address spaces' if args.spaces_only else 'dynamic hub' if args.hub_only else args.backend+' boot/GPT/ext4 block backend'),'; report:',report)
 except BaseException as error:
-    result.update(status='failed',reason=str(error)[-4096:]);save();raise
+    result.update(status='failed',reason=str(error)[-4096:]);save();report.write_text(json.dumps(result,indent=2)+'\n');raise

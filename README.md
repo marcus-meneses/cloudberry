@@ -201,7 +201,7 @@ Completion becomes reapable only after leaving the thread stack.
 [SMP](kmodules/shared/smp.md) establishes per-CPU GDT/TSS/IDT, guarded dispatcher and
 emergency stacks, calibrated local timers, wake IPIs and TLB acknowledgements.
 The BSP transfers from the retained Limine stack to its managed event stack.
-APs execute pinned threads and idle on interrupts. The BSP event loop dispatches
+APs execute assigned threads and eligible stolen user contexts, and idle on interrupts. The BSP event loop dispatches
 one thread context per step; separate preemptible workers execute scheduler
 callbacks and IRQ notifications. Blocked-thread deadlines arm local timers; empty
 queues without deadlines stop their timers.
@@ -221,8 +221,9 @@ baseline, with latency/scalability work still needed; it is not unrestricted
 kernel preemption. New kmodules must define their critical/reentrancy contracts.
 Threads eagerly preserve x87/SSE and available AVX through the shared xstate
 kmodule; dispatcher/ISR infrastructure still builds with mgeneral-regs-only.
-Forced thread cancellation, CPU hotplug, migration and load
-balancing are not implemented. USB device/hub hotplug is implemented.
+Arbitrary kernel-thread cancellation and CPU hotplug are not implemented.
+Ordinary user contexts support conservative migration at clean return boundaries;
+explicit provider/kernel affinity remains fixed. USB device/hub hotplug is implemented.
 
 Single-CPU clock selection prefers a validated invariant TSC with HPET fallback.
 SMP requires a healthy HPET reference, validates per-CPU frequency with HPET
@@ -280,8 +281,8 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 
 | Area | Implemented | Remaining boundary |
 | --- | --- | --- |
-| Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
-| Applications | Privileged userland lifecycle, versioned installed-app registry, signed local install/remove/upgrade, per-user/global scopes, stable identity and private data | Pinned development issuer; no running-app upgrades or forced termination or automatic manager recovery |
+| Execution | Preemptible threads, SMP, xstate, static ELF ring-3 processes, safe user-boundary migration, explicit termination and owned reap | One user thread per process; no user-thread/TLS API, demand growth, dynamic linking or arbitrary kernel-thread cancellation |
+| Applications | Privileged userland lifecycle, versioned installed-app registry, signed local install/remove/upgrade, per-user/global scopes, stable identity and private data | Pinned development issuer; no running-app upgrades or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Built-in and signed runtime installation bindings; one boot input domain; no general approval UI, automatic rebind, vows or C++ wrappers |
 | Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU or window/compositor model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
@@ -315,7 +316,7 @@ separates broker work, copies, blocking and handoff; it is absent from the candi
 and materially affects timings. The current performance/concurrency follow-up is
 closed; physical and native Intel acceptance remain open. Application lifecycle
 work now adds an installed userland launcher, argv/cwd startup metadata, deferred
-waits, cooperative stop and owner-scoped retained results. Isolated four-CPU
+waits, cooperative stop, explicit owner-scoped user termination and retained results. Isolated four-CPU
 AMD-host KVM lifecycle correctness acceptance passes with stable qualified TSC.
 See the
 [applications provider](handlers/applications/README.md) and [built-in apps](apps/README.md).
@@ -425,6 +426,7 @@ src/
 │   ├── hid-report.c
 │   └── hid-report.h
 ├── handlers/
+│   ├── recovery.md
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
 │   ├── installer/ (README.md, installer.c, bundle.h, health.inc, permissions.inc, files.inc, store.inc, operations.inc, manifest.json, provider.cnf, vendor/monocypher/)
 │   ├── sessions/ (README.md, sessions.c, manifest.json, provider.cnf)
@@ -720,6 +722,7 @@ src/
 ├── sdk/
 │   ├── service.h
 │   ├── stream.h
+│   ├── runtime-port.md
 │   ├── streams.md
 │   ├── application.h
 │   ├── application.ld
@@ -728,6 +731,8 @@ src/
 ├── tests/
 │   ├── offline-update.py
 │   ├── persistent-sessions.py
+│   ├── execution-acceptance.py / execution-acceptance.md
+│   ├── runtime-audit.py
 │   ├── console-boot.py
 │   ├── raster.c
 │   ├── graphics-present.c
@@ -735,6 +740,7 @@ src/
 │   ├── streams.c
 │   ├── waitset.c
 │   ├── monitor-accounting.c
+│   ├── process-memory.c
 │   ├── process-samples.c
 │   ├── io-credentials.c
 │   ├── process-credentials.c
@@ -753,7 +759,7 @@ src/
 │   ├── hid-fixtures.h
 │   ├── filesystem-backends.c
 │   ├── usb-endpoints.c
-│   ├── apps/
+│   ├── apps/ (includes isolated execution.c migration/termination probe)
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
 │   │   ├── application-runtime.c
@@ -867,6 +873,7 @@ src/
 │   ├── process-boot.c
 │   ├── provider-definition.c
 │   ├── process-elf.c
+│   ├── probe-execution.inc
 │   ├── probe-process.c
 │   ├── probe-applications.inc
 │   ├── probe-handle-stress.inc
@@ -1164,7 +1171,8 @@ owner-authorized repair/removal, while an untrusted registry stays restricted.
 Upgrade/repair preserve prior denials unless a permission subset is explicitly approved.
 Only a pinned host development issuer is supported; this is not Secure Boot or a
 public package trust system. There is no provider installation, running-app upgrade,
-network repository, dependency solver or forced termination in this milestone.
+network repository or dependency solver in this milestone. Active uninstall/upgrade
+still requires an inactive target; installer does not automatically kill it.
 See [installer](handlers/installer/README.md), [CLI](apps/install/README.md),
 [filesystem layout](maps/filesystem.md) and [development media](tools/development-images.md).
 
@@ -1186,3 +1194,13 @@ replaced through bootstrap restore. The focused provider test exercises actual
 kernel admission as well as injected index/journal failures.
 `make -C src test-installer-user-lifecycle` checks per-user V2 approval reductions
 through upgrade, reboot and offline candidate update on disposable media.
+
+
+Ordinary applications now use runnable-pressure placement and conservative
+migration of detached user-return continuations. Kernel workers and boot providers
+retain affinity. Manifest-authorized `applications.terminate` exits an owned child
+at a safe boundary, with kernel work drained before reclamation. It is separate
+from cooperative STOP and session-close policy. No userland interrupt-control
+escape hatch is provided, including for root or privileged handlers.
+
+Runtime port readiness is tracked in [the foundation audit](src/sdk/runtime-port.md). The JavaScript shell stays deferred until its required foundations pass. Focused native execution acceptance: `./scripts/check-execution-kvm.sh`; see [acceptance instructions](src/tests/execution-acceptance.md).

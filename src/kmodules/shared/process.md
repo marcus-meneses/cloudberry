@@ -5,7 +5,7 @@ from an already selected ext4 filesystem into owned lower-half pages. Code is
 RX, data/stack RW/NX; writable executable pages, overlapping LOAD pages,
 interpreter/dynamic/TLS segments, malformed ranges and noncanonical addresses
 are refused. Empty segments are ignored only when their file size is also zero.
-Each process has one CPU-pinned preemptible thread, a guarded kernel execution
+Each process has one preemptible thread, a guarded kernel execution
 stack and a separate guarded kernel-entry stack. User stack size is supplied by
 trusted bootstrap policy (64 KiB default), committed eagerly; demand growth,
 TLS, dynamic linking, conventional argv/environment and multi-threaded processes are
@@ -50,7 +50,9 @@ Fixtures never enter candidate media.
 Local acceptance (TCG): one-CPU/no-IOMMU run `c4c028b695ed409a848b6700b11e4037` and
 four-CPU/VT-d run `1d3609b7d8d24e84ac89c2c8f9ece5f9` pass. The final four-CPU
 probe also verifies NT-flag sanitization across the user gate. Pure ELF decoder
-checks pass under UBSan. Native KVM/physical user-entry acceptance remains open.
+checks pass under UBSan. User-host AMD KVM user-entry, migration, termination and
+cleanup acceptance passes with one/four CPUs in execution session
+`20261022T163746.733190Z`; physical hardware/native Intel CPU remain separate.
 
 `process.check` validates at most a 16 KiB message range without copying.
 `memory_alloc` and `memory_free` are trusted owner-thread mechanisms behind the
@@ -124,7 +126,8 @@ Provider-owned records track parent sessions and owner-exit cleanup.
 missing/reaped intermediates fail closed. Keyboard uses this predicate through
 restricted IO to nest focus without allowing unrelated input takeover.
 Session 0 is the root boot domain. Credential replacement remains separate from
-session membership; no forced termination or existing-thread migration is added.
+session membership. Closing a session still requests cooperative stop; it does not
+automatically invoke the separate explicit termination operation.
 
 
 Atomic credential operation 4 takes cb_identity_home plus groups/home bytes. It
@@ -147,3 +150,30 @@ handler separately closes recorded descendant session subtrees. UID 0 cannot be
 the account-revocation target. Closed processes cannot replace their credentials
 or home, including a previously dispatched authentication transition. Finished
 processes are skipped during retries; failures remain distinct from a live drain.
+
+
+## Explicit termination and migration boundaries
+
+Process request ABI3 appends `flags`. `PROCESS_MIGRATABLE` opts ordinary application
+execution into clean user-return migration; ABI1/2 and zero flags retain affinity.
+INFO and SAMPLE report the thread's actual current assignment rather than its
+initial load CPU. Kernel continuations, including blocked syscalls, stay pinned
+until a later clean user boundary. There is no multi-threaded user process yet.
+
+`process.terminate(PID)` is trusted kernel control over user processes only. It
+sets a termination request, revokes acquisitions/publications, wakes broker/stream
+waits and interrupts copied provider calls without claiming their side effects
+were rolled back. It wakes the target CPU. On a clean return to CPL3, the process
+hook replaces the return frame with the existing normal kernel exit continuation,
+reporting exit status 137 (`CB_APPLICATION_TERMINATED`). Kernel code is never
+asynchronously unwound: running file workers and other retained kernel work must
+return normally first. Cleanup follows IO/handle exit, thread EXITED and owned
+reap. Repeated requests for a still-recorded terminal process are harmless.
+
+`/@applications.terminate` is separately manifest-authorized and owner-scoped:
+only the authenticated launcher can terminate its own child. The manager-bound IO
+operation cannot be acquired as a bypass by another ordinary application. STOP
+remains the graceful notification; no automatic timeout/escalation policy is added.
+
+Userland, including root and privileged providers, receives no CLI/STI or IOPL
+escape hatch. Facilities requiring direct interrupt masking belong in kmodules.

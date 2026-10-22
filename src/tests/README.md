@@ -706,12 +706,15 @@ src/
 ├── sdk/
 │   ├── service.h
 │   ├── stream.h
+│   ├── runtime-port.md
 │   ├── streams.md
 │   ├── application.h
 │   ├── application.ld
 │   ├── system.c
 │   └── system.h
 ├── tests/
+│   ├── execution-acceptance.py / execution-acceptance.md
+│   ├── runtime-audit.py
 │   ├── console-boot.py
 │   ├── raster.c
 │   ├── graphics-present.c
@@ -1030,3 +1033,5 @@ and independent filesystem checks. Fault code is compiled only into test ELFs.
 `console-boot.py --installer-phase upgrade --fixtures` checks active-target refusal
 and normal replacement; rescue/quarantine phases use offline-edited copied images.
 Reports and exact acceptance paths are recorded in the current roadmap.
+
+Runtime port readiness is tracked in [the foundation audit](../../src/sdk/runtime-port.md). The JavaScript shell stays deferred until its required foundations pass. Focused native execution acceptance: `./scripts/check-execution-kvm.sh`; see [acceptance instructions](../../src/tests/execution-acceptance.md).

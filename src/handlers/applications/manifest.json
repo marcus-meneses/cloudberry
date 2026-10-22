@@ -19,7 +19,8 @@
         "process_release",
         "process_sample",
         "process_data",
-        "registry"
+        "registry",
+        "process_terminate"
       ]
     },
     {
@@ -34,7 +35,8 @@
         "list",
         "processes",
         "data",
-        "resources"
+        "resources",
+        "terminate"
       ]
     }
   ]

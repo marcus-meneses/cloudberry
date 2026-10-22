@@ -171,7 +171,7 @@ application bundles and publishes supplemental registrations.
 
 ## Installed application lifecycle
 
-`applications.h` defines launch/info/wait/stop/release frames for `/@applications`.
+`applications.h` defines launch/info/wait/stop/terminate/release frames for `/@applications`.
 `installations.h` defines the immutable OS catalog; `sdk/application.h` validates
 readonly argv/cwd startup data. `admission.h` decodes the broker-generated caller
 PID, installation ID and grant time. No payload field can replace those identities.
@@ -293,3 +293,28 @@ The V2 registry persists revisions and effective grants; legacy entries retain
 revision 1 semantics. Permission changes apply at next launch, without live handle
 revocation. Recovery state 1 permits explicit quarantine repair/removal only; state
 2 (untrusted or uncertain) refuses mutations. See the installer provider contract.
+
+
+`/@applications.terminate` (operation 10) is separately manifest-authorized and
+restricted to the authenticated launcher's own children. Graceful `stop` remains
+operation 4. Termination reports `CB_APPLICATION_TERMINATED` (137) through ordinary
+completion after the kernel returns through a safe user boundary and owned cleanup;
+there is no forced kernel-stack unwind. Kernel manager IO appends
+`process_terminate` without renumbering existing operations. See process.md and the
+application provider contract for draining and unknown side effects.
+
+Existing asynchronous facilities are SUBMIT/COLLECT/WAIT/ABANDON. WAIT combines
+owned request completions and stream readiness with an absolute deadline, including
+a deadline-only wait. SUBMIT currently accepts userland-provider calls; kernel
+stream operations use their existing blocking/nonblocking/readiness path. File
+readiness indicates stream availability, not completion of a future disk operation.
+These mechanisms are foundations for runtime adapters, not missing event-loop
+infrastructure. General user threads/TLS, public page-management/JIT contracts,
+networking and richer public file operations remain separate extensions.
+
+The [runtime foundation audit](../sdk/runtime-port.md) identifies the implemented
+mechanisms, missing C/math support and host adapters for a pinned QuickJS profile.
+The JavaScript shell remains gated on those foundations. `/@memory` publishes only
+allocate/free; operation 3 is reserved and no longer declared as callable RESIZE.
+Runtime realloc must preserve its original allocation on failure using a user
+allocator over these primitives.

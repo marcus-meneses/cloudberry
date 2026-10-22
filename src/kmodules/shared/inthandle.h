@@ -25,6 +25,9 @@ enum inthandle_delivery { INTHANDLE_CPU_ENTRY=0, INTHANDLE_DEFERRED=1 };
  * nmi_mask(0/1): set mask and return previous value; 2 queries without change.
  * init establishes masked NMI before IDT activation, then enables it. */
 /* user_stack(top): IF=0 CPU-local TSS RSP0; user_fault(surface_name): one
- * boot-pinned synchronous CPL3 fault sink. NMI/DF/MCE remain fatal. */
+ * boot-pinned synchronous CPL3 fault sink. NMI/DF/MCE remain fatal.
+ * user_return(surface_name): one boot-pinned IF-clear hook after a normal IRQ/
+ * syscall callback has returned and before CPL3 iret. CPU-local device callback
+ * continuations are gone before the hook may suspend/migrate user execution. */
 void inthandle_dispatch(struct inthandle_frame *frame);
 #endif

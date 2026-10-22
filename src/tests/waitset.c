@@ -80,6 +80,15 @@ int main(void){
     call=(struct cb_call_header){.handle=factory->id,.operation=CB_STREAM_PIPE};assert(stream_call(1,&call,NULL,&pair,&actual)==CB_OK);pipe_reader=capability(1,pair.reader);pipe_writer=capability(1,pair.writer);
     /* Full writer must wake when the last reader disappears (broken pipe). */
     pipe_writer->stream->used=CB_PIPE_CAPACITY;item=(struct cb_wait_item){.kind=CB_WAIT_WRITE,.handle=pair.writer};handoff=close_reader;assert(wait_any(policy(1),&item,sizeof(item),0,&ready)==CB_OK);drop_capability(pipe_writer);
+    /* Forced caller termination returns UNKNOWN for dispatched work, wakes the
+       caller, and preserves records until ordinary gate/exit cleanup. */
+    call=(struct cb_call_header){.version={sizeof(call),1,0},.handle=cap->id,.interface=id,.operation=1};
+    submit_again(&call,&request);pending->dispatched=1;pending->provider=2;pending->waiter=77;
+    assert(!handles_surface_terminate(1,0,0,0,0,0).status && policy(1)->revoked && pending->done && !pending->completed);
+    struct cb_reply_header killed;memcpy(&killed,pending->reply,sizeof(killed));assert(killed.status==CB_REVOKED && killed.outcome==CB_OUTCOME_UNKNOWN && owned_request(1,request)==pending);
+    drop_request(pending);policy(1)->revoked=0;
+    submit_again(&call,&request);pending->dispatched=1;pending->provider=2;pending->waiter=77;
+    late.request=request;remaining=0;assert(!handles_surface_terminate(1,0,0,0,0,0).status && pending->failure==CB_RESOURCE_FAILURE);remaining=-1;
     assert(!handles_surface_exit(1,0,0,0,0,0).status && !handles_surface_exit(2,0,0,0,0,0).status);assert(!state.caps && !state.requests && !state.policies && !handle_waiters);while(state.publications){struct publication *p=state.publications;assert(!p->refs);p->dead=1;p->kernel=0;drop_publication(p);}assert(!blocks);
-    puts("PASS wait-any: deferred replies, spurious wakes, ownership, full-set validation, deadlines, pipe progress/EOF/broken pipe and cleanup");return 0;
+    puts("PASS wait-any: forced caller termination preserves UNKNOWN and wakes under OOM;  deferred replies, spurious wakes, ownership, full-set validation, deadlines, pipe progress/EOF/broken pipe and cleanup");return 0;
 }

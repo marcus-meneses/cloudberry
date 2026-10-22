@@ -8,7 +8,7 @@ static long blocks,budget=-1;static unsigned reaped,reject_admission;static cons
 static struct kernel_surface_result alloc_stub(MODULE_ARGS){MODULE_UNUSED();if(!budget)return module_result(0,0);if(budget>0)--budget;void *p=calloc(b,c);if(p)++blocks;return module_result((uintptr_t)p,p!=NULL);}
 static struct kernel_surface_result free_stub(MODULE_ARGS){MODULE_UNUSED();assert(blocks>0);--blocks;free((void *)b);return module_result(1,1);}
 static struct kernel_surface_result cpu_stub(MODULE_ARGS){MODULE_UNUSED();return module_result(0,1);}
-static struct kernel_surface_result load_stub(MODULE_ARGS){MODULE_UNUSED();const struct process_request *r=(const void *)a;assert(r->abi==2 && !strcmp(r->path,expected_path) && r->filesystem==7 && r->startup_bytes==24);return module_result(99,1);}
+static struct kernel_surface_result load_stub(MODULE_ARGS){MODULE_UNUSED();const struct process_request *r=(const void *)a;assert(r->abi==3 && !strcmp(r->path,expected_path) && r->filesystem==7 && r->startup_bytes==24);return module_result(99,1);}
 static struct kernel_surface_result admit_stub(MODULE_ARGS){MODULE_UNUSED();const struct handle_policy *p=(const void *)a;assert(p->process==99 && p->bytes && p->identity.installation_id[0]);return module_result(1,!reject_admission);}
 static struct kernel_surface_result reap_stub(MODULE_ARGS){MODULE_UNUSED();assert(a==99);++reaped;return module_result(1,1);}
 static uint8_t caller_ids[2][16];

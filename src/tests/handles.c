@@ -92,8 +92,16 @@ int main(void){
     struct stream *closed_pipe=allocate(sizeof(*closed_pipe)+CB_PIPE_CAPACITY);assert(closed_pipe);struct capability *closed_reader=stream_endpoint(policy(2),cap->publication,closed_pipe,CB_STREAM_READ);assert(closed_reader);struct cb_call_header closed_call={.handle=closed_reader->id,.operation=CB_STREAM_READ,.payload_bytes=sizeof(struct cb_stream_read)};struct cb_stream_read closed_read={1,0};size_t actual=0;unsigned char read_byte;
     assert(stream_call(2,&closed_call,&closed_read,&read_byte,&actual)==CB_REVOKED);drop_capability(closed_reader);
 
+    admission=(struct handle_policy){.process=4,.manifest=client_manifest,.bytes=sizeof(client_manifest)-1};assert(!CALL(handles_surface_admit,&admission,0,0).status);
+    assert(acquire(policy(4),ask,sizeof(ask),&token)==CB_OK);struct capability *old_cap=capability(4,token);uint64_t old_epoch=old_cap->publication->epoch;
     assert(!handles_surface_decommission(1,0,0,0,0,0).status && cap->publication->dead);
     assert(receive(policy(1),0,&notification,&notification_bytes,CB_FRAME_LIMIT)==CB_OK);copy_bytes(&delivered,notification,sizeof(delivered));assert(!delivered.call.handle && delivered.call.operation==CB_HANDLE_RELEASE && delivered.call.flags==(CB_CALL_SYSTEM_EVENT|CB_CALL_PROVIDER_DELIVERY));release(notification);
-    assert(!CALL(handles_surface_exit,1,0,0).status && cap->publication->dead);assert(!CALL(handles_surface_exit,2,0,0).status);assert(!state.policies && !state.caps && !state.publications && !state.requests && blocks==0);
-    puts("PASS handles: publication policy, duplicate names, scoped reflection, cross-process token rejection, OOM rollback and owner cleanup");return 0;
+    assert(!CALL(handles_surface_exit,1,0,0).status && cap->publication->dead);
+    admission=(struct handle_policy){.process=3,.manifest=server_manifest,.bytes=sizeof(server_manifest)-1};assert(!CALL(handles_surface_admit,&admission,0,0).status);
+    assert(publish(policy(3),bytes,offset,&token)==CB_OK && acquire(policy(4),ask,sizeof(ask),&token)==CB_OK);struct capability *fresh=capability(4,token);
+    assert(fresh && fresh->publication->pid==3 && fresh->publication->epoch!=old_epoch && old_cap->publication->pid==1 && old_cap->publication->dead && permitted(fresh->operations,"read",4) && !permitted(fresh->operations,"secret",6));
+    struct cb_call_header stale={.version={sizeof(stale),1,0},.handle=old_cap->id,.interface=interface,.operation=1};unsigned char *stale_reply=NULL;size_t stale_bytes;
+    assert(invoke(policy(4),(void *)&stale,sizeof(stale),&stale_reply,&stale_bytes,0)==CB_PROVIDER_FAILED);struct cb_reply_header stale_header;copy_bytes(&stale_header,stale_reply,sizeof(stale_header));assert(stale_header.outcome==CB_NOT_DISPATCHED && stale_header.provider_epoch==old_epoch);release(stale_reply);drop_request(owned_request(4,stale_header.request));
+    assert(!CALL(handles_surface_exit,2,0,0).status && !CALL(handles_surface_exit,3,0,0).status && !CALL(handles_surface_exit,4,0,0).status);assert(!state.policies && !state.caps && !state.publications && !state.requests && blocks==0);
+    puts("PASS handles: publication policy, duplicate names, scoped reflection, cross-process token rejection, OOM rollback, fresh restart epoch/stale-cap failure and owner cleanup");return 0;
 }

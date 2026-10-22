@@ -56,7 +56,7 @@ static struct kernel_surface_result load_installation(const struct installation_
     if(record->flags==CB_INSTALL_MANAGER && runtime.manager)return module_result(0,0);
     char *path=allocate(record->path_bytes+1);if(!path)return module_result(0,0);cb_install_copy(path,name+record->name_bytes,record->path_bytes);
     uint32_t cpu=record->cpu;if(record->flags&CB_INSTALL_APPLICATION){struct kernel_surface_result selected=CALL(runtime.control,THREAD_SELECT_CPU,0,0);if(selected.status){release(path);return module_result(0,0);}cpu=selected.value;}
-    struct process_request request={.abi=2,.filesystem=runtime.filesystem,.path=path,.cpu=cpu,.stack_bytes=record->stack_bytes,.startup=packet,.startup_bytes=bytes};
+    struct process_request request={.abi=3,.flags=(record->flags&CB_INSTALL_APPLICATION)?PROCESS_MIGRATABLE:0,.filesystem=runtime.filesystem,.path=path,.cpu=cpu,.stack_bytes=record->stack_bytes,.startup=packet,.startup_bytes=bytes};
     struct kernel_surface_result loaded=CALL(runtime.load,&request,0,0);release(path);if(loaded.status){if(loaded.value)(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}
     struct handle_policy policy={.process=loaded.value,.manifest=name+record->name_bytes+record->path_bytes,.bytes=record->manifest_bytes,.installation_owner=entry->owner==CB_REGISTRY_SYSTEM?0:entry->owner};cb_install_copy(policy.identity.installation_id,record->installation,16);
     if(CALL(runtime.admit,&policy,0,0).status){(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}
@@ -131,13 +131,14 @@ int applications_invoke(struct io_invocation *r){
         r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_process_query) || r->capacity<sizeof(struct cb_process_sample))return 1;
         kernel_surface_call sample=kernel_surface_find(runtime.hub,"process.sample");if(!sample){r->status=CB_UNAVAILABLE;return 1;}struct kernel_surface_result result=CALL(sample,r->input,r->output,0);r->status=result.status?CB_RESOURCE_FAILURE:CB_OK;if(!result.status && result.value)r->actual=sizeof(struct cb_process_sample);return 1;
     }
-    if(r->operation<CB_IO_PROCESS_LAUNCH || r->operation>CB_IO_PROCESS_RELEASE)return 0;
+    if((r->operation<CB_IO_PROCESS_LAUNCH || r->operation>CB_IO_PROCESS_RELEASE) && r->operation!=CB_IO_PROCESS_TERMINATE)return 0;
     r->status=CB_DENIED;if(!runtime.catalog || r->process!=runtime.manager || CALL(runtime.cpu,CPU_CURRENT,0,0).value)return 1;
     if(r->operation==CB_IO_PROCESS_LAUNCH){uint64_t flags=lock();++runtime.registry_loaders;unlock(flags);r->status=launch(r);flags=lock();--runtime.registry_loaders;unlock(flags);return 1;}
     if(r->bytes!=sizeof(struct cb_application_ref)){r->status=CB_BAD_REQUEST;return 1;}struct cb_application_ref ref;cb_install_copy(&ref,r->input,sizeof(ref));
     uint64_t flags=lock();struct child *child=runtime.children;while(child && child->process!=ref.process)child=child->next;unlock(flags);if(!child){r->status=CB_BAD_REQUEST;return 1;}
     if(r->operation==CB_IO_PROCESS_RELEASE){r->status=child->reaped && !child->worker?CB_OK:CB_BUSY;if(r->status==CB_OK)release_child(child);return 1;}
-    if(r->operation==CB_IO_PROCESS_STOP)r->status=CALL(runtime.stop,child->process,0,0).status?CB_RESOURCE_FAILURE:CB_OK;
+    if(r->operation==CB_IO_PROCESS_TERMINATE){kernel_surface_call terminate=kernel_surface_find(runtime.hub,"process.terminate");r->status=!terminate?CB_UNAVAILABLE:CALL(terminate,child->process,0,0).status?CB_RESOURCE_FAILURE:CB_OK;}
+    else if(r->operation==CB_IO_PROCESS_STOP)r->status=CALL(runtime.stop,child->process,0,0).status?CB_RESOURCE_FAILURE:CB_OK;
     else {struct process_info info;if(!child->reaped && (CALL(runtime.info,child->process,&info,0).status || (info.state!=PROCESS_EXITED && info.state!=PROCESS_FAULTED))){r->status=CB_BUSY;return 1;}r->status=dispose(child,1);}return 1;
 }
 cb_status_t applications_exit(uint64_t pid){

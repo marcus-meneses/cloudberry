@@ -2,8 +2,10 @@
 
 `smp.kmod` starts the CPUs supplied by Limine's MP response. Bootstrap passes
 that response through, rather than interpreting the CPU inventory in main.
-Logical CPU0 is the BSP; other indices follow firmware order. No hotplug, thread
-migration or load balancing is implemented.
+Logical CPU0 is the BSP; other indices follow firmware order. Ordinary user
+contexts can migrate at clean return boundaries through conservative idle stealing.
+Kernel/provider affinity remains fixed; CPU hotplug and general kernel-context
+migration are unsupported. See threads.md for the eligibility contract.
 
 `prepare(hub,heap,response)` allocates the CPU table, startup records, private
 GDT/TSS/IDT storage and four guarded 32 KiB stack bodies per CPU: dispatcher,

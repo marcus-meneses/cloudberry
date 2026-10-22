@@ -10,7 +10,7 @@
 #include "../../kernel/cpu.h"
 struct page {struct page *next;struct mem_pages frame;uint64_t address;uint32_t flags,mapped;};
 struct allocation {struct allocation *next;uint64_t address,bytes;};
-struct process {char *home;uint64_t parent,session,session_parent,session_closed,session_stop_failed;struct cb_credentials credentials;uint64_t *groups;struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom,user_pages;char name[256];uint32_t name_bytes,name_truncated;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp;};
+struct process {char *home;uint64_t parent,session,session_parent,session_closed,session_stop_failed;struct cb_credentials credentials;uint64_t *groups;struct process *next;struct allocation *allocations;uint64_t memory_next,stack_bottom,user_pages;char name[256];uint32_t name_bytes,name_truncated;struct process_info info;struct page *pages;struct mem_stack trap;uint64_t entry,sp,argument,saved_rsp,flags,kill_requested;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;uint64_t serial;struct process *head;
     kernel_surface_call alloc,free,pages_alloc,pages_free,stack_alloc,stack_free,space_create,space_destroy,space_map,create,control,entry_stack,stat,read,cpu;} state;
 struct kernel_surface_result process_surface_check(MODULE_ARGS);
@@ -62,13 +62,15 @@ struct kernel_surface_result process_surface_init(MODULE_ARGS){
     BIND(alloc,"mem.calloc");BIND(free,"mem.free");BIND(pages_alloc,"mem.pages_alloc");BIND(pages_free,"mem.pages_free");BIND(stack_alloc,"mem.stack_alloc");BIND(stack_free,"mem.stack_free");BIND(space_create,"mem.space_create");BIND(space_destroy,"mem.space_destroy");BIND(space_map,"mem.space_map");BIND(create,"threads.create");BIND(control,"threads.control");BIND(entry_stack,"threads.entry_stack");BIND(stat,"ext4_fs.stat");BIND(read,"ext4_fs.read");BIND(cpu,"cpu.control");
 #undef BIND
     kernel_surface_call claim=kernel_surface_find(hub,"inthandle.claim"),fault=kernel_surface_find(hub,"inthandle.user_fault");
-    if(!claim || !fault || claim(128,(uintptr_t)"process.gate",0,1,0,0).status || CALL(fault,"process.fault",0,0).status)return module_result(0,0);
+    kernel_surface_call user_return=kernel_surface_find(hub,"inthandle.user_return");
+    if(!user_return || CALL(user_return,"process.user_return",0,0).status || !claim || !fault || claim(128,(uintptr_t)"process.gate",0,1,0,0).status || CALL(fault,"process.fault",0,0).status)return module_result(0,0);
     state.heap=b;state.hub=hub;return module_result(1,1);
 }
 #include "ext4-fs.h"
 struct kernel_surface_result process_surface_load(MODULE_ARGS){
     MODULE_UNUSED();const struct process_request *r=(const void *)a;
-    if(!state.hub || !r || (r->abi!=1 && r->abi!=2) || !r->path || !r->filesystem)return module_result(0,0);
+    if(!state.hub || !r || (r->abi!=1 && r->abi!=2 && r->abi!=3) || !r->path || !r->filesystem)return module_result(0,0);
+    if(r->abi==3 && (r->flags&~PROCESS_MIGRATABLE))return module_result(0,0);
     struct ext4_stat st;if(CALL(state.stat,r->filesystem,r->path,&st).status || !st.bytes || st.bytes>SIZE_MAX)return module_result(0,0);
     unsigned char *image=allocate(st.bytes);if(!image)return module_result(0,0);
     struct kernel_surface_result got=state.read(r->filesystem,(uintptr_t)r->path,0,(uintptr_t)image,st.bytes,0);
@@ -82,9 +84,9 @@ struct kernel_surface_result process_surface_load(MODULE_ARGS){
     release(image);
     if(ok)ok=!CALL(state.stack_alloc,65536,p->info.id,&p->trap).status;
     if(!ok)return load_failure(p);
-    p->credentials.generation=1; /* Explicit root bootstrap identity. */
+    p->flags=r->abi==3?r->flags:0;p->credentials.generation=1; /* Explicit root bootstrap identity. */
     p->argument=r->argument;
-    if(r->abi==2){
+    if(r->abi>=2){
         if(!r->startup || !r->startup_bytes || r->startup_bytes>SIZE_MAX-4095){return load_failure(p);}
         uint64_t rounded=(r->startup_bytes+4095)&~UINT64_C(4095),va=65536;int gap=0;
         while(va<p->stack_bottom-4096 && rounded<=p->stack_bottom-4096-va){uint64_t next=va;for(struct page *page=p->pages;page;page=page->next)if(page->address>=va && page->address-va<rounded && page->address+4096>next)next=page->address+4096;if(next==va){gap=1;break;}va=next;}
@@ -95,7 +97,7 @@ struct kernel_surface_result process_surface_load(MODULE_ARGS){
 }
 struct kernel_surface_result process_surface_start(MODULE_ARGS){
     MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);if(!p || p->info.state!=PROCESS_READY || p->session_closed){unlock(flags);return module_result(0,0);}p->info.state=PROCESS_LOADING;unlock(flags);
-    struct thread_request r={.abi=2,.cpu=p->info.cpu,.process_id=p->info.id,.address_space=p->info.address_space,.stack_bytes=32768,.entry=(uintptr_t)kernel_surface_find(state.hub,"process.run"),.major=1,.payload={.arguments={(uintptr_t)p}}};
+    struct thread_request r={.abi=3,.flags=(p->flags&PROCESS_MIGRATABLE)?THREAD_MIGRATABLE:0,.cpu=p->info.cpu,.process_id=p->info.id,.address_space=p->info.address_space,.stack_bytes=32768,.entry=(uintptr_t)kernel_surface_find(state.hub,"process.run"),.major=1,.payload={.arguments={(uintptr_t)p}}};
     /* The entry waits for publication if create wakes its AP immediately. */
     struct kernel_surface_result created=CALL(state.create,&r,0,0);flags=lock();if(!created.status)p->info.thread=created.value;__atomic_store_n(&p->info.state,created.status?PROCESS_READY:PROCESS_RUNNING,__ATOMIC_RELEASE);unlock(flags);return created;
 }
@@ -106,6 +108,19 @@ struct kernel_surface_result process_surface_stop(MODULE_ARGS){
     if(p->info.state!=PROCESS_RUNNING){unlock(flags);return module_result(0,0);}unlock(flags);
     kernel_surface_call stop=kernel_surface_find(state.hub,"handles.decommission");if(!stop || CALL(stop,a,0,0).status)return module_result(0,0);
     flags=lock();p=find(a);if(p)p->info.stop_requested=1;unlock(flags);return module_result(1,1);
+}
+/* Request termination, then unwind only at a clean return to user mode.
+ * In-flight kernel work owns its continuation until it returns normally. */
+struct kernel_surface_result process_surface_terminate(MODULE_ARGS){
+    MODULE_UNUSED();uint64_t flags=lock();struct process *p=find(a);
+    if(!p){unlock(flags);return module_result(0,0);}
+    if(p->info.state==PROCESS_EXITED || p->info.state==PROCESS_FAULTED){unlock(flags);return module_result(1,1);}
+    if(p->info.state!=PROCESS_RUNNING){unlock(flags);return module_result(0,0);}
+    p->kill_requested=1;p->info.stop_requested=1;uint64_t thread=p->info.thread;unlock(flags);
+    kernel_surface_call terminate=kernel_surface_find(state.hub,"handles.terminate");
+    if(!terminate || CALL(terminate,a,0,0).status)return module_result(0,0);
+    struct thread_info info;if(!CALL(state.control,THREAD_INFO,thread,&info).status)CALL(state.cpu,CPU_WAKE,info.cpu,0);
+    return module_result(1,1);
 }
 struct kernel_surface_result process_surface_run(MODULE_ARGS){
     MODULE_UNUSED();struct process *p=(void *)a;
@@ -122,6 +137,12 @@ struct kernel_surface_result process_surface_run(MODULE_ARGS){
 }
 static void terminate(struct process *p,struct inthandle_frame *f,uint64_t code){
     p->info.exit_code=code;f->rip=(uintptr_t)process_return;f->rsp=p->saved_rsp;f->cs=8;f->ss=16;f->rflags=2;f->rax=code;
+}
+struct kernel_surface_result process_surface_user_return(MODULE_ARGS){
+    MODULE_UNUSED();struct inthandle_frame *frame=(void *)a;if(!frame || (frame->cs&3)!=3)return module_result(1,1);
+    uint64_t flags=lock();struct process *p=current();if(!p || !p->saved_rsp){unlock(flags);return module_result(0,0);}
+    if(p->kill_requested){p->info.state=PROCESS_EXITED;terminate(p,frame,CB_APPLICATION_TERMINATED);unlock(flags);return module_result(1,1);}
+    unlock(flags);return CALL(state.control,THREAD_USER_RETURN,0,0);
 }
 struct kernel_surface_result process_surface_gate(MODULE_ARGS){
     MODULE_UNUSED();struct inthandle_frame *frame=(void *)a;if(!frame || frame->vector!=128 || (frame->cs&3)!=3)return module_result(0,0);
@@ -145,7 +166,7 @@ struct kernel_surface_result process_surface_fault(MODULE_ARGS){
 }
 struct kernel_surface_result process_surface_info(MODULE_ARGS){
     MODULE_UNUSED();if(!b)return module_result(0,0);uint64_t flags=lock();struct process *p=find(a);
-    if(p){*(struct process_info *)b=p->info;if(p->info.thread){struct thread_info t;if(!CALL(state.control,THREAD_INFO,p->info.thread,&t).status)((struct process_info *)b)->switches=t.switches;}}
+    if(p){*(struct process_info *)b=p->info;if(p->info.thread){struct thread_info t;if(!CALL(state.control,THREAD_INFO,p->info.thread,&t).status){((struct process_info *)b)->switches=t.switches;((struct process_info *)b)->cpu=t.cpu;}}}
     unlock(flags);return module_result(p!=NULL,p!=NULL);
 }
 struct kernel_surface_result process_surface_reap(MODULE_ARGS){
@@ -213,7 +234,7 @@ struct kernel_surface_result process_surface_sample(MODULE_ARGS){
     if(!selected){unlock(flags);return module_result(0,1);}struct cb_process_sample out={.process=selected->info.id,.thread=selected->info.thread,.ceiling=ceiling,.user_bytes=selected->user_pages*4096,.state=selected->info.state,.cpu=selected->info.cpu,.name_bytes=selected->name_bytes,.flags=selected->name_truncated?CB_PROCESS_NAME_TRUNCATED:0};
     if(selected->info.stop_requested)out.flags|=CB_PROCESS_STOP_REQUESTED;
     for(unsigned i=0;i<out.name_bytes;++i)out.name[i]=selected->name[i];
-    struct thread_account_info time;if(!CALL(state.control,THREAD_ACCOUNTING,out.thread,&time).status){out.timestamp_ns=time.timestamp_ns;out.cpu_ns=time.runtime_ns;out.thread_state=time.state;out.cpus=time.cpus;if(time.flags)out.flags|=CB_PROCESS_CPU_VALID;}
+    struct thread_account_info time;if(!CALL(state.control,THREAD_ACCOUNTING,out.thread,&time).status){out.timestamp_ns=time.timestamp_ns;out.cpu_ns=time.runtime_ns;out.thread_state=time.state;out.cpus=time.cpus;out.cpu=time.cpu;if(time.flags)out.flags|=CB_PROCESS_CPU_VALID;}
     if(out.thread){struct thread_info thread;if(!CALL(state.control,THREAD_INFO,out.thread,&thread).status)out.switches=thread.switches;}
     *(struct cb_process_sample *)b=out;unlock(flags);return module_result(1,1);
 }

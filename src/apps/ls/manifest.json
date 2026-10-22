@@ -1,1 +1,1 @@
-{"version": 1, "resources": [{"name": "/@streams", "operations": ["read", "write"]}, {"name": "/@filesystem", "operations": ["list"]}]}
+{"version": 1, "resources": [{"name": "/@streams", "operations": ["read", "write"]}, {"name": "/@filesystem", "operations": ["list"]}, {"name": "/@text", "operations": ["info"]}, {"name": "/@memory", "scope": "self", "operations": ["allocate", "free"]}]}

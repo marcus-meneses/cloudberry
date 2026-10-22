@@ -5,8 +5,8 @@
 #include "timer.h"
 #include "../../kernel/cpu.h"
 struct context {uintptr_t rsp,xstate;uint64_t space,owner;uintptr_t entry_stack;};
-struct thread {struct thread *next;uint64_t joining;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;struct thread_info info;struct thread_account account;kernel_surface_call entry;uintptr_t args[6];};
-struct local {struct context dispatcher;struct thread *current;uint64_t dispatching;struct thread_timing timing;};
+struct thread {struct thread *next;uint64_t joining;struct context context;struct mem_stack stack;uint64_t ready_ns,wake_ns;int ready_valid,wake_pending;unsigned migratable,boundary,preempt;struct thread_info info;struct thread_account account;kernel_surface_call entry;uintptr_t args[6];};
+struct local {struct context dispatcher;struct thread *current;uint64_t dispatching;struct thread_timing timing;uint64_t migrations_in,migrations_out,pressure;};
 static struct {const struct kernel_surfaces *hub;uintptr_t heap;size_t count;uint64_t serial;struct thread *head,*tail;struct local *cpus;struct xstate_info xstate;kernel_surface_call fp_init,fp_save,fp_restore,aligned,cpu,alloc,free,stack_alloc,stack_free,arm,now,space_pin,space_switch,user_stack;} state;
 extern void threads_switch(struct context *,const struct context *) __attribute__((visibility("hidden")));
 static struct kernel_surface_result call(kernel_surface_call fn,uintptr_t a,uintptr_t b,uintptr_t c) {return fn(a,b,c,0,0,0);}
@@ -24,6 +24,8 @@ static void set_status(struct thread *t,uint32_t value) {__atomic_store_n(&t->in
 static void suspend(uint32_t next,uint64_t deadline) {
     struct local *cpu=&state.cpus[current_cpu()];struct thread *t=cpu->current;
     uint64_t saved;__asm__ volatile("pushfq;pop %0;cli":"=r"(saved)::"memory");
+    if(!t->preempt)t->boundary=0;
+    t->preempt=0;
     uint64_t lock_flags=next==THREAD_BLOCKED?enter():0;
     if(next==THREAD_BLOCKED && t->wake_pending) {t->wake_pending=0;leave(lock_flags);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");return;}
     t->wake_ns=deadline;
@@ -60,8 +62,9 @@ struct kernel_surface_result threads_surface_init(MODULE_ARGS) {
 }
 struct kernel_surface_result threads_surface_create(MODULE_ARGS) {
     MODULE_UNUSED();const struct thread_request *r=(const void *)a;
-    if(!state.hub || !r || (r->abi!=1 && r->abi!=2) || r->reserved || r->cpu>=state.count || !r->stack_bytes || r->stack_bytes<4096 || r->payload.reserved ||
+    if(!state.hub || !r || (r->abi!=1 && r->abi!=2 && r->abi!=3) || r->reserved || r->cpu>=state.count || !r->stack_bytes || r->stack_bytes<4096 || r->payload.reserved ||
         (r->payload.bytes && (!r->payload.data || r->payload.data_register>5)) || r->payload.bytes>SIZE_MAX-sizeof(struct thread)-128-state.xstate.bytes) return module_result(0,0);
+    if(r->abi==3 && (r->flags&~THREAD_MIGRATABLE || ((r->flags&THREAD_MIGRATABLE) && (!r->process_id || !r->address_space))))return module_result(0,0);
     int found=0;const struct kernel_surface *methods=kernel_surface_entries(state.hub);
     for(size_t i=0;i<kernel_surface_count(state.hub);++i) if((uintptr_t)methods[i].call==r->entry && methods[i].major==r->major && methods[i].minor>=r->minor) {found=1;break;}
     if(!found) return module_result(0,0);
@@ -73,8 +76,9 @@ struct kernel_surface_result threads_surface_create(MODULE_ARGS) {
     t->context.xstate=((uintptr_t)(t+1)+15+r->payload.bytes+63)&~(uintptr_t)63;
     if(call(state.fp_init,t->context.xstate,state.xstate.bytes,0).status) {call(state.stack_free,t->stack.id,r->process_id,0);call(state.free,state.heap,(uintptr_t)t,0);return module_result(0,0);}
     if(kernel_hub_pin_call(state.hub,(kernel_surface_call)r->entry,1).status){call(state.stack_free,t->stack.id,r->process_id,0);call(state.free,state.heap,(uintptr_t)t,0);return module_result(0,0);}
-    uint64_t address_space=r->abi==2?r->address_space:0;
+    uint64_t address_space=r->abi>=2?r->address_space:0;
     if(address_space && call(state.space_pin,address_space,r->process_id,1).status){kernel_hub_pin_call(state.hub,(kernel_surface_call)r->entry,0);struct kernel_surface_result released=call(state.stack_free,t->stack.id,r->process_id,0);uint64_t cleanup=released.status?t->stack.id:0;call(state.free,state.heap,(uintptr_t)t,0);return module_result(cleanup,0);}
+    t->migratable=r->abi==3 && (r->flags&THREAD_MIGRATABLE);t->boundary=t->migratable;
     t->context.space=address_space;t->context.owner=address_space?r->process_id:0;
     t->info=(struct thread_info){.id=0,.process_id=r->process_id,.cpu=r->cpu,.state=THREAD_RUNNABLE};t->entry=(kernel_surface_call)r->entry;
     for(size_t i=0;i<6;++i)t->args[i]=r->payload.arguments[i];
@@ -111,6 +115,36 @@ static void finish_suspend(struct thread *t,uint64_t ready_time,int ready_valid)
         }
     }
 }
+/* All placement/stealing decisions hold the list lock. Only detached user
+ * return continuations opt in; arbitrary saved kernel continuations stay pinned. */
+static struct thread_load load_cpu(size_t cpu){
+    struct thread_load load={0};
+    for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==cpu){unsigned st=status(t);
+        if(st!=THREAD_EXITED && st!=THREAD_REAPING)++load.live;
+        if(st==THREAD_RUNNABLE)++load.runnable;
+        else if(st==THREAD_RUNNING || st==THREAD_BLOCKING || st==THREAD_EXITING)++load.running;
+        else if(st==THREAD_BLOCKED)++load.blocked;
+    }
+    load.migrations_in=state.cpus[cpu].migrations_in;load.migrations_out=state.cpus[cpu].migrations_out;
+    load.wait_samples=state.cpus[cpu].timing.samples;load.total_wait_ns=state.cpus[cpu].timing.total_wait_ns;load.max_wait_ns=state.cpus[cpu].timing.max_wait_ns;return load;
+}
+/* One O(threads + CPUs) pressure snapshot per scheduling decision. Never
+ * rescan the whole thread list for each steal candidate while IRQs are off. */
+static void refresh_pressure(void){
+    for(size_t i=0;i<state.count;++i)state.cpus[i].pressure=0;
+    for(struct thread *t=state.head;t;t=t->next){unsigned st=status(t);if(t->info.cpu<state.count && (st==THREAD_RUNNABLE || st==THREAD_RUNNING || st==THREAD_BLOCKING || st==THREAD_EXITING))++state.cpus[t->info.cpu].pressure;}
+}
+static uint64_t pressure(size_t cpu){return state.cpus[cpu].pressure;}
+static int detached(const struct thread *t){for(size_t i=0;i<state.count;++i)if(__atomic_load_n(&state.cpus[i].current,__ATOMIC_ACQUIRE)==t)return 0;return 1;}
+static int can_steal(const struct thread *t,size_t cpu){return t->info.cpu!=cpu && t->migratable && status(t)==THREAD_RUNNABLE && detached(t) && t->boundary && pressure(t->info.cpu)>1;}
+static void wake_balance(struct thread *t){if(!t->migratable || !t->boundary || status(t)!=THREAD_RUNNABLE)return;refresh_pressure();if(pressure(t->info.cpu)<2)return;for(size_t i=0;i<state.count;++i)if(i!=t->info.cpu && !pressure(i)){call(state.cpu,CPU_WAKE,i,0);break;}}
+static struct thread *select_thread(size_t cpu,struct thread **previous){
+    refresh_pressure();struct thread *t=state.head,*prev=NULL;
+    while(t && (t->info.cpu!=cpu || status(t)!=THREAD_RUNNABLE)){prev=t;t=t->next;}
+    if(!t){prev=NULL;t=state.head;while(t && !can_steal(t,cpu)){prev=t;t=t->next;}
+        if(t){++state.cpus[t->info.cpu].migrations_out;++state.cpus[cpu].migrations_in;t->info.cpu=cpu;}}
+    *previous=prev;return t;
+}
 struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub || !a || call(state.cpu,CPU_DEPTH,0,0).value) return module_result(0,0);
     struct local *cpu=&state.cpus[current_cpu()];if(cpu->dispatching) return module_result(0,0);cpu->dispatching=1;
@@ -119,17 +153,17 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         call(state.cpu,CPU_IRQ_BEGIN,512,(uintptr_t)threads_surface_run);
         uint64_t flags=enter();struct kernel_surface_result time=call(state.now,0,0,0);
         if(time.status) {leave(flags);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");cpu->dispatching=0;return module_result(0,0);}
-        wake_due(time.value);struct thread *t=state.head,*prev=NULL;
-        while(t && (t->info.cpu!=current_cpu() || status(t)!=THREAD_RUNNABLE)) {prev=t;t=t->next;}
+        wake_due(time.value);struct thread *prev=NULL,*t=select_thread(current_cpu(),&prev);
         if(!t) {leave(flags);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");break;}
         /* Rotate the selected record to the tail for round-robin fairness. */
         if(t!=state.tail) {if(prev)prev->next=t->next;else state.head=t->next;state.tail->next=t;state.tail=t;t->next=NULL;}
         __atomic_store_n(&cpu->current,t,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,t->stack.bottom,t->stack.top);set_status(t,THREAD_RUNNING);++t->info.switches;leave(flags);
         struct kernel_surface_result now=call(state.now,0,0,0);
         if(now.status || now.value>UINT64_MAX-2000000 || call(state.arm,now.value+2000000,0,0).status) {__atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);set_status(t,THREAD_RUNNABLE);cpu->dispatching=0;call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");return module_result(0,0);}
+        uint64_t accounting=enter();
         if(t->ready_valid && now.value>=t->ready_ns) {uint64_t wait=now.value-t->ready_ns;++cpu->timing.samples;cpu->timing.total_wait_ns+=wait;if(wait>cpu->timing.max_wait_ns)cpu->timing.max_wait_ns=wait;}
         else ++cpu->timing.clock_failures;
-        uint64_t accounting=enter();thread_account_begin(&t->account,now.value,!now.status);leave(accounting);
+        thread_account_begin(&t->account,now.value,!now.status);leave(accounting);
         call(state.cpu,CPU_IRQ_END,512,0);
         switch_context(&cpu->dispatcher,&t->context);
         call(state.cpu,CPU_IRQ_BEGIN,512,(uintptr_t)threads_surface_run);
@@ -138,13 +172,19 @@ struct kernel_surface_result threads_surface_run(MODULE_ARGS) {
         uint64_t transition=enter();
         thread_account_end(&t->account,ready_time.value,!ready_time.status);
         __atomic_store_n(&cpu->current,NULL,__ATOMIC_RELEASE);call(state.cpu,CPU_ACTIVE,0,0);
-        finish_suspend(t,ready_time.value,!ready_time.status);
+        finish_suspend(t,ready_time.value,!ready_time.status);wake_balance(t);
         leave(transition);call(state.cpu,CPU_IRQ_END,512,0);__asm__ volatile("push %0;popfq"::"r"(saved):"memory","cc");++done;
     }
     cpu->dispatching=0;return module_result(done,1);
 }
 struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
     MODULE_UNUSED();if(!state.hub) return module_result(0,0);
+    if(a==THREAD_USER_RETURN){
+        /* IF is clear on a clean return to CPL3, after device/syscall callbacks. */
+        if(call(state.cpu,CPU_DEPTH,0,0).value)return module_result(0,0);
+        struct thread *t=state.cpus[current_cpu()].current;if(!t || !t->context.space)return module_result(0,0);
+        if(t->preempt){t->boundary=t->migratable;suspend(THREAD_RUNNABLE,0);}return module_result(1,1);
+    }
     if(a==THREAD_WAIT){
         uint64_t interrupt_flags;__asm__ volatile("pushfq;pop %0":"=r"(interrupt_flags));
         if(!(interrupt_flags&512) || call(state.cpu,CPU_DEPTH,0,0).value)return module_result(0,0);
@@ -162,14 +202,18 @@ struct kernel_surface_result threads_surface_control(MODULE_ARGS) {
         suspend(a==THREAD_YIELD?THREAD_RUNNABLE:THREAD_BLOCKED,a==THREAD_BLOCK_UNTIL?b:0);return module_result(1,1);
     }
     uint64_t flags=enter();
-    if(a==THREAD_SELECT_CPU) {size_t best=0,minimum=SIZE_MAX;for(size_t cpu=0;cpu<state.count;++cpu){size_t load=0;for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==cpu && t->info.process_id && status(t)!=THREAD_EXITED && status(t)!=THREAD_REAPING)++load;if(load<minimum){minimum=load;best=cpu;}}leave(flags);return module_result(best,1);}
+    if(a==THREAD_SELECT_CPU){size_t best=0;struct thread_load minimum=load_cpu(0);
+        for(size_t cpu=1;cpu<state.count;++cpu){struct thread_load load=load_cpu(cpu);uint64_t p=load.runnable+load.running,m=minimum.runnable+minimum.running;
+            if(p<m || (p==m && load.live<minimum.live)){minimum=load;best=cpu;}}
+        leave(flags);return module_result(best,1);}
+    if(a==THREAD_LOAD && b<state.count && c){*(struct thread_load *)c=load_cpu(b);leave(flags);return module_result(1,1);}
     if(a==THREAD_CURRENT) {struct thread *current=state.cpus[current_cpu()].current;uint64_t id=current?current->info.id:0;leave(flags);return module_result(id,1);}
     if(a==THREAD_TIMING && c) {*(struct thread_timing *)c=state.cpus[current_cpu()].timing;leave(flags);return module_result(1,1);}
     if(a==THREAD_DEADLINE) {uint64_t deadline=0;
         for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==current_cpu() && status(t)==THREAD_BLOCKED && t->wake_ns && (!deadline || t->wake_ns<deadline))deadline=t->wake_ns;
         leave(flags);return module_result(deadline,1);
     }
-    if(a==THREAD_READY) {struct kernel_surface_result time=call(state.now,0,0,0);if(time.status){leave(flags);return time;}wake_due(time.value);size_t count=0;for(struct thread *t=state.head;t;t=t->next)if(t->info.cpu==current_cpu() && status(t)==THREAD_RUNNABLE)++count;leave(flags);return module_result(count,1);}
+    if(a==THREAD_READY) {struct kernel_surface_result time=call(state.now,0,0,0);if(time.status){leave(flags);return time;}wake_due(time.value);refresh_pressure();size_t count=0;for(struct thread *t=state.head;t;t=t->next)if((t->info.cpu==current_cpu() && status(t)==THREAD_RUNNABLE) || can_steal(t,current_cpu()))++count;leave(flags);return module_result(count,1);}
     if(a==THREAD_ACCOUNTING && c){
         struct kernel_surface_result now=call(state.now,0,0,0);struct thread_account_info out={.timestamp_ns=now.value,.cpus=state.count,.flags=!now.status};
         if(b){struct thread *sample=state.head;while(sample && sample->info.id!=b)sample=sample->next;if(!sample){leave(flags);return module_result(0,0);}out.runtime_ns=thread_account_value(&sample->account,now.value,!now.status);out.state=status(sample);out.cpu=sample->info.cpu;out.flags=out.flags && !sample->account.invalid && (!sample->account.active || now.value>=sample->account.start);}
@@ -198,6 +242,7 @@ struct kernel_surface_result threads_surface_tick(MODULE_ARGS) {
     MODULE_UNUSED();if(!a || ((const struct inthandle_frame *)a)->vector!=TIMER_VECTOR)return module_result(0,0);
     if(state.hub && state.cpus[current_cpu()].current) {
         if(call(state.cpu,CPU_DEPTH,0,0).value)return module_result(THREAD_TICK_DEFERRED,1);
+        if((((const struct inthandle_frame *)a)->cs&3)==3){state.cpus[current_cpu()].current->preempt=1;return module_result(1,1);}
         suspend(THREAD_RUNNABLE,0);
     }
     return module_result(1,1);

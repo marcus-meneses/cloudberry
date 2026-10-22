@@ -20,7 +20,7 @@ static struct {
     struct binding callbacks[256];
     uint64_t counts[256];
     _Alignas(16) unsigned char emergency[3][8192];
-    kernel_surface_call user_fault;
+    kernel_surface_call user_fault,user_return;
     uint8_t cmos_selector;
     int initialized;
 } state;
@@ -84,6 +84,7 @@ void inthandle_dispatch(struct inthandle_frame *frame) {
     if (frame->vector < 32 || !callback.call) fatal(frame);
     struct kernel_surface_result r=callback.call((uintptr_t)frame,callback.context,0,0,0,0);
     if (r.status) fatal(frame);
+    if((frame->cs&3)==3 && state.user_return && state.user_return((uintptr_t)frame,0,0,0,0,0).status)fatal(frame);
 }
 static uint64_t irq_save(void) {
     uint64_t flags; __asm__ volatile("pushfq; popq %0; cli" : "=r"(flags) :: "memory");return flags;
@@ -218,4 +219,12 @@ struct kernel_surface_result inthandle_surface_user_fault(MODULE_ARGS) {
     const struct kernel_hub_owner *owner=kernel_hub_owner(hub,kernel_surface_owner(hub,(const char *)a));
     if(!owner || !(owner->flags&HUB_OWNER_BOOT_PINNED))return module_result(0,0);
     state.user_fault=kernel_surface_find_version(hub,(const char *)a,1,0);return module_result(1,state.user_fault!=NULL);
+}
+
+struct kernel_surface_result inthandle_surface_user_return(MODULE_ARGS){
+    MODULE_UNUSED();if(!a || state.user_return)return module_result(0,0);
+    const struct kernel_surfaces *hub=(const void *)(uintptr_t)KERNEL_SURFACES_ADDRESS;
+    const struct kernel_hub_owner *owner=kernel_hub_owner(hub,kernel_surface_owner(hub,(const char *)a));
+    if(!owner || !(owner->flags&HUB_OWNER_BOOT_PINNED))return module_result(0,0);
+    state.user_return=kernel_surface_find_version(hub,(const char *)a,1,0);return module_result(1,state.user_return!=NULL);
 }

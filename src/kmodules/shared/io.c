@@ -66,7 +66,7 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     else if((r->operation>=CB_IO_DISPLAY_INFO && r->operation<=CB_IO_DISPLAY_BLIT) || r->operation==CB_IO_DISPLAY_COPY)backend=display;
     else if(r->operation==CB_IO_FILESYSTEM)backend=filesystem;
     else if(r->operation>=CB_IO_PROCESS_LAUNCH && r->operation<=CB_IO_PROCESS_RELEASE)backend=applications;
-    else if(r->operation==CB_IO_PROCESS_SAMPLE || r->operation==CB_IO_PROCESS_DATA)backend=applications;
+    else if(r->operation==CB_IO_PROCESS_SAMPLE || r->operation==CB_IO_PROCESS_DATA || r->operation==CB_IO_PROCESS_TERMINATE)backend=applications;
     if(backend)(void)CALL(backend,r,0,0);
     return module_result(1,1);
 }

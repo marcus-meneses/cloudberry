@@ -222,7 +222,7 @@ struct kernel_surface_result handles_surface_init(MODULE_ARGS){
     const char *memory_names[]={"allocate","free"};
     /* Build relocated pointers at runtime. A large local pointer initializer
        becomes an absolute .rodata pointer table in the flat PIC module. */
-    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access","registry"};
+    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access","registry","process_terminate"};
     const char *io_names[sizeof(io_labels)/sizeof(io_labels[0])];for(size_t i=0;i<sizeof(io_names)/sizeof(io_names[0]);++i)io_names[i]=io_labels[i];
     const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID,stream=CB_STREAM_INTERFACE_ID;const char *stream_names[]={"pipe","read","write"};
     return module_result(1,kernel_publication(CB_MEMORY_NAME,&memory,memory_names,2,1) && kernel_publication(CB_IO_NAME,&io,io_names,sizeof(io_names)/sizeof(io_names[0]),2) && kernel_publication(CB_STREAM_NAME,&stream,stream_names,3,3));
@@ -437,4 +437,14 @@ struct kernel_surface_result handles_surface_revoke(MODULE_ARGS){MODULE_UNUSED()
     for(struct capability *cap=state.caps;cap;cap=cap->next)if(cap->pid==a && cap->stream)stream_wake(cap->stream);
     for(struct handle_waiter *w=handle_waiters;w;w=w->next)if(w->pid==a)wake(w->thread);
     wake(owner->receiver);unlock(flags);return module_result(1,1);
+}
+
+/* Forced user termination wakes copied provider calls without unwinding kernel
+ * continuations. Dispatched work may commit; preserve UNKNOWN until completion. */
+struct kernel_surface_result handles_surface_terminate(MODULE_ARGS){
+    MODULE_UNUSED();struct kernel_surface_result revoked=handles_surface_revoke(a,0,0,0,0,0);if(revoked.status)return revoked;
+    uint64_t flags=lock();for(struct request *r=state.requests;r;r=r->next)if(r->pid==a && !r->done){
+        (void)error_reply(r,CB_REVOKED,r->dispatched?CB_OUTCOME_UNKNOWN:CB_NOT_DISPATCHED);
+        if(!r->dispatched){r->completed=1;r->done=1;}}
+    unlock(flags);return module_result(1,1);
 }
