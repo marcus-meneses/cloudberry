@@ -318,3 +318,12 @@ The JavaScript shell remains gated on those foundations. `/@memory` publishes on
 allocate/free; operation 3 is reserved and no longer declared as callable RESIZE.
 Runtime realloc must preserve its original allocation on failure using a user
 allocator over these primitives.
+
+The [static native SDK](../sdk/README.md) now provides that user allocator,
+Newlib target libc/libm and reusable handle adapters. Public IO appends UTC (38),
+returning signed POSIX seconds, nanoseconds and quality flags in 16 bytes.
+RTC-as-UTC requires explicit boot policy; absence is UNAVAILABLE, never uptime.
+Ordinary IO admission permits self-scoped now_ns/utc/random with manifest grants;
+device/process authority remains restricted. Timers combine existing wait-any
+readiness/deadlines with bounded local callback dispatch. Language-specific
+exceptions, modules and microtasks remain future interpreter integration.

@@ -1,11 +1,12 @@
 # Runtime foundation contract and JavaScript gate
 
-Status: audited 2026-10-22. No JavaScript interpreter, shell, engine library or
-new provider is installed by this milestone. Priority 3 stays deferred until the
-mandatory foundations below have working implementations and validation evidence.
-Native execution acceptance passed on the user AMD KVM host with matching source
-fingerprint (session `20261022T163746.733190Z`); other mandatory foundations remain
-open. Physical hardware and native Intel CPU acceptance are separate.
+Status: runtime foundations implemented 2026-10-22; see [the native SDK](README.md).
+The optional static SDK supplies handle-backed allocation, target Newlib libc/libm,
+startup and reusable C adapters. No engine or shell is installed. The existing
+execution foundation and these new SDK paths passed AMD KVM acceptance, alongside
+focused host/target-link/TCG evidence. The SDK report is
+`81d6f8ba5c2141c9919b0af94846ca7f`, with a matching probe digest and Newlib identity.
+Physical hardware and native Intel CPU acceptance remain separate.
 
 ## Reference profile
 
@@ -38,61 +39,56 @@ headers. Host objects are dependency evidence only; they are never linked into
 the guest. Some whole-core dependencies can disappear with custom hooks/dead-code
 elimination. A successful audit does not satisfy the target-link/guest gate.
 
-## Existing facilities and required work
+## Foundation status
 
-| Requirement | Current source evidence | Required foundation / acceptance |
-| --- | --- | --- |
-| Native execution | `sdk/application.ld`, `application.h`; `process.load` static ELF; preemptible isolated address space | Existing. Keep each app in ring 3; no hub access or interrupt-mask hatch. New ABI needs a separate review. |
-| Allocation | `interfaces/memory.h`, `handles.c:kernel_call`, `process.memory_alloc/free` | Kernel allocate/free exist and commit zeroed pages. Missing user C allocator: aligned suballocation, requested-size metadata, overflow-safe calloc, realloc with old-data retention on failure, usable-size callback and full cleanup. No callable resize exists; operation 3 remains reserved. Do not map one page for every tiny engine object. |
-| C headers and library | SDK currently supplies framing, byte copy, paths and stream helpers; application links use `-nostdlib` | Missing target headers/library for audited externals: strings/memory, formatting, diagnostic FILE/stdio paths and fatal assertions. The pinned core supplies its own sorting and float conversion units. Inventory exact symbols in report; provide tested implementations or documented removal/adaptation of unused core paths. No host glibc objects. |
-| Floating point | `xstate` preserves x87/SSE/qualified AVX; execution tests guard SIMD across preemption/migration | Missing target libm coverage and IEEE edge/rounding tests. Build engine/user math with SSE2-capable flags; existing `-mgeneral-regs-only` app recipe cannot compile general floating-point expressions. Kernel/ISR compilation stays separate. Compiler-runtime helpers must be resolved by the target toolchain. |
-| Stack safety | Guarded process stack reservation, explicit configured app stack size, engine stack-check API | Initialize engine stack limit below the app's configured usable stack with headroom for SDK frames; validate recursion overflow/recovery. Migration retains the virtual stack. No unbounded host-default engine stack assumption. |
-| Monotonic timers | `CB_IO_NOW_NS`, `CB_SYSTEM_WAIT` deadline-only/wait-any, `clock.now_ns` | Mechanisms exist. Missing reusable runtime adapter: nanosecond-to-JS conversion policy, timer ownership, spurious-ready handling, cleanup and deadlines that do not poll. TSC availability is not required. |
-| Wall time / Date | Kernel clock exposes RTC; public IO exposes monotonic now, not a general UTC/calendar service | Missing public UTC snapshot/availability contract and calendar bridge. Monotonic uptime must never masquerade as Unix epoch time. Specify UTC-only behavior initially; any disabled Date functionality must be explicit. RTC absence must have a defined result. |
-| Randomness | `CB_IO_RANDOM` through manifest-authorized IO | Existing entropy mechanism; missing engine-host binding/propagation of unavailable/denied results. Do not substitute a monotonic timestamp for entropy. |
-| stdin/stdout/stderr | `cb_standard`, `stream.h`, `sdk/stream.h`, `streams.md` | Existing directional bindings and EOF/backpressure. Missing runtime adapter: partial transfers, error mapping, binary/text conversion, handle release and readiness integration. Direct keyboard ownership is unnecessary for script byte input. |
-| Files / source modules | `filesystem.h` open/stat/list/mutations, caller-owned streams; `cb_path` | Sequential script/module loading mechanisms exist. Missing adapter for cwd canonicalization, counted UTF-8, complete reads, source lifetime, module cache/cycle/error behavior and grant failures. No private app data without installed identity. Richer seek/truncate/rename/fsync/locking APIs are later extensions unless a specific chosen shell operation requires one. |
-| Program execution | `applications.h` launch/info/wait/stop/terminate/release; launch-time stream and cwd bindings | Existing. Missing typed runtime binding, owned-child results/reaping and handle cleanup. A child launch does not imply the parent can stop another launcher's child. Command parsing/quoting is a shell concern after this gate. |
-| Promises / completion | QuickJS pending-job API; SDK SUBMIT/COLLECT/WAIT/ABANDON | Mechanisms exist; missing user runtime job pump/adapters. Drain ready JS jobs with a budget, collect owned completions, then wait on readiness/deadlines. SUBMIT accepts userland-provider requests; kernel streams use blocking/nonblocking readiness. File readiness is not pending disk-completion notification. Abandoning dispatched work does not cancel its side effect. |
-| Error / authority | `handle.h`, `service.h`, filtered describe, immutable admission, epochs/outcomes | Existing wire contracts. Missing runtime value/error conversion preserving request ID, outcome, payload/trace and 64-bit identity (strings/BigInt, not lossy JS Number). Stale caps require explicit reacquisition; never silently retry UNKNOWN writes. |
-| Resource lifetime | Process termination/draining, app release, provider epochs; `handlers/recovery.md` | Mechanisms exist. Adapter must close streams/requests/timers and release C allocations on normal exit, exception and forced termination. No automatic provider recovery is claimed. |
+| Requirement | Implementation and validation boundary |
+| --- | --- |
+| Native execution | Existing static ELF, guarded stacks, isolated address spaces, preemption and safe user-boundary migration. AMD KVM execution acceptance passed before this SDK; new SDK acceptance is a separate focused command. |
+| Allocation | `heap.h/.c`: shared arenas, aligned allocation, calloc, realloc, usable size, empty-backing return and explicit ownership on backend failure. Public/reentrant libc allocation uses `/@memory`; resize operation 3 stays reserved. Host tests inject OOM and exercise randomized fragmentation, alignment and preservation of usable capacity. |
+| C headers/library | Pinned Newlib 4.5.0.20241231 target libc, custom reentrant handle adapters, startup and assertion termination. SDK sysroot is under bin/sdk, never installed into host/compiler defaults. All 55 audit names resolve in a target static link. This is support for this audit profile, not full POSIX or every Newlib API. |
+| Floating point | Target Newlib libm plus target libgcc; SSE2-capable user compilation. Guest checks exercise transcendentals, NaN/infinity/signed zero, explicit rounding and formatting. Kernel/ISR flags remain separate. Exhaustive ULP/libc conformance is not inferred. |
+| Stack safety | Existing guarded process stacks and explicit installation stack sizes; the isolated C probe uses 512 KiB. The future engine must configure its stack limit below its declared usable stack and test language recursion errors during engine integration. |
+| Monotonic timers | `cb_runtime_now/delay/timer/cancel_timer/poll`, using existing IO now_ns and system wait-any/deadlines. Timer IDs are owned/nonreused, dispatch is budgeted, and due callbacks coexist with ready I/O. No recurring idle polling or new kernel event loop. |
+| Wall time | Appended public UTC snapshot, explicit boot RTC-as-UTC policy, Gregorian conversion, availability/resolution/quality flags and gettimeofday bridge. Missing/false policy or missing RTC returns UNAVAILABLE. Wall time is never fabricated from uptime. No system timezone database; libc defaults to UTC without app TZ configuration. |
+| Randomness | Existing IO hardware randomness is now within the ordinary manifest-authorized self-scope ceiling. Multi-chunk runtime adapter wipes output on failure; no timestamp fallback. A restricted guest app proves denied access still fails. |
+| Streams/files | Checked partial read/write/full-write helpers, canonical counted binary load, trailing NUL outside byte count, and sequential C stdio read/recreate/append. Native probes exercise binary data, EOF, nonblocking readiness, append and ESPIPE. Richer public file APIs remain separate. |
+| Program execution | Runtime launch/child-control/release adapters use the installed application provider; explicit child stream bindings, cwd and owned-child status. Guest probe validates asynchronous completion, ownership denial and an abandoned wait without canceling child execution. |
+| Async completion | Owned SDK SUBMIT/COLLECT/WAIT/ABANDON remain the transport. The runtime exposes submit/collect plus timer/readiness polling; kernel streams retain blocking/nonblocking readiness semantics. Interpreter-specific Promise job draining and source-module caching belong to future engine integration. |
+| Errors/authority | Runtime retains the copied failure frame, request ID/outcome, original payload and trace until the next failure. No automatic UNKNOWN retry, provider rebind, lossy ID conversion or privilege bypass. JS value/exception conversion belongs to future language bindings. |
+| Resource lifetime | Context destruction cancels local timers, refuses live heap/internal requests and releases cached handles. Callers own returned streams/heap buffers/children and external async clients. Process exit uses existing kernel draining/reclamation. Guest probe exercises context destruction and ownership checks. |
 
-## Gate before priority 3
+## Gate before the JavaScript shell
 
-Required completion order:
-
-1. Accept the current execution paths on one/four-CPU KVM (passed on the AMD host,
-   session `20261022T163746.733190Z`). On failure retain the
-   first failure and scheduler/broker/HID snapshot; do not hide it with retries.
-   A single passed run does not certify every hardware/input path.
-2. Supply and test the user allocator and exact target C/math/header dependency
-   set. Prove an isolated static target link with no unresolved host/POSIX imports.
-   Test OOM/overflow/realloc preservation, floating-point edges and stack limits.
-3. Supply the time/UTC contract and reusable Cloudberry host adapters listed
-   above. Validate them using small native probes first: partial I/O and EOF,
-   deadlines, denial, owned launch/wait/release, interruption and cleanup. Native
-   probes remain isolated test fixtures, not default environment apps.
-4. Update this gate with exact artifacts/test reports. Only then add the selected
-   engine and minimal JavaScript shell. Do not let stubs that return success,
-   host-header audit objects or unavailable APIs count as completed foundations.
+1. Existing execution acceptance: passed on AMD KVM, session
+   `20261022T163746.733190Z`.
+2. User allocator, target C/math headers/libraries and static audit link: implemented;
+   focused host and target-link checks pass. Newlib licenses/provenance accompany the SDK.
+3. Time and reusable C handle adapters: implemented and exercised by isolated native
+   C executables under one/four-CPU TCG. Four-CPU AMD KVM acceptance passes in
+   `81d6f8ba5c2141c9919b0af94846ca7f`; this closes the native SDK foundation gate
+   for the tested configuration.
+4. Keep the JavaScript shell deferred. Its engine-specific allocation hooks, value/error
+   conversion, microtask/module integration and recursion limits are not silently
+   treated as implemented C foundations or added to candidate boot.
 
 General user threads/TLS/synchronization, dynamic linking, JIT page protection,
 networking and Node/libuv compatibility remain subsequent work. They are not
 requirements of this explicitly single-threaded interpreter profile. A later
-V8/Node audit must examine its own version/configuration instead of treating this
-smaller engine's gate as proof of readiness.
+V8/Node audit must examine its own version/configuration.
 
 ## Recorded audit evidence
 
 The pinned whole-core host inventory produced 55 external symbols, including
 malloc/realloc/free/usable-size, memory/string routines, snprintf/vsnprintf/fprintf,
 assert/abort, gettimeofday/localtime_r, libm and compiler 128-bit division helpers.
-The target header probe failed at `stdlib.h`. Compiler helpers may be satisfied by
-target libgcc; that must be demonstrated by the eventual target link. Formatting
+The original compiler-default header probe failed at `stdlib.h`; the optional SDK
+now supplies those headers through explicit build flags. Target libgcc resolves
+the compiler helpers in test-sdk-link. Formatting
 is used by actual engine error paths, so dropping only debug dumps cannot remove
 the whole formatting requirement. This inventory is conservative and is not a
 substitute for the future adapter's own dependency inventory.
 
-Local evidence: `bin/tests/runtime-audit/report.json` and
-`target-header-probe.log`. Neither successful host compilation nor a missing-header
-probe claims a completed foundation. The shell gate remains closed.
+Evidence: `bin/tests/runtime-audit/report.json`, `target-header-probe.log` and
+`bin/tests/sdk-link/report.json`. The audit records whether it used compiler-default
+or optional-SDK headers. Target link evidence is separate from host source inventory;
+neither claims an implemented guest JavaScript engine. The shell remains deferred.

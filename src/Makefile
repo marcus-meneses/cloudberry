@@ -84,6 +84,7 @@ QEMU_BOOT_IMAGE ?= $(ISO)
 QEMU_BOOT_WRITABLE ?= 0
 QEMU_BOOT_MEDIA_MODE = $(if $(filter 1,$(QEMU_BOOT_WRITABLE)),snapshot=on,readonly=on)
 QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
+    -rtc base=utc,clock=host \
     $(QEMU_IOMMU_FLAGS) -accel $(QEMU_ACCEL) -cpu $(QEMU_CPU) -smp cpus=$(QEMU_CPUS),sockets=1,cores=$(QEMU_CPUS),threads=1 -bios "$(OVMF)" \
     -device VGA -device qemu-xhci,id=xhci \
     -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
@@ -1396,3 +1397,33 @@ test-process-memory:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/process-memory.c -Wl,--gc-sections -o $(BUILD)/tests/process-memory
 	$(BUILD)/tests/process-memory
+
+SDK_ROOT := $(ROOT)/bin/sdk
+SDK_CFLAGS := -std=c11 -O2 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-pie -fno-stack-protector -mno-red-zone -ffunction-sections -fdata-sections -isystem $(SDK_ROOT)/sysroot/x86_64-elf/include
+SDK_LINK := -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld -L$(SDK_ROOT)/sysroot/x86_64-elf/lib
+.PHONY: sdk test-sdk-heap test-sdk-link test-runtime-foundations
+sdk:
+	python3 tools/build-sdk.py
+test-sdk-link: sdk
+	python3 tests/sdk-link.py
+test-sdk-heap:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fno-builtin -fsanitize=undefined tests/sdk-heap.c sdk/heap.c -o $(BUILD)/tests/sdk-heap
+	$(BUILD)/tests/sdk-heap
+.PHONY: test-runtime-time test-sdk-runtime
+test-sdk-runtime:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fno-builtin -fsanitize=undefined -ffunction-sections -fdata-sections tests/sdk-runtime.c sdk/runtime.c sdk/heap.c -Wl,--gc-sections -o $(BUILD)/tests/sdk-runtime
+	$(BUILD)/tests/sdk-runtime
+test-runtime-time:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined -ffunction-sections -fdata-sections tests/runtime-time.c -Wl,--gc-sections -o $(BUILD)/tests/runtime-time
+	$(BUILD)/tests/runtime-time
+$(BUILD)/tests/apps/runtime-foundation.elf: tests/apps/runtime-foundation.c $(wildcard sdk/*.c sdk/*.h interfaces/*.h) Makefile tools/build-sdk.py | sdk
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) $(SDK_LINK) $(SDK_ROOT)/crt0.o $< -Wl,--start-group $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+test-runtime-foundations:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-runtime-foundations
+.PHONY: _test-runtime-foundations
+_test-runtime-foundations: $(ISO) $(BUILD)/tests/apps/graphics-check.elf $(BUILD)/tests/apps/runtime-foundation.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --runtime-only --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)

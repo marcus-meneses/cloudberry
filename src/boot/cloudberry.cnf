@@ -1,5 +1,7 @@
 # Cloudberry boot configuration, format version 1. Keys are case-sensitive.
 version=1
+# Development QEMU uses UTC RTC. Omit/disable for firmware with unknown timezone.
+clock.rtc_utc=true
 boot.show_inventory=true
 drivers.directory=/system/kmodules/drivers
 storage.timeout_ms=1000

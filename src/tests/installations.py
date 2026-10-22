@@ -29,4 +29,8 @@ class Catalog(unittest.TestCase):
         for grant in [dict(name='/@applications',publish=True,operations=['launch']),dict(name='/@io',scope='process-manager',operations=['process_launch']),dict(name='/@io',scope='keyboard',operations=['process_launch']),dict(name='/@io',scope='hid',operations=['hid_subscribe'])]:
             (self.root/next(r for r in self.records if r['flags']==1)['manifest']).write_text(json.dumps(dict(version=1,resources=[grant])))
             with self.assertRaises(ValueError):self.build()
+    def test_public_time_entropy(self):
+        record=next(r for r in self.records if r['flags']==1)
+        (self.root/record['manifest']).write_text(json.dumps(dict(version=1,resources=[dict(name='/@io',scope='self',operations=['now_ns','utc','random'])])))
+        self.build()
 if __name__=='__main__':unittest.main()

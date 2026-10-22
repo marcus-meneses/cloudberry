@@ -92,7 +92,7 @@ static int manifest_resource(void *ctx,const char *name,const char *scope,int pu
     *is_io=mf_equal(name,"/@io");
     return !(publish && name[0]=='/' && name[1]=='@') && !mf_equal(scope,"process-manager") && !mf_equal(scope,"display") && !mf_equal(scope,"filesystem") && !mf_equal(scope,"graphics") && (!*is_io || mf_equal(scope,"self"));
     }
-static int manifest_operation(void *ctx,const char *name){return !*(int *)ctx || mf_equal(name,"now_ns");
+static int manifest_operation(void *ctx,const char *name){return !*(int *)ctx || (mf_equal(name,"now_ns") || mf_equal(name,"utc") || mf_equal(name,"random"));
     }
 static cb_status_t verify(struct blob *file,struct bundle *b){cb_status_t status=bundle_decode(b,file->data,file->bytes,trusted_key);
     if(status)return status;

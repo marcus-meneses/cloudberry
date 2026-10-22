@@ -55,21 +55,41 @@ Closed execution priorities (2026-10-22; validation details at the end):
 
 Current next priorities (2026-10-22):
 
-1. Native execution acceptance: `scripts/check-execution-kvm.sh` builds isolated
-   media and checks one/four-CPU migration/termination plus console/input wake.
-   Functional acceptance is independent of timestamp qualification. First live
-   failures capture scheduler/broker/HID state before shutdown. User-host AMD KVM
-   acceptance passed on the matching source fingerprint; see the closure below.
-   Native Intel CPU and physical-device acceptance remain separate.
-2. Runtime foundation audit: [runtime-port.md](sdk/runtime-port.md) pins QuickJS
-   2026-06-04 as a single-threaded, non-JIT reference. The reproducible dependency
-   inventory records the official archive hash and host whole-core externals,
-   separately probing missing target headers. Existing async/stream/lifecycle
-   mechanisms are distinguished from missing allocator, C/math/time support and
-   host adapters. Unsupported public MEMORY_RESIZE is removed; ID 3 stays reserved.
-3. JavaScript shell: **deferred until all mandatory foundation gates in that audit
-   are implemented and validated**. No engine/interpreter is installed or built
-   into candidate boot. Do not substitute an audit or host link for a guest port.
+1. Commit and push the accepted runtime foundations.
+2. Cross-compile the pinned QuickJS core in isolation. Validate allocation hooks,
+   stack limits, exceptions, Unicode, math and OOM cleanup before packaging it.
+3. Implement JavaScript bindings over handles: streams/files, owned processes,
+   timers, Promise completion and structured errors.
+4. Package a script-runner application with script files, arguments, inherited
+   streams/cwd and module loading; then advance to interactive shell functionality.
+5. Expand C++ support: target runtime/standard library, constructors/destructors,
+   new/delete and exception unwinding, retaining the public C OS ABI.
+6. Formalize the Cloudberry compiler target/sysroot and its startup/library/ABI
+   defaults for host-side cross-development.
+7. Build a native C/C++ development toolchain that runs inside Cloudberry:
+   compiler, assembler, linker, headers/libraries and build tools. Use priority 6's
+   target/sysroot and add the demonstrated host-runtime prerequisites. Validate
+   compiling, linking and running C/C++ applications entirely inside Cloudberry;
+   rebuilding the compiler itself is a subsequent self-hosting acceptance step.
+
+Priority 7 acceptance stages:
+
+- **7.1:** Compile, link and run a small C application entirely inside Cloudberry.
+- **7.2:** Repeat with C++, then build and run a useful multi-file application.
+- **7.3:** Rebuild a Cloudberry component inside Cloudberry and validate the result
+  in an isolated test image.
+- **7.4:** Rebuild the compiler itself inside Cloudberry and use the resulting
+  compiler to build and run validation applications.
+
+Retain host cross-development as a recovery path throughout these stages. Native
+tooling uses handle-backed adapters; add host-runtime facilities based on concrete
+port requirements. Rebuilding the whole OS is not a prerequisite for 7.1–7.2.
+
+The execution and [runtime foundations](sdk/README.md) passed AMD KVM acceptance;
+see the closure below and [runtime-port.md](sdk/runtime-port.md). Native Intel CPU
+and physical-device qualification remain separate. The JavaScript implementation
+has not begun. This list records sequence, not authorization to start later items
+as part of a documentation update.
 
 User threads/TLS, richer public memory/filesystem contracts, networking and full
 V8/Node support remain later extensions; the selected smaller interpreter does
@@ -2178,3 +2198,49 @@ for the tested AMD KVM configuration, not performance bounds, Intel hardware or
 physical devices. The earlier isolated input timeout was not reproduced here;
 its original cause remains unclassified. Runtime foundations remain the next
 implementation work; the JavaScript shell gate stays closed.
+
+Native runtime foundation implementation (2026-10-22, after checkpoint e2f2bc0):
+
+1. User allocator: handle-backed shared arenas, dynamic aligned allocation,
+   calloc, usable-size tracking, coalescing and preserving realloc. Empty backing
+   returns to the OS; failed release retains ownership. Injected exhaustion,
+   overflow, randomized fragmentation and alignment tests pass under UBSan.
+2. Target C/math: optional pinned Newlib 4.5.0.20241231 build under bin/sdk, C
+   startup, reentrant libc hooks and user SSE2 compilation. No host sysroot or
+   cross-toolchain installation is changed. All 55 audit names resolve in a static
+   target link with C++20 header/C-linkage coverage, no undefined symbols,
+   dynamic loader or TLS. The refreshed audit finds explicit optional-SDK headers.
+3. Handle adapters: partial binary stream/file I/O, recreate/append, canonical
+   counted loads, clocks/entropy, owned-child lifecycle, async submit/collect and
+   budgeted one-shot timer/readiness polling. Errors retain copied reply data;
+   submission failures cannot misrepresent an old result as a fresh failure.
+   Public IO appends UTC (38), guarded by explicit RTC-is-UTC configuration and
+   availability/quality flags. Monotonic-source failure now returns UNAVAILABLE;
+   a successful zero remains valid. Ordinary self-scoped now_ns/utc/random requests
+   still require grants; installer and kernel device/process ceilings remain.
+
+Candidate build, C/C++ ABI, UTC/calendar policy/failure, allocation, submission
+ownership, catalog/registry admission and target-link checks pass. Final isolated
+TCG reports console/8d5b65c533754970b7fc60898d27292a (one CPU) and
+console/1326e79865984e99b9b7f108e875b9ed (four CPUs) pass with identical SDK probe
+SHA-256 `108c447ce1b33683f12142800e48b2efebc5aa7bab6173f0a897c19aadb31dbc`.
+They exercise real native C handles, math/rounding/formatting, binary recreate/read/
+append, EOF/readiness, timer cancellation/budgets, denied UTC/entropy, context
+cleanup, async owned-child completion and abandoned wait without child cancellation.
+Successful disposable media is removed; result records include the probe digest
+and Newlib build identity. No fixtures, SDK libraries or engine enter candidate
+boot. Native KVM acceptance for these new SDK paths remains pending:
+`make -C src test-runtime-foundations QEMU_CPUS=4 QEMU_ACCEL=kvm`.
+The JavaScript shell remains deferred; language-specific module/microtask/value
+bindings and recursion-limit integration are not included in these foundations.
+
+User-host SDK acceptance (2026-10-22): console report
+`81d6f8ba5c2141c9919b0af94846ca7f` passes with explicit KVM and four CPUs.
+The probe digest `108c447ce1b33683f12142800e48b2efebc5aa7bab6173f0a897c19aadb31dbc`
+matches the current isolated ELF and final one/four-CPU TCG runs. Newlib source
+digest, compiler and flags also match. Saved QEMU arguments confirm -accel kvm;
+the real native C probe passes allocator/math/formatting, UTC, binary file/pipe
+operations, deadlines/timers, denial, async child completion and abandoned wait.
+This closes the pending native SDK acceptance for the tested AMD configuration;
+it does not qualify Intel/physical devices or complete libc/engine conformance.
+Documentation is updated. No JavaScript engine or shell was added.

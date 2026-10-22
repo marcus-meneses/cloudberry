@@ -46,7 +46,7 @@ static inline cb_status_t cb_abandon(struct cb_client *c,struct cb_abandon_resul
 static inline void *cb_result(struct cb_client *c){return c->result+sizeof(struct cb_reply_header);}
 static inline cb_handle_t cb_acquire(const char *name,struct cb_interface_id id){cb_handle_t h=0;CB_REQUIRE(cb_system_get_handle(name,cb_length(name),&id,1,0,&h)==CB_OK);return h;}
 static inline cb_status_t cb_respond(struct cb_client *c,const struct cb_delivery_header *d,cb_status_t status,const void *p,size_t n){
-    struct cb_reply_header h={.version={sizeof(h),1,0},.request=d->call.request,.provider_epoch=d->provider_epoch,.status=status,.outcome=!status?CB_COMMITTED:(status==CB_RESOURCE_FAILURE || status==CB_PROVIDER_FAILED || status==CB_TIMEOUT?CB_OUTCOME_UNKNOWN:CB_NOT_COMMITTED),.result_bytes=status?0:n};
+    struct cb_reply_header h={.version={sizeof(h),1,0},.request=d->call.request,.status=status,.outcome=!status?CB_COMMITTED:(status==CB_RESOURCE_FAILURE || status==CB_PROVIDER_FAILED || status==CB_TIMEOUT?CB_OUTCOME_UNKNOWN:CB_NOT_COMMITTED),.provider_epoch=d->provider_epoch,.result_bytes=status?0:n};
     cb_copy(c->frame,&h,sizeof(h));if(!status)cb_copy(c->frame+sizeof(h),p,n);return cb_system_reply(c->frame,sizeof(h)+h.result_bytes);
 }
 static inline cb_handle_t cb_publish(struct cb_client *c,const char *name,struct cb_interface_id id,const char *const *names,unsigned count){

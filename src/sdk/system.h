@@ -3,8 +3,14 @@
 #include "../interfaces/system.h"
 #include "../interfaces/memory.h"
 #include "../interfaces/stream.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 cb_status_t cb_system_gate(struct cb_system_gate *);
 __attribute__((noreturn)) void cb_exit(uint64_t);
+#ifdef __cplusplus
+}
+#endif
 static inline struct cb_call_header cb_call(cb_handle_t cap,struct cb_interface_id interface,uint32_t operation,uint64_t bytes){return (struct cb_call_header){.version={sizeof(struct cb_call_header),1,0},.handle=cap,.interface=interface,.operation=operation,.payload_bytes=bytes};}
 /* Named process-relative stream acquisition; caller owns each returned handle.
  * Zero means the binding is absent or acquisition failed. */

@@ -85,7 +85,7 @@ static int registry_resource(void *context,const char *name,const char *scope,in
     *io=mf_equal(name,"/@io");
     return !(publish && name[0]=='/' && name[1]=='@') && !mf_equal(scope,"process-manager") && !mf_equal(scope,"display") && !mf_equal(scope,"filesystem") && !mf_equal(scope,"graphics") && (!*io || mf_equal(scope,"self"));
     }
-static int registry_operation(void *context,const char *name){return !*(int *)context || mf_equal(name,"now_ns");
+static int registry_operation(void *context,const char *name){return !*(int *)context || (mf_equal(name,"now_ns") || mf_equal(name,"utc") || mf_equal(name,"random"));
     }
 static int registry_in_use(uint64_t owner,const unsigned char identity[16]){
     for(struct child *c=runtime.children;c;c=c->next)if(!c->reaped){struct process_info info;if(CALL(runtime.info,c->process,&info,0).status)return 1;

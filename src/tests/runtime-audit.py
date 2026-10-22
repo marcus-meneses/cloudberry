@@ -64,12 +64,14 @@ def main():
     target=ROOT/'.toolchain/cross/bin/x86_64-elf-gcc'
     probe=work/'target-header-probe.c'
     probe.write_text('#include <stdlib.h>\n#include <math.h>\nint audit_header_probe;\n')
-    result=subprocess.run([str(target), '-ffreestanding', '-c', str(probe), '-o', str(work/'target-header-probe.o')], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    sdk_headers=ROOT/'bin/sdk/sysroot/x86_64-elf/include'
+    includes=['-isystem',str(sdk_headers)] if sdk_headers.exists() else []
+    result=subprocess.run([str(target), '-ffreestanding', *includes, '-c', str(probe), '-o', str(work/'target-header-probe.o')], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (work/'target-header-probe.log').write_text(result.stdout)
     report=dict(version=1, engine='QuickJS', release=VERSION, url=URL, archive_sha256=SHA256,
                 profile=dict(units=UNITS, os_atomics=False, stack_checks=True, quickjs_libc=False, jit=False),
                 inventory_compiler=subprocess.check_output([args.cc,'--version'],text=True).splitlines()[0],
-                commands=commands, undefined_symbols=symbols, target_headers_available=result.returncode==0,
+                commands=commands, undefined_symbols=symbols, target_headers_available=result.returncode==0, target_header_source='optional-sdk' if includes else 'compiler-default',
                 guest_port_validated=False, shell_deferred=True,
                 caveat='Host-header whole-core dependency inventory; not a target link, libc conformance check or guest engine execution.')
     path=work/'report.json'

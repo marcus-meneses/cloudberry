@@ -7,6 +7,7 @@
 static const struct schema {char key[25],fallback[32];unsigned type,flags;uint64_t min,max;} schemas[]={
     {.key="system.build_id",.type=CONFIG_STRING},
     {.key="version",.type=CONFIG_UINT,.flags=REQUIRED,.min=1,.max=1},
+    {.key="clock.rtc_utc",.type=CONFIG_BOOL},
     {.key="filesystem.writable",.fallback="false",.type=CONFIG_BOOL,.flags=DEFAULT},
     {.key="boot.show_inventory",.fallback="true",.type=CONFIG_BOOL,.flags=DEFAULT},
     {.key="drivers.modules",.fallback="",.type=CONFIG_STRING,.flags=DEFAULT},

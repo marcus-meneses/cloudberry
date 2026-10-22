@@ -2,19 +2,19 @@
 """Exercise production providers/terminal on a disposable writable image via USB HID.
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
-import argparse,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['user-maint-create','user-maint-reboot','user-maint-verify','create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify','policy','repair','quarantine-remove','cut-repair','cut-forget','cut-approve','recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--cpu-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.cpu_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
+import argparse,hashlib,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['user-maint-create','user-maint-reboot','user-maint-verify','create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify','policy','repair','quarantine-remove','cut-repair','cut-forget','cut-approve','recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--runtime-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--cpu-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
+focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.runtime_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.cpu_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
 if sum(focused_modes)>1:p.error('choose only one focused run mode')
 if a.installer_phase=='create' and not a.fixtures:p.error('installer create requires isolated fixtures')
 if a.installer_cut and (not a.fixtures or not a.installer_cut.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests')):p.error('installer-cut requires fixtures and an isolated test ELF')
 if a.disk_source and (a.fixtures or a.startup_trace):p.error('--disk-source cannot rebuild fixtures')
 if a.disk_source and not a.disk_source.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests'):p.error('disk-source must be isolated inside bin/tests')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
-if (a.identity_only or a.stdio_only or a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only or a.edit_only or a.mouse_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
+if (a.runtime_only or a.identity_only or a.stdio_only or a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only or a.edit_only or a.mouse_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
 if a.startup_trace and (not a.startup_only or a.kernel):p.error('--startup-trace requires --startup-only and cannot use --kernel')
 root=pathlib.Path(__file__).resolve().parents[2];build=a.build.resolve();work=root/'bin/tests/console'/uuid.uuid4().hex;work.mkdir(parents=True)
-image=work/'boot.img'
+image=work/'boot.img';runtime_identity=None
 if a.startup_trace:
     with (work/'trace-build.log').open('w') as trace_log:subprocess.run(['make','-C',str(root/'src'),'BUILD='+str(build),str(build/'tests/startup-kernel.elf'),str(build/'tests/startup-bootstrap.kmod')],check=True,stdout=trace_log,stderr=subprocess.STDOUT)
     a.kernel=build/'tests/startup-kernel.elf'
@@ -30,6 +30,17 @@ if a.fixtures or a.startup_trace:
         operations=['info','fill','glyph','surface_create','surface_release','surface_info','state','line','rectangle','ellipse','arc','bezier','path','bitmap','blit','present']
         (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@graphics',operations=operations),dict(name='/@applications',operations=['launch','wait','release','processes']),dict(name='/@keyboard',scope='boot-input',operations=['read','focus_claim','focus_release']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@text',operations=['write','clear']),dict(name='/@io',scope='self',operations=['now_ns']),dict(name='/@filesystem',operations=['open','stat','remove'])])))
         records=json.loads((root/'src/apps/installed.json').read_text());records.append(dict(name='graphics-check',executable='/system/apps/graphics-check',manifest='graphics-check/manifest.json',installation_id='636c6f756462657272792e6766786368',flags=3,cpu=0,stack_bytes=262144));
+        if a.runtime_only:
+            directory=bundles/'runtime-foundation';directory.mkdir()
+            shutil.copy2(build/'tests/apps/runtime-foundation.elf',directory/'runtime-foundation.elf')
+            runtime_identity=dict(binary_sha256=hashlib.sha256((directory/'runtime-foundation.elf').read_bytes()).hexdigest(),newlib=json.loads((root/'bin/sdk/newlib.json').read_text()))
+            grants=[dict(name='/@memory',scope='self',operations=['allocate','free']),dict(name='/@io',scope='self',operations=['now_ns','utc','random']),dict(name='/@filesystem',operations=['open']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@applications',operations=['launch','info','wait','release'])]
+            (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=grants)))
+            records.append(dict(name='runtime-foundation',executable='/system/apps/runtime-foundation',manifest='runtime-foundation/manifest.json',installation_id='636c6f756462657272792e7274666e64',flags=3,cpu=0,stack_bytes=524288))
+            directory=bundles/'runtime-restricted';directory.mkdir()
+            shutil.copy2(build/'tests/apps/runtime-foundation.elf',directory/'runtime-restricted.elf')
+            (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@memory',scope='self',operations=['allocate','free']),dict(name='/@io',scope='self',operations=['now_ns'])])))
+            records.append(dict(name='runtime-restricted',executable='/system/apps/runtime-restricted',manifest='runtime-restricted/manifest.json',installation_id='636c6f756462657272792e7274666e65',flags=1,cpu=0,stack_bytes=524288))
         if a.installer_phase:
             packages=bundles/'packages';packages.mkdir()
             for name in ('sample.cbp','sample-v2.cbp','sample-v3.cbp','approved.json','approved-full.json','maintenance-approved.json','shared.cbp','bad.cbp'):shutil.copy2(build/'tests/installer'/name,packages/name)
@@ -61,7 +72,7 @@ if a.installer_phase in ('repair','quarantine-remove','cut-repair','cut-forget',
 # Complete host-side fixture writes before guest flush deadlines start.
 with image.open('r+b') as prepared:os.fsync(prepared.fileno())
 qmp=work/'qmp.sock';log=work/'boot.log';screenshot=work/'screen.ppm'
-command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',(f'cpus={a.cpus},sockets=1,cores={a.cpus},threads=1' if a.cpu_only else str(a.cpus)),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
+command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-rtc','base=utc,clock=host','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',(f'cpus={a.cpus},sockets=1,cores={a.cpus},threads=1' if a.cpu_only else str(a.cpus)),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
 if a.diagnostics:command+=['-gdb','unix:'+str(work/'gdb.sock')+',server=on,wait=off']
 if a.mmio_trace:command+=['-trace','enable=memory_region_ops_read','-trace','enable=memory_region_ops_write','-trace','file='+str(work/'mmio.log')]
 if a.storage_devices:
@@ -159,6 +170,10 @@ try:
             if c not in typed:raise RuntimeError('No QMP key mapping for '+repr(c)+' in '+layout_name)
             send_keys(typed[c])
         if enter:send_keys([{'type':'qcode','data':'ret'}]);time.sleep(.1)
+    if a.runtime_only:
+        type_line('runtime-foundation')
+        wait_for(lambda text:'PASS runtime foundations:' in text and text.rstrip().endswith('/ >'),120)
+        raise ProfileComplete()
     if a.installer_phase:
         prompt='/ >'
         def installed_command(command,expected,timeout=100):
@@ -614,7 +629,7 @@ finally:
                 if any(initial['clock'][key]!=final['clock'][key] for key in fields):raise RuntimeError('clock source changed during CPU measurement')
             (work/'cpu.json').write_text(json.dumps(result,indent=2)+'\n');raw.unlink()
         except Exception as error:status='failed';failure='CPU report: '+str(error)
-    (work/'result.json').write_text(json.dumps(dict(status=status,error=failure,cpus=a.cpus,accelerator=a.accel,storage_devices=a.storage_devices,diagnostic_kernel=str(a.kernel) if a.kernel else None,mmio_trace=a.mmio_trace),indent=2)+'\n')
+    (work/'result.json').write_text(json.dumps(dict(status=status,error=failure,runtime_foundation=runtime_identity,cpus=a.cpus,accelerator=a.accel,storage_devices=a.storage_devices,diagnostic_kernel=str(a.kernel) if a.kernel else None,mmio_trace=a.mmio_trace),indent=2)+'\n')
 if status=='passed' and not a.keep_artifacts:
     subprocess.run(['python3',str(root/'src/tools/clean-tests.py'),'--root',str(work)],check=True)
 if a.startup_only and status=='passed':print(f'STARTUP: prompt {boot_timing["first_prompt_seconds"]:.3f}s; verified key echo {boot_timing["interactive_seconds"]:.3f}s; timings {work}/startup.json',flush=True)

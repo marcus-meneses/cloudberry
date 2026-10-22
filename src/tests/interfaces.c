@@ -57,6 +57,7 @@ ABI_ASSERT(sizeof(struct cb_application_status)==32,"application status");
 ABI_ASSERT(sizeof(struct cb_startup)==24,"startup prefix");
 ABI_ASSERT(sizeof(struct cb_startup_file)==16,"startup file prefix");
 ABI_ASSERT(sizeof(struct cb_version)==8,"version prefix");
+ABI_ASSERT(CB_IO_UTC==38 && CB_IO_PROCESS_TERMINATE==37 && sizeof(struct cb_io_utc)==16,"append-only UTC ABI");
 ABI_ASSERT(CB_MEMORY_ALLOCATE==1 && CB_MEMORY_FREE==2 && sizeof(struct cb_memory_request)==16 && sizeof(struct cb_memory_result)==16,"implemented memory ABI");
 ABI_ASSERT(sizeof(struct cb_call_header)==80,"call frame");
 ABI_ASSERT(sizeof(struct cb_delivery_header)==96,"provider delivery");

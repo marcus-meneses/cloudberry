@@ -2,6 +2,9 @@
 #include "../../interfaces/display.h"
 #include "process.h"
 #include "../../kernel/cpu.h"
+#include "clock.h"
+#include "config.h"
+#include "../../common/calendar.h"
 static const struct kernel_surfaces *hub;
 static uint64_t installer_owner,text_owner,display_owner,graphics_owner,keyboard_owner,identity_owner,sessions_owner,mouse_owner,focus_pid,focus_generation;
 static kernel_surface_call hid,display,filesystem,applications,clock,watch,hid_exit,applications_exit;
@@ -41,7 +44,18 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
     if(r->operation==CB_IO_REGISTRY){r->authority=installer_owner && r->process==installer_owner?1:identity_owner && r->process==identity_owner?2:0;(void)CALL(applications,r,0,0);return module_result(1,1);}
     if(r->operation==CB_IO_CONSOLE_ACCESS){if(r->bytes==sizeof(struct cb_io_console_access)){struct cb_io_console_access request;__builtin_memcpy(&request,r->input,sizeof(request));r->status=console_access(r->process,&request);}return module_result(1,1);}
-    if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){uint64_t time=CALL(clock,0,0,0).value;for(unsigned i=0;i<8;++i)((unsigned char *)r->output)[i]=((unsigned char *)&time)[i];r->actual=8;r->status=CB_OK;}return module_result(1,1);}
+    if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){struct kernel_surface_result sampled=CALL(clock,0,0,0);if(sampled.status){r->status=CB_UNAVAILABLE;return module_result(1,1);}uint64_t time=sampled.value;for(unsigned i=0;i<8;++i)((unsigned char *)r->output)[i]=((unsigned char *)&time)[i];r->actual=8;r->status=CB_OK;}return module_result(1,1);}
+    if(r->operation==CB_IO_UTC){
+        if(r->bytes || r->capacity<sizeof(struct cb_io_utc))return module_result(1,1);
+        r->status=CB_UNAVAILABLE;const struct kernel_hub_table *table=kernel_hub_find_table(hub,"config.clock.rtc_utc");
+        if(!table || table->bytes!=sizeof(struct config_value))return module_result(1,1);
+        const struct config_value *policy=(const void *)(uintptr_t)table->address;
+        if(policy->type!=CONFIG_BOOL || policy->bytes!=1 || !policy->data || !*(const uint8_t *)policy->data)return module_result(1,1);
+        kernel_surface_call rtc=kernel_surface_find(hub,"clock.rtc");struct clock_calendar calendar;struct cb_io_utc result={.flags=CB_UTC_SECOND_RESOLUTION|CB_UTC_UNSYNCHRONIZED};
+        if(!rtc || CALL(rtc,&calendar,0,0).status || !cb_calendar_epoch(calendar.year,calendar.month,calendar.day,calendar.hour,calendar.minute,calendar.second,&result.seconds))return module_result(1,1);
+        if(calendar.flags&CLOCK_RTC_CENTURY_ASSUMED)result.flags|=CB_UTC_CENTURY_ASSUMED;
+        __builtin_memcpy(r->output,&result,sizeof(result));r->actual=sizeof(result);r->status=CB_OK;return module_result(1,1);
+    }
     if(r->operation==CB_IO_OWNER_WATCH){r->status=CB_DENIED;if((!graphics_owner || r->process!=graphics_owner) && (!keyboard_owner || r->process!=keyboard_owner) && (!identity_owner || r->process!=identity_owner) && (!sessions_owner || r->process!=sessions_owner))return module_result(1,1);r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_io_owner_watch))return module_result(1,1);struct cb_io_owner_watch request;for(size_t i=0;i<sizeof(request);++i)((unsigned char *)&request)[i]=((const unsigned char *)r->input)[i];if(request.enable<=1)r->status=watch(r->process,request.process,request.token,request.enable,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}
     if(r->operation==CB_IO_CREDENTIALS || r->operation==CB_IO_IDENTITY_SET){
         r->status=CB_DENIED;kernel_surface_call credentials=kernel_surface_find(hub,"process.credentials");if(!credentials)return module_result(1,1);

@@ -21,6 +21,7 @@ is accepted. Type definitions, defaults and ranges belong to the module schema.
 | Key | Type | Rule/default |
 | --- | --- | --- |
 | `version` | unsigned integer | Required; exactly `1` |
+| `clock.rtc_utc` | boolean | Optional; missing/false makes public UTC unavailable. Development boot config selects true for QEMU's explicit UTC RTC. It does not assert synchronization or change monotonic time. |
 | `filesystem.writable` | boolean | `false` schema fallback; boot file selects `true`; writable mounting also requires writable media |
 | `boot.show_inventory` | boolean | `true`; controls the core's hardware inventory dump |
 | `drivers.directory` | string | `/system/kmodules/drivers`; selected module/handler bundle directory |

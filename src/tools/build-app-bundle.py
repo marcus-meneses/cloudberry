@@ -20,7 +20,7 @@ def build(name,identity,executable,manifest,resources,private,output,launcher=Fa
     code=pathlib.Path(executable).read_bytes();metadata=pathlib.Path(manifest).read_bytes();policy=json.loads(metadata)
     if set(policy)!={'version','resources'} or policy['version']!=1:raise ValueError('invalid manifest')
     for r in policy['resources']:
-        if r.get('scope') in ('process-manager','display','filesystem','graphics') or (r.get('name','').startswith('/@') and r.get('publish')) or (r.get('name')=='/@io' and (r.get('scope','self')!='self' or any(x!='now_ns' for x in r['operations']))):raise ValueError('ordinary app authority ceiling')
+        if r.get('scope') in ('process-manager','display','filesystem','graphics') or (r.get('name','').startswith('/@') and r.get('publish')) or (r.get('name')=='/@io' and (r.get('scope','self')!='self' or any(x not in ('now_ns','utc','random') for x in r['operations']))):raise ValueError('ordinary app authority ceiling')
     if code[:4]!=b'\x7fELF':raise ValueError('executable is not ELF')
     entries=[]
     if resources:

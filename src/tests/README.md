@@ -417,6 +417,7 @@ src/
 │   ├── spaces.c
 │   └── spaces.h
 ├── common/
+│   ├── calendar.h
 │   ├── hid-report.c
 │   └── hid-report.h
 ├── handlers/
@@ -706,6 +707,11 @@ src/
 ├── sdk/
 │   ├── service.h
 │   ├── stream.h
+│   ├── README.md
+│   ├── heap.h / heap.c
+│   ├── runtime.h / runtime.c
+│   ├── libc.h / libc.c / crt0.c
+│   ├── required-symbols.txt
 │   ├── runtime-port.md
 │   ├── streams.md
 │   ├── application.h
@@ -714,6 +720,7 @@ src/
 │   └── system.h
 ├── tests/
 │   ├── execution-acceptance.py / execution-acceptance.md
+│   ├── sdk-heap.c / sdk-runtime.c / sdk-link.py / runtime-time.c
 │   ├── runtime-audit.py
 │   ├── console-boot.py
 │   ├── raster.c
@@ -741,6 +748,7 @@ src/
 │   ├── apps/
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
+│   │   ├── runtime-foundation.c
 │   │   ├── application-runtime.c
 │   │   ├── graphics-check.c
 │   │   ├── identity-check.c
@@ -878,6 +886,7 @@ src/
 │   ├── clean-tests.py
 │   ├── identity-db.py
 │   ├── stage-kmodules.py
+│   ├── build-sdk.py
 │   ├── build-boot-image.py
 │   ├── check-acpi-image.py
 │   ├── check-module-pic.py
@@ -1035,3 +1044,5 @@ and normal replacement; rescue/quarantine phases use offline-edited copied image
 Reports and exact acceptance paths are recorded in the current roadmap.
 
 Runtime port readiness is tracked in [the foundation audit](../../src/sdk/runtime-port.md). The JavaScript shell stays deferred until its required foundations pass. Focused native execution acceptance: `./scripts/check-execution-kvm.sh`; see [acceptance instructions](../../src/tests/execution-acceptance.md).
+
+The optional [native SDK](../../src/sdk/README.md) supplies handle-backed allocation, target Newlib libc/libm and runtime adapters. Build with `make -C src sdk`; isolated validation uses `make -C src test-runtime-foundations QEMU_CPUS=4`. No SDK test apps or interpreter enter normal boot.

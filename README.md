@@ -423,6 +423,7 @@ src/
 │   ├── spaces.c
 │   └── spaces.h
 ├── common/
+│   ├── calendar.h
 │   ├── hid-report.c
 │   └── hid-report.h
 ├── handlers/
@@ -722,6 +723,11 @@ src/
 ├── sdk/
 │   ├── service.h
 │   ├── stream.h
+│   ├── README.md
+│   ├── heap.h / heap.c
+│   ├── runtime.h / runtime.c
+│   ├── libc.h / libc.c / crt0.c
+│   ├── required-symbols.txt
 │   ├── runtime-port.md
 │   ├── streams.md
 │   ├── application.h
@@ -732,6 +738,7 @@ src/
 │   ├── offline-update.py
 │   ├── persistent-sessions.py
 │   ├── execution-acceptance.py / execution-acceptance.md
+│   ├── sdk-heap.c / sdk-runtime.c / sdk-link.py / runtime-time.c
 │   ├── runtime-audit.py
 │   ├── console-boot.py
 │   ├── raster.c
@@ -762,6 +769,7 @@ src/
 │   ├── apps/ (includes isolated execution.c migration/termination probe)
 │   │   ├── bench-client.json
 │   │   ├── bench-server.json
+│   │   ├── runtime-foundation.c
 │   │   ├── application-runtime.c
 │   │   ├── graphics-check.c
 │   │   ├── private-check.c
@@ -919,6 +927,7 @@ src/
 │   ├── init-dev-disk.py
 │   ├── identity-db.py
 │   ├── stage-kmodules.py
+│   ├── build-sdk.py
 │   ├── build-boot-image.py
 │   ├── check-acpi-image.py
 │   ├── check-module-pic.py
@@ -1204,3 +1213,5 @@ from cooperative STOP and session-close policy. No userland interrupt-control
 escape hatch is provided, including for root or privileged handlers.
 
 Runtime port readiness is tracked in [the foundation audit](src/sdk/runtime-port.md). The JavaScript shell stays deferred until its required foundations pass. Focused native execution acceptance: `./scripts/check-execution-kvm.sh`; see [acceptance instructions](src/tests/execution-acceptance.md).
+
+The optional [native SDK](src/sdk/README.md) supplies handle-backed allocation, target Newlib libc/libm and runtime adapters. Build with `make -C src sdk`; isolated validation uses `make -C src test-runtime-foundations QEMU_CPUS=4`. No SDK test apps or interpreter enter normal boot.
