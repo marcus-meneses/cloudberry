@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@filesystem",
+      "operations": [
+        "open",
+        "list",
+        "stat",
+        "mkdir"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    },
+    {
+      "name": "/@graphics",
+      "operations": [
+        "info",
+        "rectangle",
+        "glyphs",
+        "present",
+        "font_info",
+        "text_batch",
+        "surface_create",
+        "surface_release",
+        "surface_place",
+        "surface_scroll"
+      ]
+    },
+    {
+      "name": "/@keyboard",
+      "scope": "boot-input",
+      "operations": [
+        "read",
+        "focus_claim",
+        "focus_release"
+      ]
+    },
+    {
+      "name": "/@mouse",
+      "scope": "boot-input",
+      "operations": [
+        "read",
+        "state",
+        "cursor_info",
+        "read_cursor",
+        "cursor_hide",
+        "cursor_show"
+      ]
+    }
+  ]
+}

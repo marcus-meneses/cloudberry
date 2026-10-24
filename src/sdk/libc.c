@@ -16,6 +16,7 @@ struct descriptor {struct descriptor *next;int fd;cb_handle_t cap;};
 static struct descriptor *descriptors;
 static unsigned standard_opened;
 struct cb_runtime *cb_libc_runtime(void){if(!initialized){initialized=1;cb_runtime_init(&runtime);}return &runtime;}
+const char *cb_libc_cwd(void){return cwd;}
 int cb_libc_set_cwd(const char *s){if(!s || s[0]!='/')return 0;char p[sizeof(cwd)];if(!cb_path(p,sizeof(p),"/",s))return 0;memcpy(cwd,p,strlen(p)+1);return 1;}
 static int error(cb_status_t s){switch(s){case CB_DENIED:return EACCES;case CB_NOT_FOUND:return ENOENT;case CB_RESOURCE_FAILURE:return ENOMEM;case CB_WOULD_BLOCK:case CB_BUSY:return EAGAIN;case CB_BROKEN_PIPE:return EPIPE;case CB_READ_ONLY:return EROFS;case CB_BAD_HANDLE:return EBADF;case CB_TIMEOUT:return ETIMEDOUT;case CB_UNAVAILABLE:return ENOSYS;case CB_BAD_REQUEST:return EINVAL;default:return EIO;}}
 void *malloc(size_t n){void *p=cb_heap_alloc(&cb_libc_runtime()->heap,n);if(n && !p)errno=ENOMEM;return p;}

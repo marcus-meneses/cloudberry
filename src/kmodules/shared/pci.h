@@ -12,9 +12,12 @@ struct pci_table {uint64_t magic;uint16_t major,minor;uint32_t entry_bytes;uint6
 struct pci_firmware_access {uint16_t segment;uint8_t bus,slot,function,width;uint16_t offset;uint32_t value;};
 struct pci_device {uint64_t hardware_index,owner;struct pci_bar bars[6];uint16_t msix_cap,msix_count;uint32_t reserved;struct device_acpi_ref acpi;};
 struct pci_msix {uint64_t hardware_index,owner;uint32_t entry,masked;struct irq_route route;};
-/* BSP foreground only, trusted owners. claim(index,owner,out) takes exclusive
+/* BSP foreground only, trusted owners. claim(index,owner,out,optional_bar_mask) takes exclusive
  * boot ownership, disables DMA/INTx/MSI-X, probes and restores BARs with decode
- * disabled. Never reassigns BAR addresses. Caller resets the device before DMA.
+ * disabled. ABI1.1: mask 0 maps all memory BARs, preserving old callers;
+ * otherwise map selected BARs plus MSI-X table/PBA BARs. Unselected BARs keep
+ * physical/bytes metadata with address=0. No RAM/framebuffer cache-type override.
+ * Never reassigns BAR addresses. Caller resets the device before DMA.
  * busmaster(index,owner,enable); dma_alloc(index,owner,pages,out mem_pages);
  * dma_free(index,owner,id) requires bus mastering disabled; release likewise,
  * with no outstanding DMA allocations and hardware_quiesced=1. Hardware must

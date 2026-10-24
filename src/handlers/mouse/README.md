@@ -35,7 +35,7 @@ expiry, overflow or memory-pressure loss. STATE is index-paginated, so the reply
 frame does not impose a device-count limit. It reports connected interface
 identities, buttons and positions. Relative positions are cumulative device
 counts, not display pixels. The handler currently provides input, not a drawn
-cursor, pointer acceleration or application click policy.
+pointer acceleration or application click policy. Cursor policy now lives here: a black-outlined white arrow uses the trusted graphics overlay handle, which composites through display.
 
 ADDED/REMOVED events identify attachment changes. Removal reports released buttons
 before freeing decoder/class state. Malformed reports leave decoder state unchanged
@@ -73,3 +73,19 @@ handler queries a copied keyboard-focus/session snapshot through restricted IO;
 other sessions receive DENIED, closed/reaped callers REVOKED. Focus transitions
 advance a replay floor; clients resynchronize instead of replaying events from a
 previous session. No keyboard report or terminal event forwarding is introduced.
+
+The appended `cursor_info` and `read_cursor` operations expose clamped pixel
+coordinates and display bounds. `read_cursor` uses version 1.1 extended event
+records with the cursor snapshot associated with each event; legacy `read`
+records remain unchanged. Relative and absolute HID mice share this policy.
+The pointer continues moving independently of an application's JS rendering loop.
+
+`cursor_hide` and `cursor_show` are empty, synchronous operations. Hide is
+idempotent and restricted to the exact keyboard-focused process, not just another
+reader in the same session. Its owning process may show again even after losing
+focus; another process cannot release its hide. Movement keeps updating coordinates
+without rendering while hidden. Show reuses the existing bitmap and latest
+coordinates. The mouse provider uses the existing IO owner-exit watch to restore
+the arrow after a caller dies, and detects focus loss on device activity. Mouse
+is added to the bound-provider IO watch allowlist; arbitrary IO callers remain
+denied. Closing a JS mouse object restores any hide it owns.

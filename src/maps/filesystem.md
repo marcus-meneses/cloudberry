@@ -17,6 +17,8 @@ modules live under `/system/kmodules`, without a legacy boot-completion tree.
 │       ├── drivers/
 │       └── helpers/
 ├── system/
+│   ├── script/
+│   │   └── samples/              # Build-installed JavaScript samples
 │   ├── apps/
 │   │   ├── _index
 │   │   ├── <appname>
@@ -30,7 +32,7 @@ modules live under `/system/kmodules`, without a legacy boot-completion tree.
 │   ├── kmodules/
 │   │   ├── drivers/
 │   │   └── helpers/
-│   ├── fonts/
+│   ├── fonts/                  # UbuntuMono-R.ttf and its licence
 │   ├── config/
 │   │   ├── identity/
 │   │   │   ├── users.bin

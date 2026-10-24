@@ -1,10 +1,16 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../handlers/graphics/raster.h"
-#include "../handlers/graphics/glyphs.h"
+#include <stdlib.h>
+#include "../handlers/graphics-vga/raster.h"
+#include "../handlers/graphics-vga/glyphs.h"
 #include "../apps/terminal/parser.h"
-int main(void){assert(gfx_rgb(0x80ff0000)==0x00800000 && gfx_rgb(0x0000ff00)==0);uint32_t guarded[66*66];for(size_t i=0;i<66*66;++i)guarded[i]=0x12345678;struct gfx_surface s;gfx_init(&s,guarded+67,64,64);for(size_t i=0;i<64*64;++i)s.pixels[i]=0;gfx_line(&s,(struct gfx_point){-32768,-32768},(struct gfx_point){32767,32767},0xffffffff);assert(s.dirty && s.damage.x==0 && s.damage.y==0 && s.damage.width==64 && s.damage.height==64);assert(guarded[66]==0x12345678 && guarded[67+64*64]==0x12345678);uint64_t version=s.generation;gfx_reset_damage(&s);gfx_line(&s,(struct gfx_point){0,0},(struct gfx_point){63,63},0xffffffff);assert(!s.dirty && s.generation==version);
+int main(void){
+    unsigned char invalid[32]={0};assert(!font_engine_open(invalid,sizeof(invalid)));
+    FILE *font=fopen("fonts/UbuntuMono-R.ttf","rb");assert(font);assert(!fseek(font,0,SEEK_END));long size=ftell(font);rewind(font);void *data=malloc(size);assert(data && fread(data,1,size,font)==(size_t)size);fclose(font);assert(font_engine_open(data,size));
+    struct cb_graphics_font metrics,larger;assert(!font_engine_info(0,&metrics) && metrics.cell_width==8 && metrics.cell_height==17 && !strcmp(metrics.family,"Ubuntu Mono"));assert(font_engine_info(3,&larger)==CB_BAD_REQUEST);assert(!font_engine_info(24,&larger) && larger.cell_width>metrics.cell_width);
+    const unsigned char *coverage;uint32_t fw,fh;assert(!font_engine_alpha(0xe7,0,&coverage,&fw,&fh));unsigned partial=0;for(unsigned i=0;i<fw*fh;++i)partial+=coverage[i]>0 && coverage[i]<255;assert(partial);
+assert(gfx_rgb(0x80ff0000)==0x00800000 && gfx_rgb(0x0000ff00)==0);uint32_t guarded[66*66];for(size_t i=0;i<66*66;++i)guarded[i]=0x12345678;struct gfx_surface s;gfx_init(&s,guarded+67,64,64);for(size_t i=0;i<64*64;++i)s.pixels[i]=0;gfx_line(&s,(struct gfx_point){-32768,-32768},(struct gfx_point){32767,32767},0xffffffff);assert(s.dirty && s.damage.x==0 && s.damage.y==0 && s.damage.width==64 && s.damage.height==64);assert(guarded[66]==0x12345678 && guarded[67+64*64]==0x12345678);uint64_t version=s.generation;gfx_reset_damage(&s);gfx_line(&s,(struct gfx_point){0,0},(struct gfx_point){63,63},0xffffffff);assert(!s.dirty && s.generation==version);
     gfx_clip(&s,(struct gfx_rect){10,10,4,4});gfx_rect(&s,(struct gfx_rect){0,0,64,64},0xff00ff00,1);assert(s.damage.x==10 && s.damage.y==10 && s.damage.width==4 && s.damage.height==4);gfx_clip(&s,(struct gfx_rect){0,0,64,64});int32_t matrix[6]={131072,0,0,131072,65536,65536};assert(gfx_transform(&s,matrix));uint32_t image[4]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff};gfx_bitmap(&s,(struct gfx_point){10,10},image,2,2,2,255);assert(s.pixels[21*64+21]==0xffff0000 && s.pixels[22*64+22]==0xffff0000 && s.pixels[24*64+24]==0xffffffff);int32_t identity[6]={65536,0,0,65536,0,0};gfx_transform(&s,identity);s.mode=GFX_SOURCE_OVER;s.pixels[0]=0xff0000ff;gfx_pixel(&s,0,0,0x80ff0000);assert(s.pixels[0]==0xff80007f);gfx_arc(&s,(struct gfx_rect){5,5,30,20},0,360*65536,0xffffffff,0);struct gfx_point curve[4]={{0,0},{10,60},{50,0},{63,63}};gfx_bezier(&s,curve,0xffffffff);
     uint32_t hole_pixels[64*64]={0};struct gfx_surface holes;gfx_init(&holes,hole_pixels,64,64);struct gfx_point polygon[]={{1,1},{50,1},{50,50},{1,50},{INT32_MIN,0},{10,10},{40,10},{40,40},{10,40}};gfx_polygon(&holes,polygon,9,0xffffffff,1);assert(hole_pixels[5*64+5]==0xffffffff && !hole_pixels[20*64+20]);holes.mode=GFX_SOURCE_OVER;gfx_arc(&holes,(struct gfx_rect){10,10,30,30},0,360*65536,0x80ff0000,1);assert(hole_pixels[25*64+25]==0x80ff0000);uint64_t old=holes.generation;gfx_pixel(&holes,25,25,0);assert(holes.generation==old);for(size_t i=0;i<67;++i)assert(guarded[i]==0x12345678);for(size_t i=67+4096;i<66*66;++i)assert(guarded[i]==0x12345678);
     uint32_t batch_pixels[32*32]={0},single_pixels[32*32]={0};struct gfx_surface batch,single;gfx_init(&batch,batch_pixels,32,32);gfx_init(&single,single_pixels,32,32);
@@ -13,7 +19,8 @@ int main(void){assert(gfx_rgb(0x80ff0000)==0x00800000 && gfx_rgb(0x0000ff00)==0)
     assert(gfx_glyphs(&batch,(void *)glyphs,0)==CB_BAD_REQUEST && gfx_glyphs(&batch,(void *)glyphs,sizeof(glyphs)-1)==CB_BAD_REQUEST);
     unsigned char unaligned[sizeof(glyphs)+1];memcpy(unaligned+1,glyphs,sizeof(glyphs));assert(gfx_glyphs(&batch,unaligned+1,sizeof(glyphs))==CB_OK);
     for(unsigned i=0;i<3;++i){assert(gfx_glyphs(&single,(void *)(glyphs+i),sizeof(*glyphs))==CB_OK);}
-    assert(!memcmp(batch_pixels,single_pixels,sizeof(batch_pixels)) && batch_pixels[0]==0xff220000 && batch.damage.width==16 && batch.damage.height==16);
+    assert(!memcmp(batch_pixels,single_pixels,sizeof(batch_pixels)) && batch_pixels[0]==0xff220000 && batch.damage.width==16 && batch.damage.height==(int32_t)metrics.cell_height);
+    assert(batch.generation);uint64_t unchanged=batch.generation;assert(!gfx_glyphs(&batch,(const void *)(glyphs+1),sizeof(*glyphs)) && batch.generation==unchanged);
     /* Compare overlapping copies with the general snapshot path in every
      * direction, including clipping and unchanged-pixel damage accounting. */
     struct gfx_point destinations[]={{0,0},{0,2},{2,0},{-2,-2},{0,0}};
@@ -45,4 +52,4 @@ int main(void){assert(gfx_rgb(0x80ff0000)==0x00800000 && gfx_rgb(0x0000ff00)==0)
     assert(!gfx_uniform_rgb(&batch,(struct gfx_rect){-1,0,32,32},&rgb));
     assert(!gfx_uniform_rgb(&batch,(struct gfx_rect){0,0,33,32},&rgb));
     assert(!gfx_uniform_rgb(&batch,(struct gfx_rect){0,0,0,32},&rgb));
-    char storage[256];struct term_token tokens[128];size_t n;assert(term_tokens("echo 'hello |> world' |> cat => /a",storage,tokens,128,&n) && n==6 && !strcmp(tokens[1].text,"hello |> world") && tokens[2].kind==TERM_PIPE && tokens[4].kind==TERM_RECREATE);assert(!term_tokens("echo 'unterminated",storage,tokens,128,&n));assert(term_tokens("echo \"\" ->file",storage,tokens,128,&n) && n==4 && !*tokens[1].text && tokens[2].kind==TERM_APPEND);puts("PASS raster/parser: clipping, guards, unchanged-pixel damage, transformed bitmaps, alpha, curves and quoted routing");}
+    char storage[256];struct term_token tokens[128];size_t n;assert(term_tokens("echo 'hello |> world' |> cat => /a",storage,tokens,128,&n) && n==6 && !strcmp(tokens[1].text,"hello |> world") && tokens[2].kind==TERM_PIPE && tokens[4].kind==TERM_RECREATE);assert(!term_tokens("echo 'unterminated",storage,tokens,128,&n));assert(term_tokens("echo \"\" ->file",storage,tokens,128,&n) && n==4 && !*tokens[1].text && tokens[2].kind==TERM_APPEND);font_engine_close();free(data);puts("PASS TTF/raster/parser: clipping, guards, unchanged-pixel damage, transformed bitmaps, alpha, curves and quoted routing");}

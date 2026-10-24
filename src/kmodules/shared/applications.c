@@ -49,6 +49,7 @@ int applications_data(const unsigned char *identity,const char *path){
     struct installation_ref ref;if(installation_lookup(0,NULL,0,identity,&ref)){int allowed=0;if(ref.snapshot && registry_find(ref.snapshot,ref.owner,identity)){const unsigned char *p=ref.name+ref.record.name_bytes;size_t last=0;for(size_t i=0;i<ref.record.path_bytes;++i)if(p[i]=='/')last=i+1;size_t n=ref.record.path_bytes-last;const char *tail=path+sizeof(prefix)-1;size_t bytes=length(tail);allowed=bytes>n+6 && cb_install_equal(tail,p+last,n) && cb_install_equal(tail+n,".data/",6);}installation_drop(&ref);return allowed;}return 0;
 }
 #include "applications-access.inc"
+#include "render-role.h"
 /* Trusted kernel entry. Ordinary callers can only reach the manager's narrower
  * process_launch operation, which cannot load provider/manager records. */
 static struct kernel_surface_result load_installation(const struct installation_ref *entry,const void *packet,size_t bytes){
@@ -67,7 +68,7 @@ struct kernel_surface_result applications_surface_installed_load(MODULE_ARGS){
     MODULE_UNUSED();if(!runtime.catalog || !a || !b || !c || CALL(runtime.cpu,CPU_CURRENT,0,0).value)return module_result(0,0);
     struct installation_ref entry={0};entry.name=cb_install_find(runtime.catalog,(const void *)a,length((const void *)a),NULL,&entry.record);if(!entry.name)return module_result(0,0);
     struct kernel_surface_result loaded=load_installation(&entry,(const void *)b,c);if(loaded.status)return loaded;
-    if(entry.record.flags==CB_INSTALL_PROVIDER){static const char targets[][24]={"hid.bind","display.bind","filesystem.bind","io.bind"};for(unsigned i=0;i<sizeof(targets)/sizeof(targets[0]);++i){kernel_surface_call bind=kernel_surface_find(runtime.hub,targets[i]);if(!bind || CALL(bind,a,loaded.value,runtime.mount).status){(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}}}
+    if(entry.record.flags==CB_INSTALL_PROVIDER){static const char targets[][24]={"hid.bind","display.bind","filesystem.bind","io.bind"};for(unsigned i=0;i<sizeof(targets)/sizeof(targets[0]);++i){kernel_surface_call bind=kernel_surface_find(runtime.hub,targets[i]);if(!bind || CALL(bind,render_provider_role((const char *)a),loaded.value,runtime.mount).status){(void)CALL(runtime.reap,loaded.value,0,0);return module_result(0,0);}}}
     return loaded;
 }
 struct kernel_surface_result applications_surface_worker(MODULE_ARGS){

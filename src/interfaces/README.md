@@ -200,7 +200,7 @@ The old numeric gate remains ABI-compatible and returns zero for absent bindings
 `filesystem.h` exposes canonical-path open/stat/list/remove/mkdir/metadata/chmod/chown and returns
 caller-owned streams, preserving the same read/write contract across backing types.
 The C layouts contain no kernel or provider pointers. See [streams](../sdk/streams.md)
-and [graphics](../handlers/graphics/README.md) for bounds and lifetime rules.
+and [graphics](../handlers/graphics-vga/README.md) for bounds and lifetime rules.
 
 
 `mouse.h` defines the privileged `/@mouse` provider's copied READ/STATE contract:
@@ -327,3 +327,33 @@ Ordinary IO admission permits self-scoped now_ns/utc/random with manifest grants
 device/process authority remains restricted. Timers combine existing wait-any
 readiness/deadlines with bounded local callback dispatch. Language-specific
 exceptions, modules and microtasks remain future interpreter integration.
+
+
+The private paired rendering contract is [render-backend.h](render-backend.h):
+`/@display.render` info and versioned fill/copy batches. It is restricted by
+kernel-bound provider identity and is not an application rendering interface.
+[gpu.h](gpu.h) remains a display-provider-only copied transport contract. The
+public text → graphics → display handles remain backend-independent.
+
+
+The private rendering contract appends process-owned cached surfaces and
+BEGIN/END composition chunks. IDs never expose native device resources; complete
+contiguous uploads must commit before sampling. Public graphics/display methods,
+interface IDs and operation numbers are unchanged. See the graphics-opengl
+provider for CPU raster versus GPU composition boundaries and acceptance status.
+
+
+The private GPU transport now appends `CB_GPU_SELECTED` (18), returning the
+kernel-qualified device in the existing info layout. It is restricted to the
+bound display provider, accepts no payload fields beyond the operation, and
+uses no DMA/kernel pointers. Enumeration remains available separately. Public
+`/@graphics`, `/@display` and their existing operation numbers are unchanged;
+applications are agnostic to the automatically selected provider pair.
+
+The private rendering interface appends PATCH (7), carrying a bounded rectangle
+and contiguous packed row groups. It requires prior full initialization and a
+complete BEGIN/COMMIT transaction before sampling. COMPOSE BEGIN|DAMAGE preserves
+the prior complete frame in the back target and permits clipped opaque base and
+layers. The private GPU WRITE/UPLOAD operations accept flags=1 for bounded
+rectangles with resource backing stride; unused fields remain rejected. Public
+application graphics/display interfaces and authorization are unchanged.

@@ -1,0 +1,8 @@
+version=1
+executable=display-vga.elf
+manifest=manifest.json
+ready=/@display
+installation_id=8a4701a30e315e1df4ab50d47a6623cc
+cpu=0
+stack_bytes=262144
+files=

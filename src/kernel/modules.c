@@ -14,6 +14,7 @@ static struct boot_pages *hub_pages;
 struct method_metadata {kernel_surface_call implementation;uint64_t mode;};
 struct hub_range {uintptr_t address;uint64_t mapped;uint32_t kind;int executable;uint64_t pending;unsigned phase;};
 static struct hub_range method_range={.address=KERNEL_METHODS_ADDRESS,.kind=BOOT_RES_HUB},
+    hash_range={.address=KERNEL_METHOD_HASH_ADDRESS,.kind=BOOT_RES_HUB},
     table_range={.address=KERNEL_TABLES_ADDRESS,.kind=BOOT_RES_HUB},
     owner_range={.address=KERNEL_OWNERS_ADDRESS,.kind=BOOT_RES_HUB},
     metadata_range={.address=KERNEL_METADATA_ADDRESS,.kind=BOOT_RES_HUB},
@@ -47,13 +48,13 @@ static int grow(struct hub_range *r,uint64_t bytes){
     return 1;
 }
 static int ensure_methods(uint64_t count){
-    if(count>UINT32_MAX || !grow(&method_range,count*sizeof(struct kernel_surface)) || !grow(&metadata_range,count*sizeof(struct method_metadata)) || !grow(&stub_range,count*STUB_BYTES))return 0;
+    if(count>UINT32_MAX || !grow(&method_range,count*sizeof(struct kernel_surface)) || !grow(&metadata_range,count*sizeof(struct method_metadata)) || !grow(&stub_range,count*STUB_BYTES) || !grow(&hash_range,KERNEL_METHOD_HASH_DIRECTORY_BYTES+count*sizeof(struct kernel_method_hash_node)))return 0;
     uint64_t n=method_range.mapped/sizeof(struct kernel_surface),m=metadata_range.mapped/sizeof(struct method_metadata),t=stub_range.mapped/STUB_BYTES;
     if(n>m){n=m;}if(n>t){n=t;}
     __atomic_store_n(&hub_writable->method_capacity,n,__ATOMIC_RELEASE);
     __atomic_store_n(&hub_writable->stub_bytes,stub_range.mapped,__ATOMIC_RELEASE);return 1;
 }
-static int method_exists(const char *name){const struct kernel_surface *e=kernel_surface_entries(hub_writable);for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(kernel_hub_name_equal(e[i].name,name))return 1;return 0;}
+static int method_exists(const char *name){return kernel_surface_by_key(hub_writable,kernel_surface_key(name))!=NULL;}
 static int owner_accepts(const struct kernel_hub_owner *o){
     uint32_t status=__atomic_load_n(&o->state,__ATOMIC_SEQ_CST);
     return status==HUB_OWNER_LIVE || (status==HUB_OWNER_DRAINING && (__atomic_load_n(&o->pins,__ATOMIC_SEQ_CST) || __atomic_load_n(&o->active,__ATOMIC_SEQ_CST)));
@@ -127,6 +128,13 @@ static void write_surface(size_t index,const char *name,kernel_surface_call call
     struct kernel_surface *entry=&((struct kernel_surface *)writable(&method_range))[index];
     *entry=(struct kernel_surface){.call=call,.major=major,.minor=minor,.owner=owner};
     for(size_t i=0;i<31 && name[i];++i)entry->name[i]=name[i];
+    /* Append only this export. Nodes never move or change after publication;
+     * readers may see a new head before count, but skip unpublished indexes. */
+    uint32_t *buckets=writable(&hash_range);
+    struct kernel_method_hash_node *nodes=(void *)((unsigned char *)buckets+KERNEL_METHOD_HASH_DIRECTORY_BYTES);
+    uint64_t key=kernel_surface_key(name);uint32_t bucket=key&(KERNEL_METHOD_HASH_BUCKETS-1);
+    nodes[index]=(struct kernel_method_hash_node){.key=key,.next=__atomic_load_n(&buckets[bucket],__ATOMIC_RELAXED)};
+    __atomic_store_n(&buckets[bucket],(uint32_t)index+1,__ATOMIC_RELEASE);
 }
 static int add_surface(const char *name,kernel_surface_call call,uint16_t major,uint16_t minor,int mediated){
     if(!valid_name(name) || !call || !major || method_exists(name) || !ensure_methods((uint64_t)hub_writable->count+1))return 0;
@@ -303,9 +311,10 @@ const struct kernel_surfaces *kernel_surfaces_publish(struct boot_pages *pages) 
     uint64_t physical = boot_pages_reserve(pages, HUB_BYTES / BOOT_PAGE_SIZE, BOOT_RES_HUB, KERNEL_SURFACES_ADDRESS);
     if(!physical || !boot_map_page(pages,KERNEL_SURFACES_ADDRESS,physical,false,false))return NULL;
     hub_pages=pages;hub_writable=boot_physical_pointer(pages,physical);
-    *hub_writable=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.page_bytes=HUB_BYTES,.header_bytes=sizeof(*hub_writable),.entry_bytes=sizeof(struct kernel_surface),.physical_address=physical,
+    *hub_writable=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.minor=1,.page_bytes=HUB_BYTES,.header_bytes=sizeof(*hub_writable),.entry_bytes=sizeof(struct kernel_surface),.physical_address=physical,
         .table_entry_bytes=sizeof(struct kernel_hub_table),.methods_address=KERNEL_METHODS_ADDRESS,.tables_address=KERNEL_TABLES_ADDRESS,.owners_address=KERNEL_OWNERS_ADDRESS,.owner_entry_bytes=sizeof(struct kernel_hub_owner),.mapped_bytes=HUB_BYTES};
-    if(!grow(&owner_range,sizeof(struct kernel_hub_owner)))return NULL;
+    if(!grow(&hash_range,KERNEL_METHOD_HASH_DIRECTORY_BYTES) || !grow(&owner_range,sizeof(struct kernel_hub_owner)))return NULL;
+    hub_writable->method_hash_address=KERNEL_METHOD_HASH_ADDRESS;
     struct kernel_hub_owner *kernel=writable(&owner_range);*kernel=(struct kernel_hub_owner){.name="kernel",.id=0,.state=HUB_OWNER_LIVE,.flags=HUB_OWNER_BOOT_PINNED};
     hub_writable->owner_capacity=owner_range.mapped/sizeof(*kernel);__atomic_store_n(&hub_writable->owner_count,1,__ATOMIC_RELEASE);
     if(!add_surface("hub.owner_info",owner_info,1,0,0) || !add_surface("hub.owner_pin",owner_pin,1,0,0) || !add_surface("hub.owner_control",owner_control,1,0,0))return NULL;
@@ -363,7 +372,7 @@ static bool load_owned(struct boot_pages *pages,const void *image,size_t bytes,c
             exports[i].offset < code_start || exports[i].offset >= h->writable_offset ||
             method_exists(exports[i].name)) return false;
         for (size_t j = 0; j < i; ++j)
-            if (kernel_hub_name_equal(exports[i].name, exports[j].name)) return false;
+            if (kernel_surface_key(exports[i].name)==kernel_surface_key(exports[j].name)) return false;
     }
     for(uint32_t i=0;i<hub_writable->owner_count;++i)if(kernel_hub_name_equal(owner_write(i)->name,name))return false;
     uint32_t owner=hub_writable->owner_count,first=kernel_surface_count(hub_writable);
@@ -543,7 +552,8 @@ static void release_dependencies(uint64_t owner){
 }
 static kernel_surface_call own_entry(uint64_t owner,const char *name){
     const struct kernel_surface *entries=kernel_surface_entries(hub_writable);
-    for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(entries[i].owner==owner && entries[i].major==1 && kernel_hub_name_equal(entries[i].name,name))return ((const struct method_metadata *)writable(&metadata_range))[i].implementation;
+    const struct kernel_surface *entry=kernel_surface_by_key(hub_writable,kernel_surface_key(name));
+    if(entry && entry->owner==owner && entry->major==1)return ((const struct method_metadata *)writable(&metadata_range))[entry-entries].implementation;
     return NULL;
 }
 static kernel_surface_call private_resolve(uint64_t owner,const char *name,uint16_t major,uint16_t minor){
@@ -554,7 +564,8 @@ static kernel_surface_call private_resolve(uint64_t owner,const char *name,uint1
     kernel_surface_call thread=kernel_surface_find(hub_writable,"threads.control");
     if(!thread || thread(THREAD_CURRENT,0,0,0,0,0).value!=activation_thread)return NULL;
     const struct kernel_surface *entries=kernel_surface_entries(hub_writable);
-    for(uint32_t i=0;i<kernel_surface_count(hub_writable);++i)if(entries[i].owner==owner && entries[i].major==major && entries[i].minor>=minor && kernel_hub_name_equal(entries[i].name,name))return ((const struct method_metadata *)writable(&metadata_range))[i].implementation;
+    const struct kernel_surface *entry=kernel_surface_by_key(hub_writable,kernel_surface_key(name));
+    if(entry && entry->owner==owner && entry->major==major && entry->minor>=minor)return ((const struct method_metadata *)writable(&metadata_range))[entry-entries].implementation;
     return NULL;
 }
 static struct kernel_surface_result load_runtime(MODULE_ARGS){

@@ -6,6 +6,7 @@
 extern "C" {
 #endif
 struct cb_runtime *cb_libc_runtime(void);
+const char *cb_libc_cwd(void);
 int cb_libc_set_cwd(const char *);
 #ifdef __cplusplus
 }

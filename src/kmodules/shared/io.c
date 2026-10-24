@@ -20,11 +20,14 @@ struct kernel_surface_result io_surface_init(MODULE_ARGS){
 }
 struct kernel_surface_result io_surface_bind(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);if(kernel_hub_name_equal((const char *)a,"installer"))installer_owner=b;else if(kernel_hub_name_equal((const char *)a,"text"))text_owner=b;else if(kernel_hub_name_equal((const char *)a,"display"))display_owner=b;else if(kernel_hub_name_equal((const char *)a,"graphics"))graphics_owner=b;else if(kernel_hub_name_equal((const char *)a,"keyboard"))keyboard_owner=b;else if(kernel_hub_name_equal((const char *)a,"identity"))identity_owner=b;else if(kernel_hub_name_equal((const char *)a,"sessions"))sessions_owner=b;else if(kernel_hub_name_equal((const char *)a,"mouse"))mouse_owner=b;return module_result(1,1);}
 /* Authorize screen access before a frontend mutates its state. Each backend
- * trusts only the bound upstream renderer, never a claimed identity in payload. */
+ * trusts only the bound upstream renderer, never a claimed identity in payload.
+ * The private GPU backend accepts only the bound graphics provider, even if a
+ * different caller shares focus, ancestry, session or administrator credentials. */
 static cb_status_t console_access(uint64_t provider,const struct cb_io_console_access *r){
-    if(r->reserved || !r->process || r->layer<CB_CONSOLE_TEXT || r->layer>CB_CONSOLE_DISPLAY)return CB_BAD_REQUEST;
+    if(r->reserved || !r->process || r->layer<CB_CONSOLE_TEXT || r->layer>CB_CONSOLE_RENDER_BACKEND)return CB_BAD_REQUEST;
     uint64_t expected=r->layer==CB_CONSOLE_TEXT?text_owner:r->layer==CB_CONSOLE_GRAPHICS?graphics_owner:display_owner;
     if(!expected || provider!=expected)return CB_DENIED;
+    if(r->layer==CB_CONSOLE_RENDER_BACKEND)return graphics_owner && r->process==graphics_owner?CB_OK:CB_DENIED;
     if((r->layer==CB_CONSOLE_GRAPHICS && text_owner && r->process==text_owner) || (r->layer==CB_CONSOLE_DISPLAY && graphics_owner && r->process==graphics_owner))return CB_OK;
     kernel_surface_call cpu=kernel_surface_find(hub,"cpu.control"),session=kernel_surface_find(hub,"process.session"),ancestor=kernel_surface_find(hub,"process.ancestor");
     if(!cpu || !session || !ancestor)return CB_UNAVAILABLE;
@@ -42,6 +45,11 @@ static cb_status_t console_access(uint64_t provider,const struct cb_io_console_a
 }
 struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     MODULE_UNUSED();struct io_invocation *r=(void *)a;if(!r || !hub)return module_result(0,0);r->status=CB_BAD_REQUEST;r->actual=0;if((r->bytes && !r->input) || (r->capacity && !r->output))return module_result(1,1);
+    if(r->operation==CB_IO_GPU){
+        r->status=CB_DENIED;if(!display_owner || r->process!=display_owner)return module_result(1,1);
+        kernel_surface_call gpu=kernel_surface_find(hub,"gpu.invoke");
+        r->status=CB_UNAVAILABLE;return gpu?gpu(a,display_owner,0,0,0,0):module_result(1,1);
+    }
     if(r->operation==CB_IO_REGISTRY){r->authority=installer_owner && r->process==installer_owner?1:identity_owner && r->process==identity_owner?2:0;(void)CALL(applications,r,0,0);return module_result(1,1);}
     if(r->operation==CB_IO_CONSOLE_ACCESS){if(r->bytes==sizeof(struct cb_io_console_access)){struct cb_io_console_access request;__builtin_memcpy(&request,r->input,sizeof(request));r->status=console_access(r->process,&request);}return module_result(1,1);}
     if(r->operation==CB_IO_NOW_NS){if(!r->bytes && r->capacity>=8){struct kernel_surface_result sampled=CALL(clock,0,0,0);if(sampled.status){r->status=CB_UNAVAILABLE;return module_result(1,1);}uint64_t time=sampled.value;for(unsigned i=0;i<8;++i)((unsigned char *)r->output)[i]=((unsigned char *)&time)[i];r->actual=8;r->status=CB_OK;}return module_result(1,1);}
@@ -56,7 +64,7 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
         if(calendar.flags&CLOCK_RTC_CENTURY_ASSUMED)result.flags|=CB_UTC_CENTURY_ASSUMED;
         __builtin_memcpy(r->output,&result,sizeof(result));r->actual=sizeof(result);r->status=CB_OK;return module_result(1,1);
     }
-    if(r->operation==CB_IO_OWNER_WATCH){r->status=CB_DENIED;if((!graphics_owner || r->process!=graphics_owner) && (!keyboard_owner || r->process!=keyboard_owner) && (!identity_owner || r->process!=identity_owner) && (!sessions_owner || r->process!=sessions_owner))return module_result(1,1);r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_io_owner_watch))return module_result(1,1);struct cb_io_owner_watch request;for(size_t i=0;i<sizeof(request);++i)((unsigned char *)&request)[i]=((const unsigned char *)r->input)[i];if(request.enable<=1)r->status=watch(r->process,request.process,request.token,request.enable,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}
+    if(r->operation==CB_IO_OWNER_WATCH){r->status=CB_DENIED;if((!display_owner || r->process!=display_owner) && (!graphics_owner || r->process!=graphics_owner) && (!keyboard_owner || r->process!=keyboard_owner) && (!identity_owner || r->process!=identity_owner) && (!sessions_owner || r->process!=sessions_owner) && (!mouse_owner || r->process!=mouse_owner))return module_result(1,1);r->status=CB_BAD_REQUEST;if(r->bytes!=sizeof(struct cb_io_owner_watch))return module_result(1,1);struct cb_io_owner_watch request;for(size_t i=0;i<sizeof(request);++i)((unsigned char *)&request)[i]=((const unsigned char *)r->input)[i];if(request.enable<=1)r->status=watch(r->process,request.process,request.token,request.enable,0,0).status?CB_RESOURCE_FAILURE:CB_OK;return module_result(1,1);}
     if(r->operation==CB_IO_CREDENTIALS || r->operation==CB_IO_IDENTITY_SET){
         r->status=CB_DENIED;kernel_surface_call credentials=kernel_surface_find(hub,"process.credentials");if(!credentials)return module_result(1,1);
         if(r->operation==CB_IO_CREDENTIALS){if(r->bytes!=8 || r->capacity<sizeof(struct cb_credentials)){r->status=CB_BAD_REQUEST;return module_result(1,1);}uint64_t pid;__builtin_memcpy(&pid,r->input,8);if(!pid)pid=r->process;if(pid!=r->process && (!identity_owner || r->process!=identity_owner) && (!sessions_owner || r->process!=sessions_owner))return module_result(1,1);struct kernel_surface_result result=credentials(pid,0,(uintptr_t)r->output,r->capacity,0,0);r->status=result.status?CB_BAD_REQUEST:result.value>r->capacity?CB_BUFFER_TOO_SMALL:CB_OK;if(!r->status)r->actual=result.value;}
@@ -84,7 +92,7 @@ struct kernel_surface_result io_surface_invoke(MODULE_ARGS){
     if(backend)(void)CALL(backend,r,0,0);
     return module_result(1,1);
 }
-struct kernel_surface_result io_surface_exit(MODULE_ARGS){MODULE_UNUSED();if(!hub)return module_result(1,1);struct kernel_surface_result result=CALL(applications_exit,a,0,0);if(result.status)return result;return CALL(hid_exit,a,0,0);}
+struct kernel_surface_result io_surface_exit(MODULE_ARGS){MODULE_UNUSED();if(!hub)return module_result(1,1);kernel_surface_call gpu_exit=kernel_surface_find(hub,"gpu.exit");if(gpu_exit){struct kernel_surface_result gpu_result=CALL(gpu_exit,a,0,0);if(gpu_result.status)return gpu_result;}struct kernel_surface_result result=CALL(applications_exit,a,0,0);if(result.status)return result;return CALL(hid_exit,a,0,0);}
 static struct kernel_surface_result forward(const char *name,uintptr_t a,uintptr_t b,uintptr_t c){kernel_surface_call call=hub?kernel_surface_find(hub,name):NULL;return call?CALL(call,a,b,c):module_result(0,0);}
 struct kernel_surface_result io_surface_info(MODULE_ARGS){MODULE_UNUSED();return forward("hid.info",a,b,c);}
 struct kernel_surface_result io_surface_installations(MODULE_ARGS){MODULE_UNUSED();kernel_surface_call call=hub?kernel_surface_find(hub,"applications.installations"):NULL;return call?call(a,b,c,d,e,f):module_result(0,0);}

@@ -102,7 +102,7 @@ static int extended_capabilities(struct device *dev) {
     }return 1;
 }
 struct kernel_surface_result pci_surface_claim(MODULE_ARGS) {
-    MODULE_UNUSED();if(!state.hub || !bsp() || a>=state.hw->count || !b || !c)return module_result(0,0);
+    MODULE_UNUSED();if(!state.hub || !bsp() || a>=state.hw->count || !b || !c || (d&~UINT64_C(63)))return module_result(0,0);
     const struct hwenum_descriptor *h=&state.hw->entries[a];struct device *dev=&state.devices[a];
     if(h->kind!=HWENUM_PCI || (h->data.pci.header_type&127)!=0 || dev->info.owner)return module_result(0,0);
     dev->config=mapping(a,MMIO_PCI_CONFIG,0,0);if(!dev->config)return module_result(0,0);
@@ -125,7 +125,15 @@ struct kernel_surface_result pci_surface_claim(MODULE_ARGS) {
         if(type==2)++bar;
     }
     pci_write16(dev->config+4,(dev->command&~5u)|0x402); /* Decode only; DMA still disabled. */
-    for(unsigned bar=0;bar<6;++bar)if(dev->info.bars[bar].bytes) {
+    /* ABI 1.1: zero preserves full mapping; a nonzero mask maps only requested
+     * BARs plus MSI-X table/PBA regions. Unmapped BAR extents remain described.
+     * A firmware framebuffer must not acquire a second incompatible UC alias. */
+    uint64_t map_bars=d?d:63;
+    if(dev->info.msix_cap){unsigned table_bar=pci_read32(dev->config+dev->info.msix_cap+4)&7,pba_bar=pci_read32(dev->config+dev->info.msix_cap+8)&7;
+        if(table_bar>=6 || pba_bar>=6 || !dev->info.bars[table_bar].bytes || !dev->info.bars[pba_bar].bytes)goto fail;
+        map_bars|=UINT64_C(1)<<table_bar|UINT64_C(1)<<pba_bar;
+    }
+    for(unsigned bar=0;bar<6;++bar)if(dev->info.bars[bar].bytes && (map_bars&(UINT64_C(1)<<bar))) {
         struct pci_bar *r=&dev->info.bars[bar];r->address=mapping(a,MMIO_PCI_BAR,bar,r->bytes);if(!r->address)goto fail;
     }
     dev->info.owner=b;dev->record->identity.owner=b;dev->info.acpi=dev->record->identity.acpi;*(struct pci_device *)c=dev->info;return module_result(1,1);

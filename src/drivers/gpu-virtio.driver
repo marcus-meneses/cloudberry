@@ -1,0 +1,15 @@
+version=1
+module=gpu-virtio
+init=gpu_virtio.init
+match=always
+requires=mem.calloc@1.0
+requires=pci.claim@1.1
+requires=pci.firmware_read@1.0
+requires=irq.route@1.0
+requires=iommu.ready@1.0
+requires=clock.now_ns@1.0
+requires=threads.control@1.0
+requires=cpu.control@1.0
+requires=pci.device@1.0
+requires=hardware.map_mmio@1.0
+requires=display.boot_info@1.0

@@ -16,6 +16,7 @@ static void initialize(void){
 }
 static unsigned invoke(struct cb_display_copy *box,uint64_t pid,size_t bytes){struct io_invocation r={.process=pid,.operation=CB_IO_DISPLAY_COPY,.input=box,.bytes=bytes};assert(display_invoke(&r));return r.status;}
 int main(void){
+    initialize();struct display_boot_info boot;assert(!display_surface_boot_info((uintptr_t)&boot,sizeof(boot),0,0,0,0).status && boot.frames==1 && boot.width==8 && boot.height==6 && boot.pitch==48);assert(display_surface_boot_info((uintptr_t)&boot,sizeof(boot)-1,0,0,0,0).status);
     struct cb_display_copy cases[]={{0,0,0,1,8,5},{0,1,0,0,8,5},{1,0,0,0,7,6},{0,0,1,0,7,6},{1,1,0,0,7,5},{8,6,8,6,0,0}};
     for(unsigned i=0;i<sizeof(cases)/sizeof(*cases);++i){initialize();uint32_t expected[2+12*6],saved[48];memcpy(expected,pixels,sizeof(pixels));struct cb_display_copy box=cases[i];
         for(unsigned y=0;y<box.height;++y)for(unsigned x=0;x<box.width;++x)saved[y*box.width+x]=pixels[1+(box.source_y+y)*12+box.source_x+x];

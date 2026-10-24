@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #define _start graphics_entry
-#include "../handlers/graphics/graphics.c"
+#include "../handlers/graphics-vga/graphics-vga.c"
 #undef _start
 int main(void){
     uint64_t surface=4;struct cb_graphics_blit blit={.surface=4,.source=0};

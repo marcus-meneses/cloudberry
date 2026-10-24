@@ -23,7 +23,8 @@
         "hid_get_feature",
         "hid_set_feature",
         "now_ns",
-        "input_focus"
+        "input_focus",
+        "owner_watch"
       ]
     },
     {
@@ -32,7 +33,21 @@
       "publish": true,
       "operations": [
         "read",
-        "state"
+        "state",
+        "cursor_info",
+        "read_cursor",
+        "cursor_hide",
+        "cursor_show"
+      ]
+    },
+    {
+      "name": "/@graphics-overlay",
+      "scope": "graphics",
+      "operations": [
+        "info",
+        "set",
+        "move",
+        "hide"
       ]
     }
   ]

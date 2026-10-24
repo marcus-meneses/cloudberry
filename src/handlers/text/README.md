@@ -1,40 +1,55 @@
 # Text provider
 
-`text.elf` publishes `/@text`, using `/@graphics`, which uses `/@display`.
-It derives columns and rows from actual pixel dimensions with 8×16 cells:
-1280×800 yields 160×50. No fixed terminal column count is required.
+`text.elf` publishes `/@text`, acquiring `/@graphics`, private `/@memory`, and
+console authorization through `/@io`. Graphics supplies font metrics and rasterizes
+Unicode with Ubuntu Mono. The current 16-pixel face has 8×17 cells: the requested 1024×768 startup mode gives
+128×45. No terminal font, framebuffer pointer or hardcoded grid is required.
 
-Operations report dimensions/cursor, clear, write a UTF-8 byte sequence, or draw
-an absolute positioned cell, or set the sequential cursor within the grid. UTF-8 decoding and control characters (newline, CR,
-backspace) belong here. Invalid sequences become replacement characters. The
-terminal encodes keyboard text events as UTF-8 and does not interpret a codepage.
-The graphics font currently renders printable ASCII and substitutes other glyphs.
+```text
+main graphics canvas (surface 0)
+└── text viewport (clipping container, no bitmap allocation)
+    ├── reusable row bitmap
+    ├── reusable row bitmap
+    └── … one bitmap per visible row
+```
 
-Sequential output wraps and destructively scrolls; scrolling uses an overlap-safe
-graphics blit and clears the bottom row. Positioned cells leave the sequential
-cursor unchanged. The retained cell grid is allocated through private memory.
-This is one shared boot console, without terminal escape sequences, independent
-windows. Foreground session authorization is enforced. Text services do not launch apps or parse commands.
+Each physical row owns a bitmap and retained character/foreground/background
+cells. The logical rows form a ring. A newline at the bottom moves the child
+surfaces up by one cell height, repositions the recycled top-row bitmap at the
+bottom, and clears that bitmap only. It never fills the main canvas to scroll.
+Graphics can translate the already composed opaque viewport using display.copy;
+the underlying line bitmaps retain their pixels and generations.
 
-Writes collect at most 256 positioned glyphs per graphics request and flush at
-request completion, batch capacity, or before scrolling. Cell operations still
-complete presentation before replying. Graphics owns the font and validates a
-whole glyph batch before drawing/presenting once. This removes a synchronous
-graphics/display round trip per character within a multi-character text write.
+A WRITE parses UTF-8/control characters in order, presenting at each newline
+and automatic line wrap before processing the following line. Trailing text
+without a newline is presented when the request ends. A newline that only moves
+the logical cursor through unchanged rows needs no display transfer. Changed
+cells within each line still use deferred glyph batches; scrolling reuses the
+row bitmaps and clears only the recycled row. Explicit CLEAR resets all retained
+rows and their bitmaps; it is separate from newline handling. This deliberately
+preserves intermediate line-by-line screen states instead of coalescing a whole
+stream chunk into its final viewport, accepting additional presentation work.
 
+The graphics hierarchy clips descendants, checks ownership, and selects the
+currently authorized drawing process's tree at presentation. The terminal's
+cached view can therefore be hidden while a graphical app is active and restored
+when text output resumes. This remains one shared console, without a desktop,
+terminal escape sequences or a secure window manager.
 
-Isolated one/four-CPU console acceptance uses this provider for keyboard echo,
-stdout/stderr, cwd prompts and error output at the actual 160×50 boot grid.
+WRITE handles UTF-8, newline, CR and backspace; malformed input becomes replacement
+characters. Sequential writes wrap and destructively scroll. Positioned CELL
+preserves its colors and leaves the sequential cursor unchanged. CURSOR validates
+coordinates and resets incomplete UTF-8 input. Text never parses commands or
+launches applications. Permission checks precede mutations as before.
 
-The appended `cursor` operation takes `cb_text_cursor {column,row}`. It validates
-both coordinates before changing state, resets any incomplete UTF-8 sequence and
-does not draw or scroll. Existing operation numbers and CELL semantics are
-unchanged. This primitive supports application-owned editing; text contains no
-command history, filesystem completion or terminal key bindings.
+Failed commits retain dirty cells and cached-row updates. An accepted positional
+scroll is not replayed when repairing a later failure. Requested cells are
+explicitly repainted even if another drawing client changed the main canvas.
+Owned row surfaces are released on provider shutdown/owner exit.
 
-Screen access now follows kernel-owned keyboard focus and session membership.
-The frontend checks the authenticated caller before mutating screen state;
-background sessions cannot bypass this by acquiring a lower rendering layer.
-See [session console policy](../sessions/README.md#foreground-console-boundary).
-Already authorized operations may finish during a focus transition. This remains
-one console, without a secure compositor or secure-attention authentication UI.
+Focused host tests execute this production model against retained mock bitmaps,
+capturing each newline frame and asserting there are no main-canvas FILL/BLIT
+calls during scrolling. Checks also cover trailing partial lines, CRLF, blank
+lines, automatic wrap, split UTF-8 and failure before the next line is parsed. Native graphics
+tests verify one display copy plus bottom-strip repair, unchanged retained bitmap
+generations, clipping, cycle/foreign-owner rejection and parent-detachment safety.

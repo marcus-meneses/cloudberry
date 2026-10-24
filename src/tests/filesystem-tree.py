@@ -11,7 +11,9 @@ with tempfile.TemporaryDirectory(dir=work) as temporary:
     assert not (root/'system/users').exists() and not (root/'home/root').exists()
     assert not (root/'boot/system').exists()
     assert not list((root/'boot').iterdir())
-    assert not list((root/'system/kmodules/drivers').iterdir())
+    drivers=root/'system/kmodules/drivers'
+    assert {p.name for p in drivers.iterdir()}=={'gpu-virtio.kmod','gpu-virtio.driver'}
+    for name in ('gpu-virtio.kmod','gpu-virtio.driver'):assert (drivers/name).read_bytes()==(bundles/name).read_bytes()
     assert (root/'system/root').stat().st_mode&0o777==0o700
     records=json.loads((source/'apps/installed.json').read_text())
     apps=[r for r in records if r['flags'] in (1,3)]
@@ -26,6 +28,9 @@ with tempfile.TemporaryDirectory(dir=work) as temporary:
         if record['flags'] in (1,3):assert (root/'system/root/_apps'/(name+'.data')).is_dir()
     for layout in ('ibm','abnt2'):
         assert (root/'system/config/keyboard'/(layout+'.keymap')).read_bytes()==(bundles/'keyboard/layouts'/(layout+'.json')).read_bytes()
+    for name in ('graphics-vga','graphics-opengl'):
+        assert 'UbuntuMono-R.ttf=/system/fonts/UbuntuMono-R.ttf' in (root/'system/handlers'/(name+'.provider.cnf')).read_text()
+        assert (root/'system/fonts/UbuntuMono-R.ttf').read_bytes()==(bundles/name/'UbuntuMono-R.ttf').read_bytes()
     keyboard=(root/'system/handlers/keyboard.provider.cnf').read_text()
     assert 'layouts/ibm.json=/system/config/keyboard/ibm.keymap' in keyboard
     assert (root/'system/state/installed.bin').read_bytes()==(root/'system/handlers/applications.resources/catalog.bin').read_bytes()

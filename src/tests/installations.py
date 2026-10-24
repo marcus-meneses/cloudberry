@@ -26,7 +26,7 @@ class Catalog(unittest.TestCase):
             if change=='manager_cpu':next(r for r in self.records if r['flags']==4)['cpu']=1
             with self.assertRaises(ValueError):self.build()
     def test_privilege_ceiling(self):
-        for grant in [dict(name='/@applications',publish=True,operations=['launch']),dict(name='/@io',scope='process-manager',operations=['process_launch']),dict(name='/@io',scope='keyboard',operations=['process_launch']),dict(name='/@io',scope='hid',operations=['hid_subscribe'])]:
+        for grant in [dict(name='/@graphics-overlay',scope='graphics',operations=['set']),dict(name='/@graphics-overlay',publish=True,operations=['move']),dict(name='/@applications',publish=True,operations=['launch']),dict(name='/@io',scope='process-manager',operations=['process_launch']),dict(name='/@io',scope='keyboard',operations=['process_launch']),dict(name='/@io',scope='hid',operations=['hid_subscribe'])]:
             (self.root/next(r for r in self.records if r['flags']==1)['manifest']).write_text(json.dumps(dict(version=1,resources=[grant])))
             with self.assertRaises(ValueError):self.build()
     def test_public_time_entropy(self):

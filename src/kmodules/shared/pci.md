@@ -17,7 +17,11 @@ enumeration. Definitions are in [pci.h](pci.h).
   nonzero owner. It disables bus mastering, port/memory decode and old message
   interrupts, walks standard capabilities with bounds/cycle checks, probes each
   assigned memory BAR with decoding disabled, restores BAR values, checks sizes
-  and alignment, and maps their full extents. Memory decoding is then available;
+  and alignment. ABI1.1 adds an optional fourth native argument, a BAR mask:
+  zero preserves full mapping; otherwise only requested BARs and MSI-X table/PBA
+  BARs are mapped. Unselected extents retain physical/size metadata with address
+  zero. This lets GPU control mappings avoid a firmware framebuffer BAR without
+  weakening cache-type protections. Memory decoding is then available;
   bus mastering remains off. No BAR relocation is performed.
 - `busmaster(index,owner,enable)` explicitly controls DMA enabling.
 - `dma_alloc(index,owner,pages,out)` returns tracked, zeroed, physically contiguous

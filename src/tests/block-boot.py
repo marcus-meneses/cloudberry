@@ -51,7 +51,7 @@ try:
         (fixture/'keyboard-fault/startup.bin').write_bytes(struct.pack('<IHHQQ',24,1,0,24+len(startup_body),len(startup_files))+startup_body)
         for policy in ('read','state','denied'):shutil.copy2(root/f'src/tests/apps/keyboard-{policy}.json',fixture/f'keyboard-{policy}.json')
     if args.disk_modules:
-        config=stage/'cloudberry.cnf';text=config.read_text();text=text.replace('drivers.modules=','drivers.modules='+('future' if args.disk_success else 'future,future-fail'));config.write_text(text)
+        config=stage/'cloudberry.cnf';text=config.read_text();text=__import__('re').sub(r'^drivers\.modules=.*$', 'drivers.modules='+('future' if args.disk_success else 'future,future-fail'), text, flags=__import__('re').M);config.write_text(text)
         for name in ('future','future-fail'):shutil.copy2(build/f'kmodules/{name}.kmod',fixture/f'{name}.kmod')
         (fixture/'future.driver').write_text('version=1\nmodule=future\ninit=future.init\nstart=future.start\nrequires=clock.now_ns@1.0\npci.class=030000\n')
         (fixture/'future-fail.driver').write_text('version=1\nmodule=future-fail\ninit=future_fail.init\nrequires=future.value@1.2\nmatch=always\n')

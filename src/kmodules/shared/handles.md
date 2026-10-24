@@ -180,3 +180,37 @@ caller records. Late provider replies to removed request IDs fail BAD_REQUEST.
 Allocation failure while constructing an error still wakes the waiting caller
 with a transport failure; termination must not depend on allocating a reply.
 See [provider recovery](../../handlers/recovery.md) for restart/outcome policy.
+
+
+## GPU result allocation — 2026-10-24
+
+The native I/O broker sizes GPU reply bodies by sub-operation. INFO/OPEN/NEXT/
+SELECTED reserve the fixed info record, MODES the fixed scanout record, CREATE/
+TEXTURE the resource record, and context creation its 32-bit ID. READ reserves
+the requested bounded count; CAPSET reserves metadata plus its bounded payload.
+No-result operations reserve zero body bytes. Oversized counts remain capped at
+the existing reply bound; the gateway still validates request shape, authority,
+resource bounds and reply capacity before mutation. Malformed/unknown GPU
+operations reserve no result body and are rejected by the gateway.
+
+The request-retained reply and caller copy remain separately owned. Both use
+the same sizing rule; caller output is reserved before dispatch. Allocation
+failure therefore does not authorize a mutation, and no pool reuses live results.
+A no-result GPU call avoids two 15 KiB zeroed bodies (30 KiB of allocation work),
+not two allocations or the retained request record. Other resource paths retain
+their previous capacity policy. Host tests cover every GPU operation, count
+overflow, malformed headers, exact output allocation and failure before dispatch.
+
+`handles-profile.inc` remains a disposable variant only. HP_PAUSE closes new
+measurement admissions without discarding active probes. HP_END still requires
+all admitted probes to finish; the graphics fixture reaps its actors before
+reading the final report. Pending RECEIVE calls can thus finish safely without
+including new work in the measured edit window.
+
+Profiling pause correction: stopping admission does not stop dispatch/output
+timestamps for already-admitted probes. Entry stamps carry a measurement
+generation; gates crossing a start/restart cannot attach to the wrong report.
+Profile control and admission serialize, and active probes prevent a report
+from being reset or read. HP_STATUS supplies diagnostic enabled/active/generation
+fields; genuine clock failures continue to invalidate results. All of this stays
+in the disposable profiler variant. The normal broker binary is unchanged.

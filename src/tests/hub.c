@@ -26,14 +26,24 @@ static struct kernel_surface_result hold(MODULE_ARGS){MODULE_UNUSED();atomic_sto
 static kernel_surface_call held;
 static void *caller(void *unused){(void)unused;struct kernel_surface_result r=held(0,0,0,0,0,0);assert(!r.status && r.value==77);return NULL;}
 static void *startup_reader(void *arg){kernel_surface_call entry=(kernel_surface_call)arg;for(unsigned i=0;i<10000;++i){assert(entry(0,0,0,0,0,0).status);assert(!kernel_surface_find(&header,"startup.value"));assert(owner_pin(3,1,0,0,0,0).status);}return NULL;}
-static void *reader(void *unused){(void)unused;while(!atomic_load(&stop_readers)){uint32_t count=kernel_surface_count(&header);const struct kernel_surface *entries=kernel_surface_entries(&header);for(uint32_t i=0;i<count;++i){assert(entries[i].call && entries[i].major && entries[i].name[0]);}uint32_t n=kernel_hub_table_count(&header);const struct kernel_hub_table *tables=kernel_hub_tables(&header);for(uint32_t i=0;i<n;++i)assert(tables[i].address && tables[i].bytes);}return NULL;}
+static void *reader(void *unused){(void)unused;while(!atomic_load(&stop_readers)){uint32_t count=kernel_surface_count(&header);const struct kernel_surface *entries=kernel_surface_entries(&header);for(uint32_t i=0;i<count;++i){assert(entries[i].call && entries[i].major && entries[i].name[0]);}if(count){assert(kernel_surface_find_key(&header,kernel_surface_key(entries[0].name))==entries[0].call);assert(!kernel_surface_find_key(&header,UINT64_C(0)));}uint32_t n=kernel_hub_table_count(&header);const struct kernel_hub_table *tables=kernel_hub_tables(&header);for(uint32_t i=0;i<n;++i)assert(tables[i].address && tables[i].bytes);}return NULL;}
 int main(void){
     backing=memfd_create("hub-tests",0);assert(backing>=0 && !ftruncate(backing,64*1024*1024));
     hub_writable=&header;hub_pages=&pages;header=(struct kernel_surfaces){.magic=KERNEL_SURFACES_MAGIC,.major=KERNEL_HUB_ABI,.methods_address=KERNEL_METHODS_ADDRESS,.tables_address=KERNEL_TABLES_ADDRESS,.owners_address=KERNEL_OWNERS_ADDRESS};
     assert(grow(&owner_range,4*sizeof(struct kernel_hub_owner)));struct kernel_hub_owner *owners=writable(&owner_range);
     for(unsigned i=0;i<4;++i){owners[i]=(struct kernel_hub_owner){.id=i,.state=HUB_OWNER_LIVE,.flags=i?0:HUB_OWNER_BOOT_PINNED};}header.owner_count=4;
+    assert(grow(&hash_range,KERNEL_METHOD_HASH_DIRECTORY_BYTES));header.method_hash_address=KERNEL_METHOD_HASH_ADDRESS;
+    assert(kernel_surface_key("hello")==UINT64_C(0xa430d84680aabd0b));
     pthread_t readers[3];for(unsigned i=0;i<3;++i)assert(!pthread_create(&readers[i],NULL,reader,NULL));
     for(unsigned round=0;round<6;++round){unsigned count=100*(round+1);assert(ensure_methods(count));for(unsigned i=header.count;i<count;++i){char name[32];snprintf(name,sizeof(name),"growth.method%u",i);write_surface(i,name,add,1,0,1,2);}__atomic_store_n(&header.count,count,__ATOMIC_RELEASE);}
+    assert(kernel_surface_find_key(&header,kernel_surface_key("growth.method599"))==kernel_surface_find(&header,"growth.method599"));
+    assert(kernel_surface_find_key_version(&header,kernel_surface_key("growth.method599"),1,0));
+    assert(!kernel_surface_find_key_version(&header,kernel_surface_key("growth.method599"),2,0));
+    assert(!kernel_surface_find_key_version(&header,kernel_surface_key("growth.method599"),1,1));
+    assert(!kernel_surface_find(&header,"growth.missing"));
+    assert(!add_surface("growth.method599",add,1,0,1));
+    const struct kernel_method_hash_node *nodes=(const void *)(header.method_hash_address+KERNEL_METHOD_HASH_DIRECTORY_BYTES);
+    struct kernel_method_hash_node saved[600];memcpy(saved,nodes,sizeof(saved));
     const struct kernel_surface *first=kernel_surface_entries(&header);kernel_surface_call stable=first[0].call;assert(!stable(37,0,0,0,0,0).status && stable(37,0,0,0,0,0).value==42);
     static uint64_t payload=123;struct kernel_hub_table batch[200];memset(batch,0,sizeof(batch));for(unsigned i=0;i<200;++i){snprintf(batch[i].name,sizeof(batch[i].name),"growth.table%u",i);batch[i].address=(uintptr_t)&payload;batch[i].bytes=8;batch[i].count=1;batch[i].entry_bytes=8;batch[i].owner=2;}
     fail_claim=1;uint32_t original=header.table_count;assert(publish_tables((uintptr_t)batch,200,0,0,0,0).status && header.table_count==original);fail_claim=0;
@@ -54,6 +64,23 @@ int main(void){
     unsigned hidden[]={HUB_OWNER_INITIALIZING,HUB_OWNER_STARTING,HUB_OWNER_FAILED};
     for(unsigned i=0;i<3;++i){__atomic_store_n(&owners[3].state,hidden[i],__ATOMIC_SEQ_CST);pthread_t observer;assert(!pthread_create(&observer,NULL,startup_reader,(void *)startup));pthread_join(observer,NULL);assert(!owners[3].active && !owners[3].pins);}
     __atomic_store_n(&owners[3].state,HUB_OWNER_LIVE,__ATOMIC_SEQ_CST);assert(kernel_surface_find(&header,"startup.value") && !startup(37,0,0,0,0,0).status);
+    /* Distinct full keys in one bucket must both resolve; publishing a head
+     * before count must not expose it or hide older entries in the chain. */
+    char collision[32];uint64_t target=kernel_surface_key("growth.method0");
+    for(unsigned i=0;;++i){snprintf(collision,sizeof(collision),"collision.m%u",i);if((kernel_surface_key(collision)&4095)==(target&4095))break;}
+    assert(ensure_methods(604));write_surface(603,collision,add,2,3,1,0);
+    assert(!kernel_surface_find(&header,collision));assert(kernel_surface_find_key(&header,target)==stable);
+    __atomic_store_n(&header.count,604,__ATOMIC_RELEASE);
+    assert(kernel_surface_find_version(&header,collision,2,3));
+    assert(!memcmp(saved,nodes,sizeof(saved)));assert(method_exists("drain.add"));
+    assert(!kernel_surface_find_key(&header,kernel_surface_key("drain.add")));
+    /* Mapping/allocation failure cannot publish an index entry or count. */
+    unsigned old_count=header.count;fail_claim=1;
+    assert(!ensure_methods(10000) && header.count==old_count && !kernel_surface_find(&header,"never.published"));fail_claim=0;
+    assert(grow(&method_range,2000*sizeof(struct kernel_surface)) && grow(&metadata_range,2000*sizeof(struct method_metadata)) && grow(&stub_range,2000*STUB_BYTES));
+    fail_alias=1;assert(!ensure_methods(2000) && header.count==old_count);
+    assert(kernel_surface_find_key(&header,target)==stable && !memcmp(saved,nodes,sizeof(saved)));
+    assert(ensure_methods(2000) && header.count==old_count && !memcmp(saved,nodes,sizeof(saved)));
     atomic_store(&stop_readers,1);for(unsigned i=0;i<3;++i)pthread_join(readers[i],NULL);
-    printf("PASS dynamic hub: %u methods, %u tables, stable RO/RX aliases, OOM/map-failure retry, atomic publication, concurrent readers, active/leased drain, retirement and stale calls (%u physical pages)\n",header.count,header.table_count,claims);close(backing);return 0;
+    printf("PASS indexed dynamic hub (numeric lookup, incremental publication, bucket collisions): %u methods, %u tables, stable RO/RX aliases, OOM/map-failure retry, atomic publication, concurrent readers, active/leased drain, retirement and stale calls (%u physical pages)\n",header.count,header.table_count,claims);close(backing);return 0;
 }

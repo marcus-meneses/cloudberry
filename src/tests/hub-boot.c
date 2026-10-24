@@ -41,10 +41,10 @@ bool kernel_hub_test(const struct kernel_surfaces *hub,struct boot_pages *pages)
     uint32_t before=kernel_surface_count(hub);struct kmodule_image *h=fixture(pages,"hub-grow","hub-grow.m",600,NULL);CHECK(h);h->format=2;uint64_t reservations=pages->reservations.count;
     CHECK(!kernel_module_load_owned(pages,h,h->image_bytes,"hub-grow",0) && kernel_surface_count(hub)==before && pages->reservations.count==reservations);h->format=KMODULE_FORMAT;
     CHECK(kernel_module_load_owned(pages,h,h->image_bytes,"hub-grow",0) && kernel_surface_count(hub)==before+600);
-    kernel_surface_call last=kernel_surface_find(hub,"hub-grow.m599");CHECK(last && CALL(last,37,0,0).value==42);uint64_t grow_owner=kernel_surface_owner(hub,"hub-grow.m0");CHECK(grow_owner);
+    kernel_surface_call last=kernel_surface_find(hub,"hub-grow.m599");CHECK(last && CALL(last,37,0,0).value==42);CHECK(hub->method_hash_address==KERNEL_METHOD_HASH_ADDRESS && kernel_surface_find_key(hub,kernel_surface_key("hub-grow.m599"))==last);uint64_t grow_owner=kernel_surface_owner(hub,"hub-grow.m0");CHECK(grow_owner);
     for(unsigned i=0;i<200;++i){name(tables[i].name,"hub-grow.t",i);tables[i].address=(uintptr_t)&payload;tables[i].bytes=8;tables[i].count=1;tables[i].entry_bytes=8;tables[i].owner=grow_owner;}
     CHECK(!CALL(publish,tables,200,0).status && stable_methods==kernel_surface_entries(hub) && stable_config==kernel_hub_find_table(hub,"config.version") && !CALL(clock,0,0,0).status);
-    CHECK(permissions(pages,KERNEL_METHODS_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,KERNEL_TABLES_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,KERNEL_OWNERS_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,(uintptr_t)last,1));
+    CHECK(permissions(pages,KERNEL_METHOD_HASH_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,KERNEL_METHODS_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,KERNEL_TABLES_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,KERNEL_OWNERS_ADDRESS,UINT64_C(0x8000000000000001)) && permissions(pages,(uintptr_t)last,1));
     CHECK(CALL(control,grow_owner,HUB_OWNER_DRAIN,0).status && CALL(control,0,HUB_OWNER_DRAIN,0).status);
     struct kernel_hub_owner owner;CHECK(!CALL(inspect,grow_owner,&owner,0).status && owner.tables==200 && owner.methods==600);
     kernel_surface_call create=kernel_surface_find(hub,"threads.create"),thread=kernel_surface_find(hub,"threads.control"),step=kernel_surface_find(hub,"event.step"),probe=kernel_surface_find(hub,"probe.thread");CHECK(create && thread && step && probe);

@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@io",
+      "scope": "graphics",
+      "operations": [
+        "owner_watch",
+        "console_access"
+      ]
+    },
+    {
+      "name": "/@memory",
+      "scope": "self",
+      "operations": [
+        "allocate",
+        "free"
+      ]
+    },
+    {
+      "name": "/@display",
+      "operations": [
+        "info",
+        "fill",
+        "blit",
+        "copy"
+      ]
+    },
+    {
+      "name": "/@graphics",
+      "publish": true,
+      "operations": [
+        "info",
+        "fill",
+        "glyph",
+        "surface_create",
+        "surface_release",
+        "surface_info",
+        "state",
+        "line",
+        "rectangle",
+        "ellipse",
+        "arc",
+        "bezier",
+        "path",
+        "bitmap",
+        "blit",
+        "present",
+        "glyphs",
+        "font_info",
+        "text_batch",
+        "surface_place",
+        "surface_scroll"
+      ]
+    },
+    {
+      "name": "/@graphics-overlay",
+      "publish": true,
+      "operations": [
+        "info",
+        "set",
+        "move",
+        "hide"
+      ]
+    }
+  ]
+}

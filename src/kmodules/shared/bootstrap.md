@@ -63,7 +63,8 @@ No candidate VM or developer persistent disk is run or attached by these tests.
 ## Isolated provider startup
 
 The core calls `bootstrap.apps` after volume selection starts. The startup worker
-waits for the selected readonly ext4 mount, then processes `boot.providers` in
+waits for the selected ext4 mount and successful selected-driver completion,
+then processes `boot.providers` in
 creation/readiness order. An empty list starts none; the schema fallback is `keyboard`; the supplied boot file starts keyboard,
 display, graphics, text, filesystem and applications in that readiness order.
 Each item is a bundle basename below `drivers.directory`. Bootstrap understands
@@ -155,3 +156,12 @@ loaded and its process started, that provider gets a fresh 30-second publication
 budget. Image-loading time and earlier providers cannot consume this allowance.
 Clock, inspection, provider failure, timeout and blocking errors are reported as
 distinct phases. Providers are not automatically restarted.
+
+
+Provider startup now waits for `bootstrap.driver_info.finished` with a bounded,
+sleeping wait and rejects a recorded driver error. `BOOTSTRAP_READY` alone only
+means the volume is mounted; selected module loading can still be running. The
+ordering prevents provider catalog/boot-mount setup from overlapping the disk
+loader and ensures selection sees the completed module surfaces. The wait holds
+no application-operation token and does not retry module initialization or other
+side effects. A driver-load failure or missing completion fails startup closed.

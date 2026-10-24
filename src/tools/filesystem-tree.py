@@ -1,7 +1,7 @@
 """Build the guest namespace from compiler bundle intermediates; never run at boot."""
 import json,pathlib,shutil,struct,importlib.util,hashlib
 
-DIRECTORIES = ('boot','system/apps',
+DIRECTORIES = ('boot','system/apps','system/script/samples',
  'system/handlers','system/kmodules/drivers','system/kmodules/helpers','system/fonts',
  'system/config/keyboard','system/config/identity','system/config/installations/packages','system/packages','system/state','system/root/_config','system/root/_apps',
  'home','volumes','tmp')
@@ -9,6 +9,9 @@ DIRECTORIES = ('boot','system/apps',
 def populate(root, bundles=None):
     root=pathlib.Path(root)
     for name in DIRECTORIES:(root/name).mkdir(parents=True,exist_ok=True)
+    samples=pathlib.Path(__file__).resolve().parents[1]/'script/samples'
+    shutil.copytree(samples,root/'system/script/samples',dirs_exist_ok=True)
+    shutil.copy2(pathlib.Path(__file__).resolve().parents[1]/'fonts/LICENCE-Ubuntu.txt',root/'system/fonts/LICENCE-Ubuntu.txt')
     indexes={'system/apps':[], 'system/root/_apps':[]}
     if bundles is not None:
         bundles=pathlib.Path(bundles)
@@ -32,7 +35,7 @@ def populate(root, bundles=None):
                     destination.with_name(name+'.manifest.json').write_bytes(manifest)
                     resources=destination.with_name(name+'.resources');resources.mkdir()
                     for item in source.iterdir():
-                        if item.name in (name+'.elf','manifest.json','provider.cnf') or (name=='keyboard' and item.name in ('config.cnf','layouts')):continue
+                        if (name in ('graphics-vga','graphics-opengl') and item.suffix=='.ttf') or item.name in (name+'.elf','manifest.json','provider.cnf') or (name=='keyboard' and item.name in ('config.cnf','layouts')):continue
                         if item.is_dir():shutil.copytree(item,resources/item.name)
                         else:shutil.copy2(item,resources/item.name)
                     definition=source/'provider.cnf'
@@ -46,6 +49,8 @@ def populate(root, bundles=None):
                             if name=='keyboard':
                                 target_file='/system/config/keyboard/'+('config.cnf' if item=='config.cnf' else pathlib.PurePosixPath(item).stem+'.keymap')
                                 shutil.copy2(source/item,root/target_file.lstrip('/'))
+                            if name in ('graphics-vga','graphics-opengl') and item.endswith('.ttf'):
+                                target_file='/system/fonts/'+item;shutil.copy2(source/item,root/target_file.lstrip('/'))
                             aliases.append(item+'='+target_file)
                         if 'files' in values:values['files']=','.join(aliases)
                         destination.with_name(name+'.provider.cnf').write_text(''.join(k+'='+v+'\n' for k,v in values.items()))

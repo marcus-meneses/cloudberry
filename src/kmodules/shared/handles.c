@@ -10,6 +10,7 @@
 #include "../../interfaces/system.h"
 #include "../../interfaces/memory.h"
 #include "../../interfaces/applications.h"
+#include "../../interfaces/gpu.h"
 struct channel {struct channel *next;uint64_t pid,token,sequence,owner_watch;int ready;unsigned char *frame;size_t capacity,bytes;};
 struct operation {struct operation *next;const char *name;};
 struct grant {struct grant *next;const char *name,*scope;int publish;struct operation *operations;};
@@ -43,6 +44,7 @@ static struct policy *policy(uint64_t pid);
 #include "../../tests/handles-profile.inc"
 #else
 #define HP_STAMP(name)
+#define HP_ACTIVE_STAMP(name)
 #define HP_BEGIN_CALL(owner,op,start)
 #define HP_CAPTURE_DONE()
 #define HP_FINISH(owner)
@@ -181,9 +183,29 @@ static cb_status_t reflect(struct capability *cap,unsigned char **out,size_t *by
     struct cb_reply_header h={.version={sizeof(h),1,0},.status=CB_OK,.outcome=CB_COMMITTED,.provider_epoch=p->epoch,.result_bytes=end-sizeof(h)};copy_bytes(reply,&h,sizeof(h));*out=reply;*bytes=end;return CB_OK;
 }
 #include "handles-stream.inc"
-static size_t kernel_reply_capacity(struct publication *p,unsigned op){return p->kernel==2 && (op==CB_IO_CREDENTIALS || op==CB_IO_PROCESS_DATA || op==CB_IO_REGISTRY)?CB_FRAME_LIMIT-1024:p->kernel==2 && op==CB_IO_RANDOM?64:p->kernel==2 && op==CB_IO_PROCESS_SAMPLE?sizeof(struct cb_process_sample):p->kernel==3 && op==CB_STREAM_READ?CB_STREAM_CHUNK:p->kernel==2 && (op==CB_IO_HID_DESCRIPTOR || op==CB_IO_HID_GET_FEATURE)?CB_HID_LIMIT:p->kernel==2 && op==CB_IO_FILESYSTEM?512:64;}
+/* Reserve result storage before dispatch. GPU writes/submits return no payload;
+ * fixed records and counted reads need only their actual maximum result size.
+ * The gateway remains responsible for validation and provider authority. */
+static size_t gpu_reply_capacity(const void *payload,size_t bytes){
+    const size_t limit=CB_FRAME_LIMIT-1024;
+    if(bytes<sizeof(struct cb_io_gpu_request))return 0;
+    struct cb_io_gpu_request q;copy_bytes(&q,payload,sizeof(q));
+    switch(q.operation){
+    case CB_GPU_INFO:case CB_GPU_OPEN:case CB_GPU_NEXT:case CB_GPU_SELECTED:return sizeof(struct cb_io_gpu_info);
+    case CB_GPU_MODES:return sizeof(struct cb_io_gpu_modes);
+    case CB_GPU_CREATE:case CB_GPU_TEXTURE:return sizeof(struct cb_io_gpu_resource);
+    case CB_GPU_CONTEXT:return q.context?0:sizeof(uint32_t);
+    case CB_GPU_READ:return q.bytes>limit?limit:(size_t)q.bytes;
+    case CB_GPU_CAPSET:return q.bytes>limit-sizeof(struct cb_io_gpu_capset)?limit:sizeof(struct cb_io_gpu_capset)+(size_t)q.bytes;
+    default:return 0;
+    }
+}
+static size_t kernel_reply_capacity(struct publication *p,unsigned op,const void *payload,size_t bytes){
+    if(p->kernel==2 && op==CB_IO_GPU)return gpu_reply_capacity(payload,bytes);
+    return p->kernel==2 && (op==CB_IO_CREDENTIALS || op==CB_IO_PROCESS_DATA || op==CB_IO_REGISTRY)?CB_FRAME_LIMIT-1024:p->kernel==2 && op==CB_IO_RANDOM?64:p->kernel==2 && op==CB_IO_PROCESS_SAMPLE?sizeof(struct cb_process_sample):p->kernel==3 && op==CB_STREAM_READ?CB_STREAM_CHUNK:p->kernel==2 && (op==CB_IO_HID_DESCRIPTOR || op==CB_IO_HID_GET_FEATURE)?CB_HID_LIMIT:p->kernel==2 && op==CB_IO_FILESYSTEM?512:64;
+}
 static cb_status_t kernel_call(uint64_t pid,struct publication *p,const struct cb_call_header *call,const unsigned char *payload,unsigned char **out,size_t *bytes){
-    size_t capacity=kernel_reply_capacity(p,call->operation);
+    size_t capacity=kernel_reply_capacity(p,call->operation,payload,call->payload_bytes);
     unsigned char *reply=allocate(sizeof(struct cb_reply_header)+capacity);if(!reply)return CB_RESOURCE_FAILURE;
     struct cb_reply_header h={.version={sizeof(h),1,0},.request=call->request,.status=CB_OK,.outcome=CB_COMMITTED,.provider_epoch=p->epoch};
     if(p->kernel==3){size_t actual=0;cb_status_t status=stream_call(pid,call,payload,reply+sizeof(h),&actual);if(status){release(reply);return status;}h.result_bytes=actual;
@@ -222,7 +244,7 @@ struct kernel_surface_result handles_surface_init(MODULE_ARGS){
     const char *memory_names[]={"allocate","free"};
     /* Build relocated pointers at runtime. A large local pointer initializer
        becomes an absolute .rodata pointer table in the flat PIC module. */
-    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access","registry","process_terminate","utc"};
+    static const char io_labels[][24]={"keyboard_subscribe","keyboard_protocol","keyboard_ack","keyboard_close","now_ns","process_launch","process_stop","process_reap","process_release","display_info","display_fill","display_blit","filesystem","owner_watch","display_copy","hid_subscribe","hid_list","hid_open","hid_descriptor","hid_start","hid_ack","hid_close","hid_get_feature","hid_set_feature","process_sample","credentials","identity_set","random","session","input_ancestor","input_focus_set","input_focus","identity_home","process_data","console_access","registry","process_terminate","utc","gpu"};
     const char *io_names[sizeof(io_labels)/sizeof(io_labels[0])];for(size_t i=0;i<sizeof(io_names)/sizeof(io_names[0]);++i)io_names[i]=io_labels[i];
     const struct cb_interface_id memory=CB_MEMORY_INTERFACE_ID,io=CB_IO_INTERFACE_ID,stream=CB_STREAM_INTERFACE_ID;const char *stream_names[]={"pipe","read","write"};
     return module_result(1,kernel_publication(CB_MEMORY_NAME,&memory,memory_names,2,1) && kernel_publication(CB_IO_NAME,&io,io_names,sizeof(io_names)/sizeof(io_names[0]),2) && kernel_publication(CB_STREAM_NAME,&stream,stream_names,3,3));
@@ -276,13 +298,13 @@ static cb_status_t invoke_mode(struct policy *owner,unsigned char *input,size_t 
             r->completed=1;
         }else if(p->dead){(void)error_reply(r,p->dead==2?CB_REVOKED:CB_PROVIDER_FAILED,CB_NOT_DISPATCHED);r->completed=1;}
         else if(p->kernel){
-            /* Native results are at most header+64 bytes. Reserve the caller's
-               copied result before a resource mutation can take effect. */
-            reserved_output=allocate(sizeof(struct cb_reply_header)+kernel_reply_capacity(p,call.operation));
+            /* Reserve the operation-sized caller result before a resource
+               mutation can take effect, including header-only GPU replies. */
+            reserved_output=allocate(sizeof(struct cb_reply_header)+kernel_reply_capacity(p,call.operation,input+sizeof(call),call.payload_bytes));
             if(!reserved_output){(void)error_reply(r,CB_RESOURCE_FAILURE,CB_NOT_DISPATCHED);r->completed=1;}
             else {
                 r->dispatched=1;unlock(flags);HP_KERNEL_BEGIN(owner);unsigned char *reply=NULL;size_t reply_bytes=0;cb_status_t status=kernel_call(owner->pid,p,&call,input+sizeof(call),&reply,&reply_bytes);HP_KERNEL_END(owner);flags=lock();
-                if(status){release(reserved_output);reserved_output=NULL;(void)error_reply(r,status,status==CB_RESOURCE_FAILURE && ((p->kernel==3 && call.operation==CB_STREAM_WRITE) || (p->kernel==2 && call.operation==CB_IO_FILESYSTEM))?CB_OUTCOME_UNKNOWN:CB_NOT_COMMITTED);}else {r->reply=reply;r->reply_bytes=reply_bytes;r->done=1;}r->completed=1;++p->completed;p->last_operation=call.operation;
+                if(status){release(reserved_output);reserved_output=NULL;(void)error_reply(r,status,status==CB_RESOURCE_FAILURE && ((p->kernel==3 && call.operation==CB_STREAM_WRITE) || (p->kernel==2 && (call.operation==CB_IO_FILESYSTEM || call.operation==CB_IO_GPU)))?CB_OUTCOME_UNKNOWN:CB_NOT_COMMITTED);}else {r->reply=reply;r->reply_bytes=reply_bytes;r->done=1;}r->completed=1;++p->completed;p->last_operation=call.operation;
             }
         }else{HP_HANDOFF(r,0);struct policy *provider=policy(p->pid);if(provider)wake(provider->receiver);}
     }
@@ -352,8 +374,8 @@ struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     unsigned char scratch[256];
     unsigned char *owned_input=g->input_bytes>sizeof(scratch)?allocate(g->input_bytes):NULL;
     unsigned char *input=g->input_bytes?(g->input_bytes<=sizeof(scratch)?scratch:owned_input):NULL,*output=NULL;size_t bytes=0;
-    if(g->input_bytes && (!input || !transfer(pid,g->input,input,g->input_bytes,0))){release(owned_input);HP_CAPTURE_DONE();HP_STAMP(hp_dispatch);HP_STAMP(hp_output);HP_FINISH(owner);return module_result(CB_RESOURCE_FAILURE,1);}
-    HP_CAPTURE_DONE();HP_STAMP(hp_dispatch);cb_status_t status=CB_BAD_REQUEST;uint64_t flags;
+    if(g->input_bytes && (!input || !transfer(pid,g->input,input,g->input_bytes,0))){release(owned_input);HP_CAPTURE_DONE();HP_ACTIVE_STAMP(hp_dispatch);HP_ACTIVE_STAMP(hp_output);HP_FINISH(owner);return module_result(CB_RESOURCE_FAILURE,1);}
+    HP_CAPTURE_DONE();HP_ACTIVE_STAMP(hp_dispatch);cb_status_t status=CB_BAD_REQUEST;uint64_t flags;
     if(owner->revoked && (g->operation==CB_SYSTEM_ACQUIRE || g->operation==CB_SYSTEM_PUBLISH || g->operation==CB_SYSTEM_STANDARD)){status=CB_REVOKED;}
     else if(g->operation==CB_SYSTEM_STANDARD && !g->input_bytes && g->value<3){g->value=owner->standard[g->value];status=CB_OK;}
     else if(g->operation==CB_SYSTEM_ACQUIRE){flags=lock();status=acquire(owner,input,g->input_bytes,&g->value);unlock(flags);}
@@ -373,7 +395,7 @@ struct kernel_surface_result handles_surface_gate(MODULE_ARGS){
     else if(g->operation==CB_SYSTEM_REPLY)status=respond(owner,input,g->input_bytes);
     else if(g->operation==CB_SYSTEM_RELEASE && g->input_bytes==8){uint64_t id;copy_bytes(&id,input,8);flags=lock();struct capability *cap=capability(pid,id);status=cap?CB_OK:CB_BAD_HANDLE;if(cap){if(cap->publisher)retire_publication(cap->publication,0);struct request *r=state.requests;while(r){struct request *next=r->next;if(r->pid==pid && r->cap==id)drop_request(r);r=next;}drop_capability(cap);}unlock(flags);}
     else if(g->operation==CB_SYSTEM_FORGET && g->input_bytes==sizeof(struct cb_request_id)){struct cb_request_id id;copy_bytes(&id,input,sizeof(id));flags=lock();struct request *r=state.requests;while(r && (r->pid!=pid || r->id.namespace_id!=id.namespace_id || r->id.serial!=id.serial))r=r->next;status=r?(r->done && (!r->dispatched || r->completed)?CB_OK:CB_BUSY):CB_BAD_REQUEST;if(r && status==CB_OK)drop_request(r);unlock(flags);}
-    HP_STAMP(hp_output);g->result_bytes=bytes;if(output){if(g->output_capacity<bytes){status=CB_BUFFER_TOO_SMALL;if(g->operation==CB_SYSTEM_INVOKE && g->output_capacity>=sizeof(struct cb_reply_header) && !transfer(pid,g->output,output,sizeof(struct cb_reply_header),1))status=CB_BAD_REQUEST;}else if(!transfer(pid,g->output,output,bytes,1))status=CB_BAD_REQUEST;}
+    HP_ACTIVE_STAMP(hp_output);g->result_bytes=bytes;if(output){if(g->output_capacity<bytes){status=CB_BUFFER_TOO_SMALL;if(g->operation==CB_SYSTEM_INVOKE && g->output_capacity>=sizeof(struct cb_reply_header) && !transfer(pid,g->output,output,sizeof(struct cb_reply_header),1))status=CB_BAD_REQUEST;}else if(!transfer(pid,g->output,output,bytes,1))status=CB_BAD_REQUEST;}
     release(owned_input);release(output);HP_FINISH(owner);return module_result(status,1);
 }
 struct kernel_surface_result handles_surface_post(MODULE_ARGS);

@@ -1,4 +1,4 @@
-# Startup memory ownership (x86-64, hub ABI 3.0)
+# Startup memory ownership (x86-64, hub ABI 3.1)
 
 
 ## Startup graph
@@ -34,15 +34,16 @@ UEFI firmware
             │   ├── wait for initial USB/hub discovery
             │   ├── find configured partition GUID over USB / NVMe / SATA
             │   ├── mount known ext4 driver volume; check boot origin and build ID
-            │   └── load selected future modules from /system/kmodules/drivers
-            └── provider startup worker (waits for volume readiness)
+            │   └── load selected disk modules from /system/kmodules/drivers (gpu-virtio by default)
+            └── provider startup worker (waits for volume AND selected-driver completion)
                 ├── adopt ext4 at /; mount verified ISO9660 boot filesystem at /boot; admit catalog
                 ├── bind provider PIDs to kernel backends before execution
                 ├── launch configured providers in readiness order
                 │   ├── keyboard → /@io → HID → shared USB interface
-                │   ├── mouse    → /@io → HID → same or separate interface
-                │   ├── display  → /@io → display kmodule
-                │   ├── graphics → /@display + /@io console authorization/owner watches
+                │   ├── display/graphics pair selection → graphics.backend status
+                │   ├── display-vga → /@io → framebuffer display kmodule
+                │   ├── graphics-vga → bundled TrueType face + /@display + /@io authorization/owner watches
+                │   ├── mouse    → /@io → HID; /@graphics-overlay for arrow composition
                 │   ├── text     → /@graphics + /@io console authorization
                 │   ├── filesystem → /@io → filesystem → format backend
                 │   ├── identity → /@filesystem → protected binary account database
@@ -77,6 +78,7 @@ may supply new boot pages; no fixed physical address is assumed.
 | Hub table references | `0xffff900001000000` | Page-backed on demand, RO/NX |
 | Hub providers | `0xffff900002000000` | Page-backed on demand, RO/NX |
 | Private invocation metadata | `0xffff900003000000` | Read-only primary mapping; kernel writes through private alias |
+| Hub method hash index | `0xffff900005000000` | RO/NX; 16 KiB buckets plus page-backed immutable nodes |
 | Kernel mediation stubs | `0xffff900004000000` | Page-backed on demand, RX |
 | Private array/stub aliases | Each primary array address + `0x10000000000` | Same physical pages, RW/NX; kernel construction only |
 | Page tables and reservation chunks | HHDM + physical | Reserved usable pages |
@@ -113,10 +115,10 @@ release those backing pages to other owners.
 
 Hub ABI3 separates stable method, table-reference and provider arrays from the
 one-page header. Individual physical pages are mapped as those arrays, private
-invocation metadata and RX mediation stubs grow. Each has a disjoint 16 MiB
+invocation metadata, the method hash index and RX mediation stubs grow. Each has a disjoint 16 MiB
 virtual reservation; this consumes no corresponding physical RAM upfront. Records
 are 56/72/96 bytes for methods/tables/providers, 16 bytes for invocation metadata,
-and 32 bytes per stub. The old shared 16 KiB capacity and static metadata arrays
+32 bytes per stub, and 16 bytes per hash node after the 16 KiB bucket directory. The old shared 16 KiB capacity and static metadata arrays
 are gone. Header counters report mapped backing and fully committed slot capacity.
 Current production adds process/handle/I/O methods, keyboard boot configuration
 and bootstrap application-state references. Boot header counters give the actual
@@ -384,3 +386,50 @@ Normal boot does not discover/install loose bundles. Only explicit `install`
 requests create new installations. The application manager, identity home builder
 and filesystem policy consume the shared registry through copied queries/pinned
 kernel snapshots; built-in provider bindings remain immutable.
+
+Graphics owns bitmap/container scene tables and composed-frame caches. Text creates
+its clipped viewport and reusable line surfaces through the graphics handle during
+provider initialization. Each graphical app owns its separate surface tree; only
+the authorized presenter's tree is composed. Mouse remains the independent generic
+overlay owner. None of these scene objects are kmodules or hardware framebuffers.
+
+
+## Rendering backend selection
+
+```text
+hwenum.hardware (PCI display devices)
+└── provider startup: logical display/graphics roles
+    ├── configuration-preserving gpu.opengl.probe + required release surface available?
+    ├── full display/graphics/font/overlay capabilities and both installations?
+    │   ├── yes → start display-opengl, then graphics-opengl; verify publications
+    │   │   └── failure → stop/reap pair → restore scanout → VGA fallback
+    │   │       └── uncertain cleanup → fail startup; do not run competing owners
+    │   └── no → start display-vga, then graphics-vga
+    └── public /@display and /@graphics → mouse/text/terminal/apps
+```
+
+`graphics.backend` is a bootstrap-owned, boot-lifetime status record (version,
+active pair, selection/failure reason, GPU/probe counts and PCI identity).
+Enumeration reuses hwenum; the selector does not claim hardware, map GPU registers
+or assume acceleration from PCI IDs. Catalog-authenticated suffixes bind to the
+existing display/graphics kernel roles. Current images include both provider pairs.
+The production virtio-vga probe checks framebuffer provenance, the saved VGA
+mode and actual offered features without taking over the device. The selected
+OpenGL display obtains the exact selected device over private `/@io`, then opens
+it. Failed startup reaps the pair before the driver verifies cleared ownership
+and firmware mode; uncertainty stops startup. Unsupported devices select VGA.
+
+Initial validation: four-CPU TCG VGA startup/input acceptance
+`bin/tests/console/12058f7a4d2044cea44789eafcd014fd/result.json`, and virtio-vga
+firmware fallback `bin/tests/console/a486d964ba104a7984ce295ebc9fb1a5/result.json`.
+Both detected one PCI display device and selected the working VGA pair. These
+checks establish fallback behavior, not accelerated execution or GPU-driver
+recovery on physical hardware.
+
+
+The default `drivers.modules` now loads `gpu-virtio` from the system partition.
+Once LIVE, provider selection invokes read-only `gpu_virtio.discover`, publishing
+`gpu.virtio.devices`; it does not invoke GPU open/reset/DMA/scanout. The existing
+production probe/release contract decides the pair; qualified VirGL takes over
+only when display-opengl opens the selected device. Qualification alone never
+resets hardware. Test observers remain restricted to copied acceptance media.

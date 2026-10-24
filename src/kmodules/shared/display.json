@@ -12,6 +12,10 @@
     {
       "name": "display.bind",
       "symbol": "display_surface_bind"
+    },
+    {
+      "name": "display.boot_info",
+      "symbol": "display_surface_boot_info"
     }
   ]
 }

@@ -1,0 +1,8 @@
+version=1
+executable=display-opengl.elf
+manifest=manifest.json
+ready=/@display
+installation_id=8046294795c0bbedaaedd46dba892720
+cpu=0
+stack_bytes=262144
+files=

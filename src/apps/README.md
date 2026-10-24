@@ -9,6 +9,8 @@ are registered alongside ordinary apps. Callers cannot override those bindings.
 | --- | --- |
 | terminal | Ordinary initial app; keyboard/text frontend, cwd, application discovery, stdio routing and pipelines |
 | launch | Ordinary launcher forwarding its own stdio bindings, waiting and returning the child result |
+| editor | Native graphical text editor; menus, file browser, UTF-8, undo/redo; same UI as the JS sample |
+| js | ES-module script runner / initial JavaScript REPL; handle-backed files, streams, child completion and timers |
 | true | Returns zero; accepts standard stream bindings without using them |
 | echo | Writes arguments and newline to stdout |
 | cat | Copies stdin or named files to stdout |
@@ -17,6 +19,7 @@ are registered alongside ordinary apps. Callers cannot override those bindings.
 | install | Signed local bundle inspection, own/global install and inactive-app removal through /@installer |
 | accounts | User/group management, non-echoed password changes and authenticated app execution through /@identity |
 | monitor | Read-only live process/handler monitor, CPU time and committed user pages; batch stdout snapshots |
+| bench3d | Rotating projected cubes with FPS, frame times, geometry/load and draw/present statistics |
 
 Only cd/clear/help/exit are terminal built-ins. Providers interpret their own
 configuration; neither bootstrap nor the terminal implements external utilities.
@@ -41,3 +44,9 @@ See [accounts](accounts/README.md) for management commands and identity inherita
 The [install utility](install/README.md) does not edit protected registry files.
 Runtime app basenames include their installation ID; friendly-name discovery uses
 the authoritative supplemental registry rather than directory scans or `_index`.
+
+See [JavaScript](js/README.md) for invocation, adapters and engine limits.
+
+See [native editor](editor/README.md) for `editor [path]`, controls and focused checks.
+
+See [bench3d](bench3d/README.md) for the native 3D benchmark, controls and timing interpretation.

@@ -54,18 +54,18 @@
     "stack_bytes": 65536
   },
   {
-    "name": "display",
-    "executable": "/system/handlers/display",
-    "manifest": "display/manifest.json",
+    "name": "display-vga",
+    "executable": "/system/handlers/display-vga",
+    "manifest": "display-vga/manifest.json",
     "installation_id": "8a4701a30e315e1df4ab50d47a6623cc",
     "flags": 8,
     "cpu": 0,
     "stack_bytes": 262144
   },
   {
-    "name": "graphics",
-    "executable": "/system/handlers/graphics",
-    "manifest": "graphics/manifest.json",
+    "name": "graphics-vga",
+    "executable": "/system/handlers/graphics-vga",
+    "manifest": "graphics-vga/manifest.json",
     "installation_id": "d33f70360e682facfa698f97f0c636c9",
     "flags": 8,
     "cpu": 0,
@@ -184,6 +184,51 @@
     "executable": "/system/apps/install",
     "manifest": "install/manifest.json",
     "installation_id": "636c6f756462657272792e696e73746c",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "js",
+    "executable": "/system/apps/js",
+    "manifest": "js/manifest.json",
+    "installation_id": "636c6f756462657272792e6a73000000",
+    "flags": 3,
+    "cpu": 0,
+    "stack_bytes": 524288
+  },
+  {
+    "name": "editor",
+    "executable": "/system/apps/editor",
+    "manifest": "editor/manifest.json",
+    "installation_id": "636c6f756462657272792e6564697400",
+    "flags": 1,
+    "cpu": 0,
+    "stack_bytes": 524288
+  },
+  {
+    "name": "display-opengl",
+    "executable": "/system/handlers/display-opengl",
+    "manifest": "display-opengl/manifest.json",
+    "installation_id": "8046294795c0bbedaaedd46dba892720",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "graphics-opengl",
+    "executable": "/system/handlers/graphics-opengl",
+    "manifest": "graphics-opengl/manifest.json",
+    "installation_id": "dece006883e43d6e0797e65b291c3264",
+    "flags": 8,
+    "cpu": 0,
+    "stack_bytes": 262144
+  },
+  {
+    "name": "bench3d",
+    "executable": "/system/apps/bench3d",
+    "manifest": "bench3d/manifest.json",
+    "installation_id": "636c6f756462657272792e336462656e",
     "flags": 1,
     "cpu": 0,
     "stack_bytes": 262144

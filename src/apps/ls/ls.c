@@ -3,6 +3,11 @@
 #include "../../interfaces/text.h"
 static struct cb_client client;
 static cb_handle_t memory;
+/* Directory listings are noninteractive output: amortize stream/broker and
+ * terminal repaint work without changing pipe backpressure or column layout. */
+static char output_buffer[4096];static size_t output_bytes;
+static void output(cb_handle_t out,const void *data,size_t bytes){const unsigned char *p=data;while(bytes){size_t n=sizeof(output_buffer)-output_bytes;if(n>bytes)n=bytes;cb_copy(output_buffer+output_bytes,p,n);output_bytes+=n;p+=n;bytes-=n;if(output_bytes==sizeof(output_buffer)){CB_REQUIRE(cb_write_all(&client,out,output_buffer,output_bytes)==CB_OK);output_bytes=0;}}}
+static void output_finish(cb_handle_t out){if(output_bytes){CB_REQUIRE(cb_write_all(&client,out,output_buffer,output_bytes)==CB_OK);output_bytes=0;}}
 struct item {uint16_t bytes;char name[256];};
 static void release(void *pointer){struct cb_memory_request request={.address=(uintptr_t)pointer};CB_REQUIRE(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_FREE,&request,sizeof(request),0)==CB_OK);}
 static void *grow(void *pointer,size_t old_bytes,size_t bytes){
@@ -42,10 +47,11 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){
     while(columns>1 && cell*columns>width-1)--columns;
     cell=(width-1)/columns;
     for(size_t i=0;i<count;++i){
-        CB_REQUIRE(cb_write_all(&client,out,items[i].name,items[i].bytes)==CB_OK);
-        if((i+1)%columns==0 || i+1==count)CB_REQUIRE(cb_write_all(&client,out,"\n",1)==CB_OK);
-        else {static const char spaces[]="                                                                ";size_t padding=cell-items[i].bytes;while(padding){size_t n=padding>sizeof(spaces)-1?sizeof(spaces)-1:padding;CB_REQUIRE(cb_write_all(&client,out,spaces,n)==CB_OK);padding-=n;}}
+        output(out,items[i].name,items[i].bytes);
+        if((i+1)%columns==0 || i+1==count)output(out,"\n",1);
+        else {static const char spaces[]="                                                                ";size_t padding=cell-items[i].bytes;while(padding){size_t n=padding>sizeof(spaces)-1?sizeof(spaces)-1:padding;output(out,spaces,n);padding-=n;}}
     }
+    output_finish(out);
     if(items)release(items);
     cb_exit(0);
 }

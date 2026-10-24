@@ -8,7 +8,15 @@
         "fill",
         "glyph",
         "blit",
-        "glyphs"
+        "glyphs",
+        "font_info",
+        "text_batch",
+        "present",
+        "surface_create",
+        "surface_release",
+        "surface_place",
+        "surface_scroll",
+        "rectangle"
       ]
     },
     {

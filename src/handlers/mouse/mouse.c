@@ -1,16 +1,19 @@
 #include "../../sdk/service.h"
 #include "../../interfaces/io.h"
 #include "../../interfaces/mouse.h"
+#include "../../interfaces/graphics-overlay.h"
+#include "../../interfaces/display.h"
 #include "hid.h"
 static struct cb_client client,reply;
 static cb_handle_t memory,io,publication;
 static uint64_t subscription,epoch,sequence,evicted_sequence,evicted_ns;
 static unsigned char incoming[CB_FRAME_LIMIT],outgoing[CB_FRAME_LIMIT];
 struct mouse {struct mouse *next;struct cb_io_hid_device usb;uint64_t id,seen;struct mouse_hid hid;unsigned rejected;};
-struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_mouse_read read;uint64_t grant_ns,process;};
+struct pending {struct pending *next;struct cb_delivery_header delivery;struct cb_mouse_read read;uint64_t grant_ns,process;unsigned cursor_records;};
 static uint64_t scan_serial,focus_generation,focus_floor;
 static struct mouse *devices;static struct pending *pending,*spare;
-static struct cb_mouse_event *history;static size_t capacity,count,head;
+struct mouse_record {struct cb_mouse_event event;struct cb_mouse_cursor cursor;};
+static struct mouse_record *history;static size_t capacity,count,head;
 static void *allocate(size_t bytes){struct cb_memory_request r={.bytes=bytes};if(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_ALLOCATE,&r,sizeof(r),0))return NULL;struct cb_memory_result value;cb_copy(&value,cb_result(&client),sizeof(value));return (void *)(uintptr_t)value.address;}
 static void release(void *p){if(!p)return;struct cb_memory_request r={.address=(uintptr_t)p};CB_REQUIRE(cb_invoke(&client,memory,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID,CB_MEMORY_FREE,&r,sizeof(r),0)==CB_OK);}
 static void *parser_alloc(void *ctx,size_t bytes){(void)ctx;return allocate(bytes);}
@@ -19,17 +22,18 @@ static int same_id(const void *a,const void *b,size_t n){for(size_t i=0;i<n;++i)
 static cb_status_t invoke(unsigned op,const void *p,size_t bytes){return cb_invoke(&client,io,(struct cb_interface_id)CB_IO_INTERFACE_ID,op,p,bytes,0);}
 static cb_status_t connection(unsigned op,uint64_t id){struct cb_io_subscription r={id};return invoke(op,&r,sizeof(r));}
 static uint64_t now(void){CB_REQUIRE(invoke(CB_IO_NOW_NS,NULL,0)==CB_OK);uint64_t value;cb_copy(&value,cb_result(&client),8);return value;}
-static struct cb_mouse_event *at(size_t index){return history+(head+index)%capacity;}
+#include "cursor.inc"
+static struct cb_mouse_event *at(size_t index){return &history[(head+index)%capacity].event;}
 static void prune(uint64_t time){while(count && time>=at(0)->timestamp_ns && time-at(0)->timestamp_ns>UINT64_C(5000000000)){evicted_sequence=at(0)->sequence;evicted_ns=at(0)->timestamp_ns;head=(head+1)%capacity;--count;}}
 static void emit(struct mouse *m,unsigned kind,unsigned status,const struct mouse_hid_input *value,uint64_t time){
-    prune(time);if(count==capacity){size_t n=capacity?capacity*2:64;struct cb_mouse_event *larger=n>capacity && n<=SIZE_MAX/sizeof(*history)?allocate(n*sizeof(*history)):NULL;
-        if(larger){for(size_t i=0;i<count;++i)larger[i]=*at(i);release(history);history=larger;capacity=n;head=0;}
-        else {CB_REQUIRE(capacity);evicted_sequence=sequence;evicted_ns=time;count=head=0;CB_REQUIRE(sequence!=UINT64_MAX);history[count++]=(struct cb_mouse_event){.version={sizeof(*history),1,0},.sequence=++sequence,.timestamp_ns=time,.kind=CB_MOUSE_RESET};}
+    cursor_update(m,kind,value);prune(time);if(count==capacity){size_t n=capacity?capacity*2:64;struct mouse_record *larger=n>capacity && n<=SIZE_MAX/sizeof(*history)?allocate(n*sizeof(*history)):NULL;
+        if(larger){for(size_t i=0;i<count;++i)larger[i]=history[(head+i)%capacity];release(history);history=larger;capacity=n;head=0;}
+        else {CB_REQUIRE(capacity);evicted_sequence=sequence;evicted_ns=time;count=head=0;CB_REQUIRE(sequence!=UINT64_MAX);history[count].cursor=cursor;history[count++].event=(struct cb_mouse_event){.version={sizeof(struct cb_mouse_event),1,0},.sequence=++sequence,.timestamp_ns=time,.kind=CB_MOUSE_RESET};}
     }
     /* A reset may have filled a one-entry buffer; normal buffers start at 64. */
     CB_REQUIRE(count<capacity && sequence!=UINT64_MAX);struct cb_mouse_event e={.version={sizeof(e),1,0},.sequence=++sequence,.device_id=m?m->id:0,.timestamp_ns=time,.kind=kind,.status=status,.resolution_x=1,.resolution_y=1};
     if(value){e.flags=value->flags;e.dx=value->dx;e.dy=value->dy;e.x=value->x;e.y=value->y;e.wheel_x=value->wheel_x;e.wheel_y=value->wheel_y;e.buttons=value->buttons;e.changed=value->changed;e.resolution_x=value->resolution_x;e.resolution_y=value->resolution_y;}else if(m){e.flags=m->hid.flags;e.x=m->hid.x;e.y=m->hid.y;e.buttons=m->hid.buttons;}
-    *at(count++)=e;
+    *at(count)=e;history[(head+count)%capacity].cursor=cursor;++count;
 }
 static void respond(const struct cb_delivery_header *d,cb_status_t status,const void *p,size_t bytes){
     cb_status_t sent;
@@ -42,10 +46,10 @@ static void respond(const struct cb_delivery_header *d,cb_status_t status,const 
 static cb_status_t input_access(uint64_t pid){cb_status_t s=invoke(CB_IO_INPUT_FOCUS,&pid,8);if(s)return s;struct cb_io_input_focus focus;cb_copy(&focus,cb_result(&client),sizeof(focus));if(focus.generation!=focus_generation){focus_generation=focus.generation;focus_floor=sequence;}return focus.process && focus.session!=focus.caller_session?CB_DENIED:CB_OK;}
 static int read_request(struct pending *p,uint64_t time){
     cb_status_t access=input_access(p->process);if(access){respond(&p->delivery,access,NULL,0);return 1;}
-    struct cb_mouse_read *r=&p->read;struct cb_mouse_batch batch={.version={sizeof(batch),1,0},.provider_epoch=epoch,.next_sequence=sequence};int initial=!r->provider_epoch && !r->after_sequence;
+    struct cb_mouse_read *r=&p->read;struct cb_mouse_batch batch={.version={sizeof(batch),1,p->cursor_records?1:0},.provider_epoch=epoch,.next_sequence=sequence};int initial=!r->provider_epoch && !r->after_sequence;
     if(r->after_sequence<focus_floor || (!initial && r->provider_epoch!=epoch) || r->after_sequence>sequence || (initial?p->grant_ns<=evicted_ns && evicted_sequence:r->after_sequence<evicted_sequence)){respond(&p->delivery,CB_INPUT_RESYNC,&batch,sizeof(batch));return 1;}
-    size_t slots=(sizeof(outgoing)-sizeof(struct cb_reply_header)-sizeof(batch)-512)/sizeof(struct cb_mouse_event);if(slots>r->max_events)slots=r->max_events;size_t bytes=sizeof(batch);
-    for(size_t i=0;i<count && batch.count<slots;++i){struct cb_mouse_event *e=at(i);if(e->sequence<=r->after_sequence || e->timestamp_ns<p->grant_ns)continue;cb_copy(outgoing+bytes,e,sizeof(*e));bytes+=sizeof(*e);batch.next_sequence=e->sequence;++batch.count;}
+    size_t record_bytes=p->cursor_records?sizeof(struct cb_mouse_cursor_event):sizeof(struct cb_mouse_event);size_t slots=(sizeof(outgoing)-sizeof(struct cb_reply_header)-sizeof(batch)-512)/record_bytes;if(slots>r->max_events)slots=r->max_events;size_t bytes=sizeof(batch);
+    for(size_t i=0;i<count && batch.count<slots;++i){struct cb_mouse_event *e=at(i);if(e->sequence<=r->after_sequence || e->timestamp_ns<p->grant_ns)continue;if(p->cursor_records){struct cb_mouse_cursor_event record={.event=*e,.cursor=history[(head+i)%capacity].cursor};record.event.version.bytes=sizeof(record);record.event.version.minor=1;cb_copy(outgoing+bytes,&record,sizeof(record));}else cb_copy(outgoing+bytes,e,sizeof(*e));bytes+=record_bytes;batch.next_sequence=e->sequence;++batch.count;}
     if(!batch.count){if(p->delivery.call.deadline_ns && time>=p->delivery.call.deadline_ns){respond(&p->delivery,CB_TIMEOUT,NULL,0);return 1;}return 0;}cb_copy(outgoing,&batch,sizeof(batch));respond(&p->delivery,CB_OK,outgoing,bytes);return 1;
 }
 static void serve(uint64_t time){struct pending **at=&pending;while(*at){struct pending *p=*at;if(read_request(p,time)){*at=p->next;if(!spare)spare=p;else release(p);}else at=&p->next;}}
@@ -77,13 +81,14 @@ static void remove_mouse(struct mouse *m,unsigned status,uint64_t time){
     struct mouse **at=&devices;while(*at!=m)at=&(*at)->next;*at=m->next;mouse_hid_free(&m->hid);release(m);
 }
 __attribute__((noreturn)) void _start(void){
-    memory=cb_acquire(CB_MEMORY_NAME,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID);io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);CB_REQUIRE(invoke(CB_IO_HID_SUBSCRIBE,NULL,0)==CB_OK);cb_copy(&subscription,cb_result(&client),8);
-    static const char *names[]={"read","state"};publication=cb_publish(&client,CB_MOUSE_NAME,(struct cb_interface_id)CB_MOUSE_INTERFACE_ID,names,2);
+    memory=cb_acquire(CB_MEMORY_NAME,(struct cb_interface_id)CB_MEMORY_INTERFACE_ID);io=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);cursor_init();CB_REQUIRE(invoke(CB_IO_HID_SUBSCRIBE,NULL,0)==CB_OK);cb_copy(&subscription,cb_result(&client),8);
+    static const char *names[]={"read","state","cursor_info","read_cursor","cursor_hide","cursor_show"};publication=cb_publish(&client,CB_MOUSE_NAME,(struct cb_interface_id)CB_MOUSE_INTERFACE_ID,names,6);
     struct cb_describe_request describe={.version={sizeof(describe),1,0},.interface=CB_MOUSE_INTERFACE_ID};CB_REQUIRE(cb_invoke(&client,publication,(struct cb_interface_id)CB_HANDLE_INTERFACE_ID,CB_HANDLE_DESCRIBE,&describe,sizeof(describe),0)==CB_OK);struct cb_description reflected;cb_copy(&reflected,cb_result(&client),sizeof(reflected));epoch=reflected.provider_epoch;CB_REQUIRE(epoch);discover();
     for(;;){uint64_t time=now();prune(time);serve(time);uint64_t deadline=0;for(struct pending *p=pending;p;p=p->next)if(p->delivery.call.deadline_ns && (!deadline || p->delivery.call.deadline_ns<deadline))deadline=p->delivery.call.deadline_ns;
         uint64_t bytes;cb_status_t status=cb_system_receive(incoming,sizeof(incoming),&bytes,deadline);if(status==CB_TIMEOUT)continue;CB_REQUIRE(status==CB_OK && bytes>=sizeof(struct cb_delivery_header));struct cb_delivery_header d;cb_copy(&d,incoming,sizeof(d));CB_REQUIRE(d.call.version.bytes==sizeof(d) && d.context_bytes<=bytes-sizeof(d) && d.call.payload_bytes==bytes-sizeof(d)-d.context_bytes);const unsigned char *payload=incoming+sizeof(d)+d.context_bytes;
         if(d.call.flags==(CB_CALL_PROVIDER_DELIVERY|CB_CALL_SYSTEM_EVENT)){
-            if(!d.call.handle && d.call.operation==CB_HANDLE_RELEASE){while(pending){struct pending *p=pending;pending=p->next;respond(&p->delivery,CB_REVOKED,NULL,0);release(p);}CB_REQUIRE(connection(CB_IO_HID_CLOSE,subscription)==CB_OK);while(devices){struct mouse *m=devices;devices=m->next;mouse_hid_free(&m->hid);release(m);}release(history);release(spare);cb_system_release(publication);cb_exit(0);}
+            if(!d.call.handle && d.call.operation==CB_HANDLE_RELEASE){if(cursor_hidden_owner){CB_REQUIRE(cursor_watch(cursor_hidden_owner,0)==CB_OK);cursor_hidden_owner=0;}while(pending){struct pending *p=pending;pending=p->next;respond(&p->delivery,CB_REVOKED,NULL,0);release(p);}CB_REQUIRE(connection(CB_IO_HID_CLOSE,subscription)==CB_OK);while(devices){struct mouse *m=devices;devices=m->next;mouse_hid_free(&m->hid);release(m);}release(history);release(spare);(void)cursor_call(CB_OVERLAY_HIDE,NULL,0);cb_system_release(overlay);cb_system_release(publication);cb_exit(0);}
+            if(d.call.operation==CB_IO_OWNER_EXIT && d.call.handle==CURSOR_WATCH && d.call.payload_bytes==8){uint64_t owner;cb_copy(&owner,payload,8);if(owner==cursor_hidden_owner)cursor_end_hide();continue;}
             if(d.call.operation!=CB_IO_HID_EVENT || !same_id(&d.call.interface,&(struct cb_interface_id)CB_IO_INTERFACE_ID,sizeof(d.call.interface)) || d.call.payload_bytes<sizeof(struct cb_io_hid_event))continue;
             struct cb_io_hid_event event;cb_copy(&event,payload,sizeof(event));CB_REQUIRE(event.subscription==subscription && event.bytes==d.call.payload_bytes-sizeof(event) && event.bytes<=CB_HID_LIMIT);if(event.kind==CB_IO_ERROR && event.status==CB_PROVIDER_FAILED)cb_exit(CB_PROVIDER_FAILED);CB_REQUIRE(connection(CB_IO_HID_ACK,event.connection?event.connection:subscription)==CB_OK);
             if(event.kind==CB_IO_HID_CHANGED){discover();continue;}
@@ -94,7 +99,9 @@ __attribute__((noreturn)) void _start(void){
         }
         struct cb_admission caller;if(d.call.flags!=CB_CALL_PROVIDER_DELIVERY || d.call.handle!=publication || !cb_admission_parse(incoming+sizeof(d),d.context_bytes,&caller)){respond(&d,CB_DENIED,NULL,0);continue;}
         if(d.call.operation==CB_MOUSE_STATE && d.call.payload_bytes==8){cb_status_t access=input_access(caller.process);if(access){respond(&d,access,NULL,0);continue;}uint64_t cursor;cb_copy(&cursor,payload,8);struct cb_mouse_state state={.version={sizeof(state),1,0},.provider_epoch=epoch,.last_sequence=sequence};struct mouse *m=devices;while(m){if(!m->rejected){if(!cursor)break;--cursor;}m=m->next;}cb_copy(outgoing,&state,sizeof(state));size_t n=sizeof(state);if(m){state.count=1;struct cb_mouse_device item={m->id,m->usb.device,m->usb.generation,m->usb.interface,m->hid.flags,m->hid.x,m->hid.y,m->hid.buttons};cb_copy(outgoing,&state,sizeof(state));cb_copy(outgoing+n,&item,sizeof(item));n+=sizeof(item);}respond(&d,CB_OK,outgoing,n);}
-        else if(d.call.operation==CB_MOUSE_READ && d.call.payload_bytes==sizeof(struct cb_mouse_read)){struct pending p={.delivery=d,.grant_ns=caller.grant_ns,.process=caller.process};cb_copy(&p.read,payload,sizeof(p.read));if(p.read.version.bytes!=sizeof(p.read) || p.read.version.major!=1 || p.read.version.minor || p.read.reserved || !p.read.max_events){respond(&d,CB_BAD_REQUEST,NULL,0);continue;}if(!read_request(&p,now())){struct pending *save=spare;if(save)spare=NULL;else save=allocate(sizeof(*save));if(!save){respond(&d,CB_RESOURCE_FAILURE,NULL,0);continue;}*save=p;save->next=pending;pending=save;}}
+        else if((d.call.operation==CB_MOUSE_CURSOR_HIDE || d.call.operation==CB_MOUSE_CURSOR_SHOW) && !d.call.payload_bytes){respond(&d,cursor_control(caller.process,d.call.operation==CB_MOUSE_CURSOR_HIDE),NULL,0);}
+        else if(d.call.operation==CB_MOUSE_CURSOR_INFO && !d.call.payload_bytes){cb_status_t access=input_access(caller.process);respond(&d,access,access?NULL:&cursor,access?0:sizeof(cursor));}
+        else if((d.call.operation==CB_MOUSE_READ || d.call.operation==CB_MOUSE_READ_CURSOR) && d.call.payload_bytes==sizeof(struct cb_mouse_read)){struct pending p={.delivery=d,.grant_ns=caller.grant_ns,.process=caller.process,.cursor_records=d.call.operation==CB_MOUSE_READ_CURSOR};cb_copy(&p.read,payload,sizeof(p.read));if(p.read.version.bytes!=sizeof(p.read) || p.read.version.major!=1 || p.read.version.minor || p.read.reserved || !p.read.max_events){respond(&d,CB_BAD_REQUEST,NULL,0);continue;}if(!read_request(&p,now())){struct pending *save=spare;if(save)spare=NULL;else save=allocate(sizeof(*save));if(!save){respond(&d,CB_RESOURCE_FAILURE,NULL,0);continue;}*save=p;save->next=pending;pending=save;}}
         else respond(&d,CB_BAD_REQUEST,NULL,0);
     }
 }

@@ -3,8 +3,9 @@
 #include <stdint.h>
 /* Test-only, trusted hub surface; never exposed to applications or candidate. */
 enum {HP_ACTORS=8,HP_OPS=8,HP_CPUS=4,HP_PHASES=6};
-enum {HP_BEGIN=1,HP_END,HP_READ,HP_LIVE};
+enum {HP_BEGIN=1,HP_END,HP_READ,HP_LIVE,HP_PAUSE,HP_STATUS};
 enum {HP_CHECK,HP_CAPTURE,HP_BROKER,HP_WAIT,HP_KERNEL,HP_OUTPUT};
+struct hp_status {uint64_t enabled,active,generation;};
 struct hp_row {uint64_t count,total_ns,phase_ns[HP_PHASES],max_ns;};
 struct hp_locks {uint64_t count,wait_ns,hold_ns,max_wait_ns,max_hold_ns;};
 struct hp_report {

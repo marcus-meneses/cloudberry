@@ -2,7 +2,9 @@
 #include "../../boot/limine.h"
 #include "../../interfaces/display.h"
 #include "mem-pages.h"
+#include "display-boot.h"
 static struct framebuffer screen;
+static uint64_t boot_frames;
 static uint64_t owner;static const struct kernel_surfaces *display_hub;
 /* Resident I/O-backend state, never exposed through a handle. The shadow is
  * allocated lazily; a full initial paint avoids reading slow framebuffer RAM. */
@@ -27,8 +29,9 @@ static int synchronize_shadow(void){
     shadow_valid=1;return 1;
 }
 int display_init(const struct framebuffer_response *r){
+    boot_frames=0;
     if(!r || !r->count || !r->frames || !r->frames[0])return 0;
-    screen=*r->frames[0];if(screen.red_shift>24 || screen.green_shift>24 || screen.blue_shift>24)return 0;uint32_t red=255u<<screen.red_shift,green=255u<<screen.green_shift,blue=255u<<screen.blue_shift;if((red&green) || (red&blue) || (green&blue))return 0;return screen.address && screen.width && screen.height && screen.width<=UINT32_MAX && screen.height<=UINT32_MAX && screen.bpp==32 && screen.model==1 && screen.red_size==8 && screen.green_size==8 && screen.blue_size==8 && screen.red_shift<=24 && screen.green_shift<=24 && screen.blue_shift<=24 && screen.width<=UINT64_MAX/4 && screen.pitch>=screen.width*4 && screen.height<=UINTPTR_MAX/screen.pitch && screen.height*screen.pitch<=UINTPTR_MAX-(uintptr_t)screen.address;
+    screen=*r->frames[0];if(screen.red_shift>24 || screen.green_shift>24 || screen.blue_shift>24)return 0;uint32_t red=255u<<screen.red_shift,green=255u<<screen.green_shift,blue=255u<<screen.blue_shift;if((red&green) || (red&blue) || (green&blue))return 0;int valid=screen.address && screen.width && screen.height && screen.width<=UINT32_MAX && screen.height<=UINT32_MAX && screen.bpp==32 && screen.model==1 && screen.red_size==8 && screen.green_size==8 && screen.blue_size==8 && screen.red_shift<=24 && screen.green_shift<=24 && screen.blue_shift<=24 && screen.width<=UINT64_MAX/4 && screen.pitch>=screen.width*4 && screen.height<=UINTPTR_MAX/screen.pitch && screen.height*screen.pitch<=UINTPTR_MAX-(uintptr_t)screen.address;boot_frames=valid?r->count:0;return valid;
 }
 struct kernel_surface_result display_surface_bind(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);const char *name=(const void *)a,*expected="display";while(*name && *name==*expected){++name;++expected;}if(!*name && !*expected)owner=b;return module_result(1,1);}
 static void copy(void *dst,const void *src,size_t n){unsigned char *d=dst;const unsigned char *s=src;while(n--)*d++=*s++;}
@@ -70,3 +73,8 @@ int display_invoke(struct io_invocation *r){
 
 struct kernel_surface_result display_surface_init(MODULE_ARGS){MODULE_UNUSED();if(display_hub)return module_result(1,display_hub==(const void *)a);if(!a || !c)return module_result(0,0);if(!display_init((const void *)c))return module_result(0,0);display_hub=(const void *)a;return module_result(1,1);}
 struct kernel_surface_result display_surface_invoke(MODULE_ARGS){MODULE_UNUSED();if(!a)return module_result(0,0);return module_result(1,display_invoke((void *)a));}
+
+struct kernel_surface_result display_surface_boot_info(MODULE_ARGS){
+    MODULE_UNUSED();if(!boot_frames || !a || b!=sizeof(struct display_boot_info) || c || d || e || f)return module_result(0,0);
+    *(struct display_boot_info *)a=(struct display_boot_info){boot_frames,screen.width,screen.height,screen.pitch};return module_result(boot_frames,1);
+}

@@ -1,10 +1,12 @@
 #include "bootstrap-apps.h"
 #include "bootstrap.h"
+#include "bootstrap-load.h"
 #include "config.h"
 #include "process.h"
 #include "handles.h"
 #include "threads.h"
 #include "provider-definition.h"
+#include "render-selection.h"
 #include "../../interfaces/startup.h"
 #include "../../interfaces/installations.h"
 #include "../../kernel/cpu.h"
@@ -22,6 +24,8 @@ static int enter(void){unsigned expected=0;return apps.hub && !CALL(apps.cpu,CPU
 static void leave(void){__atomic_store_n(&apps.operation,0,__ATOMIC_RELEASE);}
 static const struct config_value *config(const char *name,unsigned type){const struct kernel_hub_table *t=kernel_hub_find_table(apps.hub,name);const struct config_value *v=t?(const void *)t->address:NULL;return v && v->major==1 && v->type==type && v->data?v:NULL;}
 static char *path(const char *directory,const char *suffix){size_t n=length(directory),m=length(suffix);while(n && directory[n-1]=='/')--n;if(n>SIZE_MAX-m-2)return NULL;char *p=allocate(n+m+2);if(p){copy(p,directory,n);p[n]='/';copy(p+n+1,suffix,m+1);}return p;}
+static struct render_selection render_status;
+static unsigned render_started;
 static void log_text(const char *s);
 #ifdef CB_BOOT_TIMING
 static void boot_trace(const char *phase,const char *name){log_text("BOOT-TIME provider ");log_text(phase);log_text(" ");log_text(name);log_text("\n");}
@@ -53,7 +57,10 @@ int bootstrap_apps_init(const struct kernel_surfaces *hub,uintptr_t heap){
     BIND(alloc,"mem.calloc");BIND(free,"mem.free");BIND(stat,"ext4_fs.stat");BIND(read,"ext4_fs.read");BIND(load,"process.load");BIND(admit,"handles.admit");BIND(start,"process.start");BIND(reap,"process.reap");BIND(process_info,"process.info");BIND(thread,"threads.control");BIND(create,"threads.create");BIND(clock,"clock.now_ns");BIND(cpu,"cpu.control");BIND(inspect,"handles.inspect");
 #undef BIND
     apps.hub=hub;apps.heap=heap;struct kernel_hub_table table={.owner=kernel_surface_owner(hub,"bootstrap.init"),.name="bootstrap.applications",.address=(uintptr_t)&apps.info,.bytes=sizeof(apps.info),.count=1,.entry_bytes=sizeof(apps.info)};
-    kernel_surface_call publish=kernel_surface_find(hub,"hub.publish_table");return publish && !CALL(publish,&table,0,0).status;
+    kernel_surface_call publish=kernel_surface_find(hub,"hub.publish_table");if(!publish || CALL(publish,&table,0,0).status)return 0;
+    render_status=(struct render_selection){.bytes=sizeof(render_status),.major=1,.hardware_index=UINT64_MAX};
+    table=(struct kernel_hub_table){.owner=kernel_surface_owner(hub,"bootstrap.init"),.name="graphics.backend",.address=(uintptr_t)&render_status,.bytes=sizeof(render_status),.count=1,.entry_bytes=sizeof(render_status)};
+    return !CALL(publish,&table,0,0).status;
 }
 static void refresh(struct application *record){
     struct process_info p;struct handle_publication_info publication;
@@ -144,13 +151,79 @@ static int wait_provider(const char **phase){
         if(CALL(apps.thread,THREAD_BLOCK_UNTIL,wake,0).status){*phase="readiness wait";return 0;}
     }
 }
+/* Provider pairs are exclusive: stop/reap a failed accelerated pair before
+ * binding the VGA roles. Never race two publishers for /@display or /@graphics. */
+static int render_discard(struct application *marker){
+    kernel_surface_call terminate=kernel_surface_find(apps.hub,"process.terminate");
+    struct kernel_surface_result now=CALL(apps.clock,0,0,0);if(now.status || now.value>UINT64_MAX-UINT64_C(5000000000))return 0;
+    uint64_t deadline=now.value+UINT64_C(5000000000);
+    while(apps.first!=marker){struct application *p=apps.first;if(!p)return 0;
+        struct process_info info;if(!CALL(apps.process_info,p->process,&info,0).status && info.state==PROCESS_RUNNING && (!terminate || CALL(terminate,p->process,0,0).status))return 0;
+        while(CALL(apps.reap,p->process,0,0).status){
+            now=CALL(apps.clock,0,0,0);if(now.status||now.value>=deadline)return 0;
+            if(CALL(apps.thread,THREAD_BLOCK_UNTIL,now.value+1000000,0).status)return 0;
+        }
+        /* Reap must have removed the old publications and in-flight readers. */
+        struct handle_publication_info pub;if(*p->ready&&!CALL(apps.inspect,p->ready,&pub,0).status&&pub.process==p->process)return 0;
+        apps.first=p->next;--apps.info.count;release(p->bundle);release(p->ready);release(p);
+    }
+    apps.info.state=2;apps.info.error=0;return 1;
+}
+static int render_pair(uint64_t filesystem,const char *display,const char *graphics,const char **phase){
+    const char *names[]={display,graphics};for(unsigned i=0;i<2;i++){
+        *phase=names[i];if(bootstrap_surface_launch(filesystem,(uintptr_t)names[i],0,0,0,0).status || !wait_provider(phase))return 0;
+    }return 1;
+}
+static int render_start(uint64_t filesystem,const char **phase){
+    if(render_started)return 0;
+    if(!installations(filesystem))return 0;
+    kernel_surface_call discover=kernel_surface_find_version(apps.hub,"gpu_virtio.discover",1,0);
+    if(discover){struct kernel_surface_result discovered=CALL(discover,0,0,0);log_text("bootstrap: virtio-gpu discovery ");if(discovered.status)log_text("unavailable");else log_number(discovered.value);log_text("\n");}
+    const struct kernel_hub_table *inventory=kernel_hub_find_table(apps.hub,HWENUM_TABLE_NAME);
+    kernel_surface_call probe=kernel_surface_find_version(apps.hub,RENDER_PROBE_SURFACE,1,0),drop=kernel_surface_find_version(apps.hub,RENDER_RELEASE_SURFACE,1,0);
+    struct cb_install_record r;int providers=apps.catalog && cb_install_find(apps.catalog,"display-opengl",14,NULL,&r) && r.flags==CB_INSTALL_PROVIDER && cb_install_find(apps.catalog,"graphics-opengl",15,NULL,&r) && r.flags==CB_INSTALL_PROVIDER;
+    unsigned backend=render_select(inventory?(const void *)inventory->address:NULL,inventory?inventory->bytes:0,probe,drop!=NULL,providers,&render_status);
+    log_text("bootstrap: GPU discovery: ");log_number(render_status.devices);log_text(" display device(s), ");log_number(render_status.candidates);log_text(" qualified accelerator(s)\n");
+    if(backend==RENDER_OPENGL){struct application *marker=apps.first;
+        log_text("bootstrap: trying display-opengl + graphics-opengl\n");
+        if(render_pair(filesystem,"display-opengl","graphics-opengl",phase)){render_started=1;render_status.state=RENDER_ACTIVE;return 1;}
+        render_status.reason=RENDER_START_FAILED;
+        if(!render_discard(marker)||drop(render_status.hardware_index,0,0,0,0,0).status){render_status.state=RENDER_FAILED;render_status.reason=RENDER_CLEANUP_FAILED;return 0;}
+    }
+    render_status.backend=RENDER_VGA;
+    log_text("bootstrap: selecting display-vga + graphics-vga (fallback reason ");log_number(render_status.reason);log_text(")\n");
+    if(!render_pair(filesystem,"display-vga","graphics-vga",phase)){render_status.state=RENDER_FAILED;return 0;}
+    render_status.state=RENDER_ACTIVE;render_started=1;return 1;
+}
+/* Volume discovery precedes selected-module loading. Providers must not race
+ * that loader for filesystem initialization or observe its partial hub state. */
+static int wait_drivers(kernel_surface_call snapshot,const char **phase){
+    *phase="selected driver readiness";
+    struct kernel_surface_result stamp=CALL(apps.clock,0,0,0);
+    if(!snapshot || stamp.status || stamp.value>UINT64_MAX-UINT64_C(30000000000))return 0;
+    uint64_t limit=stamp.value+UINT64_C(30000000000);
+    for(;;){
+        struct driver_table status={0};
+        if(CALL(snapshot,&status,0,0).status)return 0;
+        if(status.finished){if(status.error){*phase="selected driver failure";return 0;}return 1;}
+        stamp=CALL(apps.clock,0,0,0);if(stamp.status || stamp.value>=limit)return 0;
+        uint64_t wake=limit-stamp.value<1000000?limit:stamp.value+1000000;
+        if(CALL(apps.thread,THREAD_BLOCK_UNTIL,wake,0).status)return 0;
+    }
+}
 struct kernel_surface_result bootstrap_surface_apps_worker(MODULE_ARGS){
     MODULE_UNUSED();while(__atomic_load_n(&apps.operation,__ATOMIC_ACQUIRE))if(CALL(apps.thread,THREAD_YIELD,0,0).status)return module_result(0,0);
     const char *active="volume",*phase="volume readiness";
     kernel_surface_call info=kernel_surface_find(apps.hub,"bootstrap.info");uint64_t time=CALL(apps.clock,0,0,0).value;if(time>UINT64_MAX-UINT64_C(30000000000))goto failed;uint64_t limit=time+UINT64_C(30000000000);struct bootstrap_info volume;char *list=NULL;
     for(;;){if(CALL(info,&volume,0,0).status || volume.state==BOOTSTRAP_FAILED || volume.state==BOOTSTRAP_DISCONNECTED)goto failed;if(volume.state==BOOTSTRAP_READY)break;time=CALL(apps.clock,0,0,0).value;if(time>=limit || CALL(apps.thread,THREAD_BLOCK_UNTIL,time+10000000,0).status)goto failed;}
+    if(!wait_drivers(kernel_surface_find(apps.hub,"bootstrap.driver_info"),&phase))goto failed_list;
     const struct config_value *providers=config("config.boot.providers",CONFIG_STRING);if(!providers || !(list=string(providers->data)))goto failed;
-    for(char *p=list;*p;){char *name=p;active=name;phase="launch";while(*p && *p!=',')++p;if(*p){*p++=0;if(!*p)goto failed_list;}boot_trace("begin",name);if(bootstrap_surface_launch(volume.filesystem.cookie,(uintptr_t)name,0,0,0,0).status)goto failed_list;
+    for(char *p=list;*p;){char *name=p;active=name;phase="launch";while(*p && *p!=',')++p;if(*p){*p++=0;if(!*p)goto failed_list;}
+        /* Logical roles stay in boot.providers; implementation names are selected
+         * together before dependent mouse/text providers may start. */
+        if(pd_same(name,"display")){if(!render_start(volume.filesystem.cookie,&phase))goto failed_list;continue;}
+        if(pd_same(name,"graphics")){if(!render_started)goto failed_list;continue;}
+        boot_trace("begin",name);if(bootstrap_surface_launch(volume.filesystem.cookie,(uintptr_t)name,0,0,0,0).status)goto failed_list;
         boot_trace("loaded",name);
         /* Creation order is also readiness order for startup dependencies. */
         phase="publication readiness";

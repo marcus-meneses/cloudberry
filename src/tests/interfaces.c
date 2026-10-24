@@ -11,6 +11,7 @@
 #include "../interfaces/installer.h"
 #include "../interfaces/admission.h"
 #include "../interfaces/display.h"
+#include "../interfaces/render-backend.h"
 #include "../interfaces/graphics.h"
 #include "../interfaces/text.h"
 #include "../interfaces/stream.h"
@@ -22,6 +23,9 @@
 #else
 #define ABI_ASSERT _Static_assert
 #endif
+ABI_ASSERT(sizeof(struct cb_io_gpu_request)==56 && sizeof(struct cb_io_gpu_info)==96 && sizeof(struct cb_io_gpu_modes)==392,"GPU bridge value frames");
+ABI_ASSERT(sizeof(struct cb_render_batch)==16 && sizeof(struct cb_render_command)==40 && sizeof(struct cb_render_layer)==40 && sizeof(struct cb_render_write)==24 && sizeof(struct cb_render_create)==8 && sizeof(struct cb_render_patch)==40,"private rendering batch frames");
+ABI_ASSERT(CB_IO_GPU==39 && CB_GPU_SUBMIT==15 && CB_GPU_NEXT==16 && CB_GPU_MODES==17,"GPU operations append without renumbering");
 ABI_ASSERT(sizeof(struct cb_installer_request)==96 && sizeof(struct cb_bundle_info)==136 && sizeof(struct cb_release_info)==120 && sizeof(struct cb_registry_entry)==56,"installer/registry frames");
 ABI_ASSERT(CB_FILESYSTEM_RMDIR==9 && CB_APPLICATION_RESOURCES==9,"appended filesystem/resources operations");
 ABI_ASSERT(sizeof(struct cb_identity_home)==40 && sizeof(struct cb_session_status)==64 && CB_APPLICATION_DATA==8,"identity home/session drain/appdata ABI");

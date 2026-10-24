@@ -268,7 +268,7 @@ and protected native processes. The disk-loaded `/@keyboard`, `/@mouse` and `/@a
 manifest-authorized capability calls. The text → graphics → display chain supplies a shared boot console. Display currently
 uses Limine’s framebuffer behind its replaceable contract. The ordinary terminal
 launches installed utilities, routes stdin/stdout/stderr and supports `=>`, `->`,
-and `|>`. See [terminal](apps/terminal/README.md), [graphics](handlers/graphics/README.md),
+and `|>`. See [terminal](apps/terminal/README.md), [graphics](handlers/graphics-vga/README.md),
 and [streams](sdk/streams.md).
 The application lifecycle provider launches
 ordinary installed native applications and reports exit/fault completion without
@@ -279,7 +279,7 @@ blocking its receive loop. Both providers run in isolated privileged userland.
 | Execution | Preemptible pinned threads, SMP, xstate, static ELF ring-3 processes, isolated faults and owned reap | One user thread per process; kernel chooses initial CPU for ordinary apps; no demand growth, dynamic linking, migration or forced cancellation |
 | Applications | Privileged userland launch/info/wait/stop/release, immutable installed identity, argv/cwd, owner notifications and copied terminal results | Pinned issuer; no running-app upgrades or forced termination or automatic manager recovery |
 | Handles | C system library, copied calls, immutable boot manifests, owner-local tokens, filtered reflection, blocking delivery, scoped memory/I/O | Build-owned installation bindings and launcher/owner policy; one boot input domain; no general approval UI, automatic rebind, vows or C++ wrappers |
-| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, basic ASCII font, one shared console and synchronous rendering; no native GPU/window/session model |
+| Console | Privileged display/graphics/text providers, software primitives, owned surfaces/damage, ordinary terminal and stream bindings | Temporary framebuffer backend, Ubuntu Mono TrueType font, one shared console and synchronous rendering; no native GPU/window/session model |
 | Devices | PCI/ACPI companions, platform inventory, DMA/IOMMU ownership | Boot inventory; no general driver manager, SCI reconciliation or physical qualification |
 | USB | xHCI, root/nested enumeration, interface claims, interrupt hotplug, subtree teardown | BSP execution, 4 KiB submissions/configurations, descriptor-driven keyboard/mouse providers with shared-interface demultiplexing implemented; broader HID/UAS and physical qualification remain open |
 | Storage | NVMe, AHCI SATA and USB BOT block read/write/flush; GPT slices; journaled ext4 mutations and an application-facing filesystem provider with file streams | Explicit device/namespace/port selection; multiple active controllers/namespaces/ports; unique-GUID bootstrap selection with boot-origin reporting; parallel command queues and physical durability remain open |
@@ -422,11 +422,13 @@ src/
 ├── handlers/
 │   ├── applications/ (README.md, applications.c, manifest.json, provider.cnf)
 │   ├── identity/ (README.md, identity.c, auth.inc, format.c, store.c, store.h, crypto/, manifest.json, provider.cnf)
-│   ├── display/ (README.md, display.c, manifest.json, provider.cnf)
+│   ├── display-vga/ (README.md, display-vga.c, manifest.json, provider.cnf)
 │   ├── filesystem/ (README.md, filesystem.c, manifest.json, provider.cnf)
-│   ├── graphics/ (README.md, graphics.c, glyphs.h, raster.c, raster.h, font.h, manifest.json, provider.cnf)
+│   ├── graphics-opengl/ (README.md, manifest.json, provider.cnf; inactive)
+│   ├── display-opengl/ (README.md, manifest.json, provider.cnf; inactive)
+│   ├── graphics-vga/ (README.md, graphics-vga.c, glyphs.h, font-engine.c, font-engine.h, font-system.c, overlay.inc, scene.inc, raster.c, raster.h, manifest.json, provider.cnf)
 │   ├── text/ (README.md, text.c, manifest.json, provider.cnf)
-│   ├── mouse/ (README.md, mouse.c, hid.c, hid.h, manifest.json, provider.cnf)
+│   ├── mouse/ (cursor.inc, README.md, mouse.c, hid.c, hid.h, manifest.json, provider.cnf)
 │   └── keyboard/
 │       ├── README.md
 │       ├── config.cnf

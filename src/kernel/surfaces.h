@@ -29,6 +29,7 @@ struct kernel_surfaces {
     uintptr_t methods_address,tables_address,owners_address;
     uint32_t method_capacity,owner_count,owner_capacity,owner_entry_bytes;
     uint64_t mapped_bytes,stub_bytes;
+    uintptr_t method_hash_address; /* ABI 3.1: buckets followed by immutable nodes. */
 };
 enum kernel_hub_owner_state {HUB_OWNER_LIVE=1,HUB_OWNER_DRAINING,HUB_OWNER_RETIRED,HUB_OWNER_INITIALIZING,HUB_OWNER_FAILED,HUB_OWNER_STARTING};
 enum kernel_hub_owner_flags {HUB_OWNER_BOOT_PINNED=1};
@@ -63,19 +64,49 @@ static inline int kernel_hub_name_equal(const char *a, const char *b) {
     while (*a && *a == *b) { ++a; ++b; }
     return *a == *b;
 }
-static inline kernel_surface_call kernel_surface_find(const struct kernel_surfaces *hub, const char *name) {
-    const struct kernel_surface *entries = kernel_surface_entries(hub);
-    for (uint32_t i = 0; i < kernel_surface_count(hub); ++i)
-        if (kernel_hub_name_equal(entries[i].name, name) && kernel_hub_owner_live(hub,entries[i].owner)) return entries[i].call;
+/* Stable FNV-1a 64-bit keys. Full-key conflicts are rejected at publication;
+ * bucket collisions are chained. No name comparison is needed for resolution. */
+#define KERNEL_METHOD_HASH_BUCKETS 4096u
+#define KERNEL_METHOD_HASH_DIRECTORY_BYTES (KERNEL_METHOD_HASH_BUCKETS * sizeof(uint32_t))
+struct kernel_method_hash_node {uint64_t key;uint32_t next,reserved;};
+static inline uint64_t kernel_surface_key(const char *name){
+    uint64_t key=UINT64_C(14695981039346656037);
+    if(name)while(*name){key^=(unsigned char)*name++;key*=UINT64_C(1099511628211);}
+    return key;
+}
+/* Returns metadata even for a non-LIVE provider; public find helpers below
+ * enforce visibility. One count snapshot hides an entire unpublished batch. */
+static inline const struct kernel_surface *kernel_surface_by_key(const struct kernel_surfaces *hub,uint64_t key){
+    const struct kernel_surface *entries=kernel_surface_entries(hub);
+    uint32_t count=kernel_surface_count(hub);
+    if(hub->method_hash_address){
+        const uint32_t *buckets=(const void *)hub->method_hash_address;
+        const struct kernel_method_hash_node *nodes=(const void *)(hub->method_hash_address+KERNEL_METHOD_HASH_DIRECTORY_BYTES);
+        uint32_t at=__atomic_load_n(&buckets[key&(KERNEL_METHOD_HASH_BUCKETS-1)],__ATOMIC_ACQUIRE);
+        while(at){uint32_t index=at-1;const struct kernel_method_hash_node *node=&nodes[index];
+            if(index<count && node->key==key)return &entries[index];
+            at=node->next;
+        }
+        return NULL;
+    }
+    /* Inline-array host fixtures without the ABI 3.1 index. Production always
+     * provides the index, including during boot and runtime module loading. */
+    for(uint32_t i=0;i<count;++i)if(kernel_surface_key(entries[i].name)==key)return &entries[i];
     return NULL;
 }
-static inline kernel_surface_call kernel_surface_find_version(const struct kernel_surfaces *hub,
-                                                              const char *name, uint16_t major, uint16_t minor) {
-    const struct kernel_surface *entries=kernel_surface_entries(hub);
-    for (uint32_t i=0;i<kernel_surface_count(hub);++i)
-        if (kernel_hub_name_equal(entries[i].name,name) && entries[i].major==major && entries[i].minor>=minor && kernel_hub_owner_live(hub,entries[i].owner))
-            return entries[i].call;
-    return NULL;
+static inline kernel_surface_call kernel_surface_find_key(const struct kernel_surfaces *hub,uint64_t key){
+    const struct kernel_surface *entry=kernel_surface_by_key(hub,key);
+    return entry && kernel_hub_owner_live(hub,entry->owner)?entry->call:NULL;
+}
+static inline kernel_surface_call kernel_surface_find_key_version(const struct kernel_surfaces *hub,uint64_t key,uint16_t major,uint16_t minor){
+    const struct kernel_surface *entry=kernel_surface_by_key(hub,key);
+    return entry && entry->major==major && entry->minor>=minor && kernel_hub_owner_live(hub,entry->owner)?entry->call:NULL;
+}
+static inline kernel_surface_call kernel_surface_find(const struct kernel_surfaces *hub,const char *name){
+    return name?kernel_surface_find_key(hub,kernel_surface_key(name)):NULL;
+}
+static inline kernel_surface_call kernel_surface_find_version(const struct kernel_surfaces *hub,const char *name,uint16_t major,uint16_t minor){
+    return name?kernel_surface_find_key_version(hub,kernel_surface_key(name),major,minor):NULL;
 }
 static inline const struct kernel_hub_table *kernel_hub_find_table(const struct kernel_surfaces *hub, const char *name) {
     const struct kernel_hub_table *tables = kernel_hub_tables(hub);
@@ -86,7 +117,7 @@ static inline const struct kernel_hub_table *kernel_hub_find_table(const struct 
 /* Provider identity is metadata, not an authorization boundary in trusted kernel
  * space. Published records/callable stubs remain address-stable until reboot. */
 static inline uint64_t kernel_surface_owner(const struct kernel_surfaces *hub,const char *name){
-    const struct kernel_surface *e=kernel_surface_entries(hub);for(uint32_t i=0;i<kernel_surface_count(hub);++i)if(kernel_hub_name_equal(e[i].name,name))return e[i].owner;return 0;
+    const struct kernel_surface *e=name?kernel_surface_by_key(hub,kernel_surface_key(name)):NULL;return e?e->owner:0;
 }
 static inline struct kernel_surface_result kernel_hub_pin_call(const struct kernel_surfaces *hub,kernel_surface_call entry,int acquire){
     const struct kernel_surface *e=kernel_surface_entries(hub);

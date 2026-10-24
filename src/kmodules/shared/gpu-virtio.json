@@ -1,0 +1,89 @@
+{
+  "name": "gpu-virtio",
+  "exports": [
+    {
+      "name": "gpu_virtio.init",
+      "symbol": "gpu_virtio_init"
+    },
+    {
+      "name": "gpu_virtio.discover",
+      "symbol": "gpu_virtio_discover"
+    },
+    {
+      "name": "gpu_virtio.info",
+      "symbol": "gpu_virtio_info"
+    },
+    {
+      "name": "gpu_virtio.open",
+      "symbol": "gpu_virtio_open"
+    },
+    {
+      "name": "gpu_virtio.close",
+      "symbol": "gpu_virtio_close"
+    },
+    {
+      "name": "gpu_virtio.display",
+      "symbol": "gpu_virtio_display"
+    },
+    {
+      "name": "gpu_virtio.create",
+      "symbol": "gpu_virtio_create"
+    },
+    {
+      "name": "gpu_virtio.destroy",
+      "symbol": "gpu_virtio_destroy"
+    },
+    {
+      "name": "gpu_virtio.present",
+      "symbol": "gpu_virtio_present"
+    },
+    {
+      "name": "gpu_virtio.capset",
+      "symbol": "gpu_virtio_capset"
+    },
+    {
+      "name": "gpu_virtio.context",
+      "symbol": "gpu_virtio_context"
+    },
+    {
+      "name": "gpu_virtio.submit",
+      "symbol": "gpu_virtio_submit"
+    },
+    {
+      "name": "gpu_virtio.interrupt",
+      "symbol": "gpu_virtio_interrupt"
+    },
+    {
+      "name": "gpu_virtio.texture",
+      "symbol": "gpu_virtio_texture"
+    },
+    {
+      "name": "gpu_virtio.attach",
+      "symbol": "gpu_virtio_attach"
+    },
+    {
+      "name": "gpu_virtio.upload",
+      "symbol": "gpu_virtio_upload"
+    },
+    {
+      "name": "gpu_virtio.readback",
+      "symbol": "gpu_virtio_readback"
+    },
+    {
+      "name": "gpu.invoke",
+      "symbol": "gpu_virtio_io"
+    },
+    {
+      "name": "gpu.exit",
+      "symbol": "gpu_virtio_exit"
+    },
+    {
+      "name": "gpu.opengl.probe",
+      "symbol": "gpu_virtio_probe"
+    },
+    {
+      "name": "gpu.opengl.release",
+      "symbol": "gpu_virtio_release"
+    }
+  ]
+}

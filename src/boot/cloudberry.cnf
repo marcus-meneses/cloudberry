@@ -9,11 +9,13 @@ storage.timeout_ms=1000
 drivers.partition_guid=9beaeafd-7835-446a-8258-00331878d4f3
 # Driver selection remains caller-owned; storage timeout bounds USB BOT commands.
 
-# Explicit future module basenames, in dependency order; empty loads none.
-drivers.modules=
+# Disk-loaded module basenames, in dependency order; empty loads none.
+# virtio-gpu discovery is read-only; GPU reset/scanout takeover remains explicit.
+drivers.modules=gpu-virtio
 
-# Provider bundle basenames in startup order; empty starts none.
-boot.providers=keyboard,mouse,display,graphics,text,filesystem,identity,sessions,installer,applications
+# Provider basenames in startup order; empty starts none.
+# display/graphics are logical roles: select a qualified OpenGL pair or VGA fallback.
+boot.providers=keyboard,display,graphics,mouse,text,filesystem,identity,sessions,installer,applications
 
 # Writable only on a writable medium; QEMU can provide a disposable snapshot.
 filesystem.writable=true

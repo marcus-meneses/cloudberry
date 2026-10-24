@@ -7,7 +7,8 @@
     },
     {
       "name": "pci.claim",
-      "symbol": "pci_surface_claim"
+      "symbol": "pci_surface_claim",
+      "version": [1, 1]
     },
     {
       "name": "pci.busmaster",

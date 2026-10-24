@@ -3,15 +3,17 @@
 Fixtures are built separately; no developer NVMe/SATA media or candidate image is written.
 """
 import argparse,hashlib,importlib.util,json,pathlib,re,shutil,socket,subprocess,time,uuid,struct,os,threading
-p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['user-maint-create','user-maint-reboot','user-maint-verify','create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify','policy','repair','quarantine-remove','cut-repair','cut-forget','cut-approve','recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--runtime-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--cpu-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);a=p.parse_args()
-focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.runtime_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.cpu_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase))
+p=argparse.ArgumentParser();p.add_argument('build',type=pathlib.Path);p.add_argument('--installer-phase',choices=['user-maint-create','user-maint-reboot','user-maint-verify','create','verify','rescue','quarantine','cut-install','cut-remove','recover-installed','recover-empty','upgrade','cut-upgrade','recover-old','recover-new','upgrade-verify','policy','repair','quarantine-remove','cut-repair','cut-forget','cut-approve','recover-quarantined','recover-repaired','recover-forgotten','recover-approved','recover-unapproved']);p.add_argument('--installer-cut',type=pathlib.Path,help='isolated fault-injected installer executable');p.add_argument('--private-check',action='store_true');p.add_argument('--persistence-phase',choices=['create','verify']);p.add_argument('--disk-source',type=pathlib.Path);p.add_argument('--fixtures',action='store_true');p.add_argument('--startup-only',action='store_true');p.add_argument('--startup-trace',action='store_true');p.add_argument('--profile-only',action='store_true');p.add_argument('--render-only',action='store_true');p.add_argument('--scroll-only',action='store_true');p.add_argument('--wait-only',action='store_true');p.add_argument('--editor-only',action='store_true');p.add_argument('--native-editor',action='store_true');p.add_argument('--javascript-only',action='store_true');p.add_argument('--js-engine-only',action='store_true');p.add_argument('--runtime-only',action='store_true');p.add_argument('--edit-only',action='store_true');p.add_argument('--cursor-only',action='store_true');p.add_argument('--mouse-only',action='store_true');p.add_argument('--monitor-only',action='store_true');p.add_argument('--cpu-only',action='store_true');p.add_argument('--stdio-only',action='store_true');p.add_argument('--identity-only',action='store_true');p.add_argument('--accounts-only',action='store_true');p.add_argument('--bootfs-only',action='store_true');p.add_argument('--keep-artifacts',action='store_true',help='retain successful-run VM media and screenshot');p.add_argument('--diagnostics',action='store_true');p.add_argument('--kernel',type=pathlib.Path,help='test-only replacement kernel, in a copied stage');p.add_argument('--mmio-trace',action='store_true');p.add_argument('--storage-devices',action='store_true',help='attach disposable 1 GiB NVMe and SATA disks');p.add_argument('--cpus',type=int,default=4);p.add_argument('--gpu',choices=['vga','virtio'],default='vga');p.add_argument('--accel',default='tcg',choices=['tcg','kvm']);p.add_argument('--bench3d-only',action='store_true');a=p.parse_args()
+focused_modes=(bool(a.installer_phase),a.startup_only,a.profile_only,a.scroll_only,a.render_only,a.wait_only,a.runtime_only,a.js_engine_only,a.javascript_only,a.editor_only,a.edit_only,a.cursor_only,a.mouse_only,a.monitor_only,a.cpu_only,a.stdio_only,a.identity_only,a.accounts_only,a.bootfs_only,bool(a.persistence_phase),a.bench3d_only)
+if a.native_editor and not a.editor_only:p.error('--native-editor requires --editor-only')
+editor_title='Cloudberry native editor' if a.native_editor else 'Cloudberry JS editor'
 if sum(focused_modes)>1:p.error('choose only one focused run mode')
 if a.installer_phase=='create' and not a.fixtures:p.error('installer create requires isolated fixtures')
 if a.installer_cut and (not a.fixtures or not a.installer_cut.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests')):p.error('installer-cut requires fixtures and an isolated test ELF')
 if a.disk_source and (a.fixtures or a.startup_trace):p.error('--disk-source cannot rebuild fixtures')
 if a.disk_source and not a.disk_source.resolve().is_relative_to(pathlib.Path(__file__).resolve().parents[2]/'bin/tests'):p.error('disk-source must be isolated inside bin/tests')
 if a.startup_only and a.fixtures:p.error('startup timing uses production apps; omit --fixtures')
-if (a.runtime_only or a.identity_only or a.stdio_only or a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only or a.edit_only or a.mouse_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
+if (a.editor_only or a.javascript_only or a.js_engine_only or a.runtime_only or a.identity_only or a.stdio_only or a.kernel or a.profile_only or a.scroll_only or a.render_only or a.wait_only or a.edit_only or a.mouse_only) and not a.fixtures:p.error('--kernel/--profile-only/--scroll-only requires --fixtures')
 if a.startup_trace and (not a.startup_only or a.kernel):p.error('--startup-trace requires --startup-only and cannot use --kernel')
 root=pathlib.Path(__file__).resolve().parents[2];build=a.build.resolve();work=root/'bin/tests/console'/uuid.uuid4().hex;work.mkdir(parents=True)
 image=work/'boot.img';runtime_identity=None
@@ -29,7 +31,20 @@ if a.fixtures or a.startup_trace:
         directory=bundles/'graphics-check';directory.mkdir();shutil.copy2(build/'tests/apps/graphics-check.elf',directory/'graphics-check.elf')
         operations=['info','fill','glyph','surface_create','surface_release','surface_info','state','line','rectangle','ellipse','arc','bezier','path','bitmap','blit','present']
         (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@graphics',operations=operations),dict(name='/@applications',operations=['launch','wait','release','processes']),dict(name='/@keyboard',scope='boot-input',operations=['read','focus_claim','focus_release']),dict(name='/@streams',operations=['pipe','read','write']),dict(name='/@text',operations=['write','clear']),dict(name='/@io',scope='self',operations=['now_ns']),dict(name='/@filesystem',operations=['open','stat','remove'])])))
+        if a.editor_only:(directory/'scroll-lines.txt').write_text('\n'.join('SCENE LINE '+str(i).zfill(2) for i in range(60)))
         records=json.loads((root/'src/apps/installed.json').read_text());records.append(dict(name='graphics-check',executable='/system/apps/graphics-check',manifest='graphics-check/manifest.json',installation_id='636c6f756462657272792e6766786368',flags=3,cpu=0,stack_bytes=262144));
+        if a.javascript_only:
+            shutil.copytree(root/'src/tests/javascript',bundles/'js-tests',ignore=shutil.ignore_patterns('*.c'))
+            directory=bundles/'js-restricted';directory.mkdir();shutil.copy2(build/'apps/js.elf',directory/'js-restricted.elf')
+            (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@memory',scope='self',operations=['allocate','free']),dict(name='/@streams',operations=['read','write']),dict(name='/@filesystem',operations=['open'])])))
+            records.append(dict(name='js-restricted',executable='/system/apps/js-restricted',manifest='js-restricted/manifest.json',installation_id='636c6f756462657272792e6a73726573',flags=1,cpu=0,stack_bytes=524288))
+            runtime_identity=dict(binary_sha256=hashlib.sha256((build/'apps/js.elf').read_bytes()).hexdigest(),scripts={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in (root/'src/tests/javascript').glob('*.js')},quickjs=json.loads((root/'bin/sdk/quickjs/build.json').read_text()),newlib=json.loads((root/'bin/sdk/newlib.json').read_text()))
+        if a.js_engine_only:
+            directory=bundles/'js-engine';directory.mkdir()
+            shutil.copy2(build/'tests/apps/js-engine.elf',directory/'js-engine.elf')
+            runtime_identity=dict(binary_sha256=hashlib.sha256((directory/'js-engine.elf').read_bytes()).hexdigest(),quickjs=json.loads((root/'bin/sdk/quickjs/build.json').read_text()))
+            (directory/'manifest.json').write_text(json.dumps(dict(version=1,resources=[dict(name='/@memory',scope='self',operations=['allocate','free']),dict(name='/@streams',operations=['read','write'])])))
+            records.append(dict(name='js-engine',executable='/system/apps/js-engine',manifest='js-engine/manifest.json',installation_id='636c6f756462657272792e6a73656e67',flags=1,cpu=0,stack_bytes=524288))
         if a.runtime_only:
             directory=bundles/'runtime-foundation';directory.mkdir()
             shutil.copy2(build/'tests/apps/runtime-foundation.elf',directory/'runtime-foundation.elf')
@@ -72,7 +87,7 @@ if a.installer_phase in ('repair','quarantine-remove','cut-repair','cut-forget',
 # Complete host-side fixture writes before guest flush deadlines start.
 with image.open('r+b') as prepared:os.fsync(prepared.fileno())
 qmp=work/'qmp.sock';log=work/'boot.log';screenshot=work/'screen.ppm'
-command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-rtc','base=utc,clock=host','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',(f'cpus={a.cpus},sockets=1,cores={a.cpus},threads=1' if a.cpu_only else str(a.cpus)),'-bios','/usr/share/ovmf/OVMF.fd','-device','VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
+command=['qemu-system-x86_64','-no-user-config','-nodefaults','-machine','q35','-rtc','base=utc,clock=host','-m','512M','-accel',a.accel,'-cpu','host,migratable=off,+invtsc' if a.accel=='kvm' else 'max','-smp',(f'cpus={a.cpus},sockets=1,cores={a.cpus},threads=1' if a.cpu_only else str(a.cpus)),'-bios','/usr/share/ovmf/OVMF.fd','-device','virtio-vga' if a.gpu=='virtio' else 'VGA','-device','qemu-xhci,id=xhci','-device','usb-kbd,bus=xhci.0','-device','usb-mouse,id=mouse0,bus=xhci.0','-drive',f'if=none,id=boot,format=raw,file={image}','-device','usb-bot,id=bot,bus=xhci.0','-device','scsi-hd,bus=bot.0,drive=boot,bootindex=1','-display','none','-debugcon','stdio','-global','isa-debugcon.iobase=0xe9','-monitor','none','-qmp',f'unix:{qmp},server=on,wait=off','-no-reboot','-no-shutdown']
 if a.diagnostics:command+=['-gdb','unix:'+str(work/'gdb.sock')+',server=on,wait=off']
 if a.mmio_trace:command+=['-trace','enable=memory_region_ops_read','-trace','enable=memory_region_ops_write','-trace','file='+str(work/'mmio.log')]
 if a.storage_devices:
@@ -80,9 +95,9 @@ if a.storage_devices:
         with (work/(name+'.img')).open('wb') as disk:disk.truncate(1024**3)
         command+=['-drive',f'if=none,id={name},format=raw,file={work/(name+".img")}']
     command+=['-device','nvme,drive=nvme,serial=CONSOLETESTNVME','-device','ide-hd,bus=ide.0,drive=sata']
-font_source=(root/'src/handlers/graphics/font.h').read_text();font=[]
-for row in re.findall(r'\{([0-9,]+)\}',font_source):font.append(tuple(map(int,row.split(','))))
-fontmap={pattern:chr(i+32) for i,pattern in enumerate(font)}
+atlas=json.loads((root/'bin/sdk/freetype/atlas.json').read_text())
+cell_width,cell_height=atlas['width'],atlas['height']
+fontmap={sum((1<<i) for i,v in enumerate(glyph) if v>127):chr(cp+32) for cp,glyph in enumerate(atlas['glyphs'])}
 class ProfileComplete(Exception):pass
 status='failed';failure='';proc=None;reader=None;milestones=[];boot_timing={}
 def capture_diagnostics():
@@ -114,19 +129,20 @@ try:
     def screen():
         call('screendump',{'filename':str(screenshot)})
         data=screenshot.read_bytes();magic,dimensions,maximum,pixels=data.split(b'\n',3);assert magic==b'P6' and maximum==b'255';w,h=map(int,dimensions.split());lines=[]
-        for y in range(h//16):
+        for y in range(h//cell_height):
             line=''
-            for x in range(w//8):
-                background=((y*16)*w+x*8)*3
-                inverse=max(pixels[background:background+3])>100
-                pattern=[]
-                for row in range(7):
-                    bits=0
-                    for col in range(5):
-                        off=((y*16+1+row*2)*w+x*8+1+col)*3
-                        bits=bits*2+int((max(pixels[off:off+3])>100)!=inverse)
-                    pattern.append(bits)
-                line+=fontmap.get(tuple(pattern),'?')
+            for x in range(w//cell_width):
+                values=[]
+                for row in range(cell_height):
+                    off=((y*cell_height+row)*w+x*cell_width)*3
+                    values.extend(max(pixels[i:i+3]) for i in range(off,off+cell_width*3,3))
+                lo,hi=min(values),max(values);background=values[0];threshold=(hi-lo)/2
+                pattern=sum(1<<i for i,v in enumerate(values) if abs(v-background)>threshold)
+                char=fontmap.get(pattern)
+                if char is None:
+                    best=min(fontmap,key=lambda p:(p^pattern).bit_count())
+                    char=fontmap[best] if (best^pattern).bit_count()<12 else '?'
+                line+=char
             lines.append(line.rstrip())
         text='\n'.join(lines);(work/'screen.txt').write_text(text);return text
     def wait_for(check,seconds=40):
@@ -136,6 +152,9 @@ try:
             text=log.read_text()
             if 'FATAL' in text or 'startup failed' in text or 'Cloudberry: fatal' in text or 'inthandle: fatal' in text:raise RuntimeError('guest startup failed')
             rendered=screen()
+            if (a.javascript_only or a.editor_only) and (('Error:' in rendered and editor_title not in rendered) or 'allocation leak' in rendered):raise RuntimeError('JavaScript acceptance failed: '+rendered)
+            if a.bench3d_only and ('bench3d: operation failed' in rendered or 'permission denied' in rendered):raise RuntimeError('benchmark launch/render failed: '+rendered)
+            if a.native_editor and 'handle operation failed' in rendered:raise RuntimeError('Native editor acceptance failed: '+rendered)
             if a.identity_only and 'IDENTITY FAIL' in rendered:raise RuntimeError('identity acceptance failed: '+rendered.split('IDENTITY FAIL',1)[1].split('\n')[0])
             if 'PRIVATE FAIL' in rendered:raise RuntimeError('private-data acceptance failed: '+rendered.split('PRIVATE FAIL',1)[1].split('\n')[0])
             if 'keyboard input failed' in rendered:raise RuntimeError('keyboard capture/provider failed; see diagnostics.log')
@@ -152,8 +171,10 @@ try:
         # QMP send-key serializes delayed edges using guest virtual time.
         # Explicit edges make injection independent of guest timer progress.
         def events(down):return [{'type':'key','data':{'down':down,'key':key}} for key in keys]
+        slow=a.editor_only and a.accel=='tcg'
+        if slow:hold=max(hold,.12 if len(keys)>1 else .07)
         call('input-send-event',{'events':events(True)});time.sleep(hold)
-        call('input-send-event',{'events':events(False)});time.sleep(.03)
+        call('input-send-event',{'events':events(False)});time.sleep(.08 if slow else .03)
     # Generate text through the configured layout; never assume a US keyboard.
     layout_name=dict(line.split('=',1) for line in (root/'src/handlers/keyboard/config.cnf').read_text().splitlines() if line and not line.startswith('#'))['layout']
     layout=json.loads((root/'src/handlers/keyboard/layouts'/(layout_name+'.json')).read_text())
@@ -170,6 +191,105 @@ try:
             if c not in typed:raise RuntimeError('No QMP key mapping for '+repr(c)+' in '+layout_name)
             send_keys(typed[c])
         if enter:send_keys([{'type':'qcode','data':'ret'}]);time.sleep(.1)
+    if a.bench3d_only:
+        type_line('bench3d')
+        wait_for(lambda text:'Cloudberry 3D benchmark' in text and 'Cubes 4' in text and 'FPS 0.0' not in text,120)
+        raw=screenshot.read_bytes();_,_,_,pixels=raw.split(b'\n',3)
+        palette={bytes.fromhex(c) for c in ('e49b28','e76c38','427db2','4db8ab','9b74c5','e6c85a')}
+        assert sum(pixels[i:i+3] in palette for i in range(0,len(pixels),3))>1000,'missing rendered cube faces'
+        from PIL import Image
+        type_line(' ',False);wait_for(lambda text:'PAUSED' in text)
+        Image.open(screenshot).save(work/'bench3d.png')
+        type_line(' ',False);wait_for(lambda text:'Cloudberry 3D benchmark' in text and 'PAUSED' not in text)
+        type_line('+',False);wait_for(lambda text:'Cubes 8' in text)
+        type_line('w',False);wait_for(lambda text:'wireframe' in text)
+        type_line(' ',False);wait_for(lambda text:'PAUSED' in text)
+        type_line(' ',False);wait_for(lambda text:'Cloudberry 3D benchmark' in text and 'PAUSED' not in text)
+        send_keys([{'type':'qcode','data':'esc'}]);wait_for(lambda text:'bench3d: frames=' in text and re.search(r'^/ >\s*$',text,re.M))
+        type_line('bench3d --frames 2 --cubes 1');wait_for(lambda text:'bench3d: frames=2 ' in text and re.search(r'^/ >\s*$',text,re.M),120)
+        raise ProfileComplete()
+    if a.editor_only:
+        type_line('editor' if a.native_editor else 'js /system/script/samples/editor.js')
+        wait_for(lambda text:editor_title in text and 'Untitled' in text and 'Copy/Cut operate' in text,120)
+        def combo(key):send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':key}],.06)
+        mice=call('query-mice');usb=[m for m in mice if m['name']=='QEMU HID Mouse'];assert usb
+        call('human-monitor-command',{'command-line':'mouse_set '+str(min(m['index'] for m in usb))})
+        for axis,value in [('x',-3000),('y',-3000),('x',24),('y',cell_height+6)]:
+            call('input-send-event',{'events':[dict(type='rel',data=dict(axis=axis,value=value))]});time.sleep(1)
+        call('input-send-event',{'events':[dict(type='btn',data=dict(button='left',down=True))]})
+        wait_for(lambda text:'Save as...' in text)
+        call('input-send-event',{'events':[dict(type='btn',data=dict(button='left',down=False))]})
+        send_keys([{'type':'qcode','data':'esc'}])
+        type_line('hello editor')
+        combo('s');wait_for(lambda text:'Save file' in text)
+        combo('a');type_line('/editor-test.txt')
+        wait_for(lambda text:'Saved /editor-test.txt' in text)
+        combo('n');wait_for(lambda text:'Untitled' in text and 'Modified' not in text)
+        combo('o');wait_for(lambda text:'Open file' in text)
+        combo('l');type_line('/system/script/samples');wait_for(lambda text:'editor-model.mjs' in text)
+        combo('l');type_line('/');wait_for(lambda text:'Path: /' in text and '[D] system' in text);send_keys([{'type':'qcode','data':'shift'},{'type':'qcode','data':'tab'}])
+        combo('a');type_line('/editor-test.txt')
+        wait_for(lambda text:'Opened /editor-test.txt' in text and 'hello editor' in text)
+        # Exercise the retained editing-area hierarchy in both directions.
+        combo('o');wait_for(lambda text:'Open file' in text);combo('l');type_line('/system/apps/graphics-check.resources')
+        wait_for(lambda text:'scroll-lines.txt' in text);send_keys([{'type':'qcode','data':'ret'}],.08)
+        wait_for(lambda text:'SCENE LINE 00' in text and 'Opened ' in text)
+        for _ in range(3):send_keys([{'type':'qcode','data':'pgdn'}],.08)
+        wait_for(lambda text:'Ln 1, Col 1' in text and 'SCENE LINE 59' in text and 'SCENE LINE 00' not in text and editor_title in text)
+        # Editing after viewport-only scrolling still targets the file caret.
+        type_line('X',enter=False);wait_for(lambda text:'XSCENE LINE 00' in text and 'Ln 1, Col 2' in text)
+        combo('z');wait_for(lambda text:'Ln 1, Col 1' in text and 'XSCENE LINE 00' not in text)
+        for _ in range(3):send_keys([{'type':'qcode','data':'pgdn'}],.08)
+        wait_for(lambda text:'Ln 1, Col 1' in text and 'SCENE LINE 59' in text and 'SCENE LINE 00' not in text)
+        for _ in range(3):send_keys([{'type':'qcode','data':'pgup'}],.08)
+        wait_for(lambda text:'Ln 1, Col 1' in text and 'SCENE LINE 00' in text)
+        type_line('X',enter=False);wait_for(lambda text:'XSCENE LINE 00' in text and 'Ln 1, Col 2' in text)
+        combo('z');wait_for(lambda text:'Ln 1, Col 1' in text and 'XSCENE LINE 00' not in text)
+        combo('o');wait_for(lambda text:'Open file' in text);combo('a');type_line('/editor-test.txt')
+        wait_for(lambda text:'Opened /editor-test.txt' in text and 'hello editor' in text)
+        shutil.copy2(screenshot,work/'editor-ttf.ppm')
+        # Park the system pointer below the last complete text row; unlike the
+        # old sample crosshair, it correctly survives the application's exit.
+        call('input-send-event',{'events':[dict(type='rel',data=dict(axis='x',value=3000)),dict(type='rel',data=dict(axis='y',value=3000))]});time.sleep(1)
+        combo('f');wait_for(lambda text:'Find text' in text)
+        type_line('editor');wait_for(lambda text:'Found: editor' in text)
+        type_line('changed ',enter=False)
+        combo('q');wait_for(lambda text:'Unsaved changes' in text)
+        send_keys([{'type':'qcode','data':'esc'}]);wait_for(lambda text:'Unsaved changes' not in text and editor_title in text)
+        combo('q');wait_for(lambda text:'Unsaved changes' in text)
+        send_keys([{'type':'qcode','data':'tab'}]);send_keys([{'type':'qcode','data':'ret'}])
+        wait_for(lambda text:text.rstrip().endswith('/ >'),90)
+        type_line('cat /editor-test.txt');wait_for(lambda text:'hello editor' in text and text.rstrip().endswith('/ >'))
+        type_line('pwd');wait_for(lambda text:text.count('/ >')>=3 and text.rstrip().endswith('/ >'))
+        (work/'editor.json').write_text(json.dumps(dict(status='passed',cpus=a.cpus,accelerator=a.accel,editor_kind='native' if a.native_editor else 'javascript',binary_sha256=hashlib.sha256((bundles/('editor/editor.elf' if a.native_editor else 'js/js.elf')).read_bytes()).hexdigest(),samples={f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in (root/'src/script/samples').glob('*') if f.is_file()}),indent=2)+'\n')
+        raise ProfileComplete()
+    if a.javascript_only:
+        def js_command(command,expected,timeout=120):
+            type_line('clear');wait_for(lambda text:text.count('/ >')==1 and text.rstrip().endswith('/ >'))
+            type_line(command);wait_for(lambda text:expected in text and text.count('/ >')>=2 and text.rstrip().endswith('/ >'),timeout)
+            text=screen()
+            if 'FAIL' in text or 'allocation leak' in text or 'InternalError:' in text:raise RuntimeError('JavaScript failure: '+text)
+            (work/('javascript-%02d.txt'%len(list(work.glob('javascript-*.txt'))))).write_text(text)
+        js_command('js /system/kmodules/drivers/js-tests/main.js one "two words"','PASS JS bindings:')
+        js_command('js-restricted /system/kmodules/drivers/js-tests/restricted.js','PASS JS manifest denial')
+        js_command('js -e "console.log(12345)" => /js-output.txt','/ >')
+        js_command('cat /js-output.txt','12345')
+        js_command("echo pipe-input |> js -e 'console.log(String.fromCharCode(...await system.stdin.read()))'",'pipe-input')
+        type_line('clear');wait_for(lambda text:text.count('/ >')==1 and text.rstrip().endswith('/ >'))
+        type_line('js -i');wait_for(lambda text:text.rstrip().endswith('js >'))
+        type_line("console.log('PASS JS interactive')");wait_for(lambda text:text.count('PASS JS interactive')>=2 and text.rstrip().endswith('js >'))
+        type_line('.exit');wait_for(lambda text:text.rstrip().endswith('/ >'))
+        type_line('clear');wait_for(lambda text:text.count('/ >')==1 and text.rstrip().endswith('/ >'))
+        type_line('js -i');wait_for(lambda text:text.rstrip().endswith('js >'))
+        type_line("system.exec('cat').then(()=>console.log('PASS JS child stdin'))")
+        type_line('javascript-child-stdin');wait_for(lambda text:text.count('javascript-child-stdin')>=2)
+        send_keys([{'type':'qcode','data':'ctrl'},{'type':'qcode','data':'d'}],.06)
+        wait_for(lambda text:text.count('PASS JS child stdin')>=2 and text.rstrip().endswith('/ >'),90)
+        raise ProfileComplete()
+    if a.js_engine_only:
+        type_line('js-engine')
+        wait_for(lambda text:'PASS JS engine:' in text and text.rstrip().endswith('/ >'),120)
+        raise ProfileComplete()
     if a.runtime_only:
         type_line('runtime-foundation')
         wait_for(lambda text:'PASS runtime foundations:' in text and text.rstrip().endswith('/ >'),120)
@@ -459,7 +579,7 @@ try:
         def cursor_sample():
             screen()
             raw=screenshot.read_bytes();_,dimensions,_,pixels=raw.split(b'\n',3);width,height=map(int,dimensions.split())
-            return [(x,y) for y in range(height//16) for x in range(width//8) if min(pixels[((y*16)*width+x*8)*3:((y*16)*width+x*8)*3+3])>180]
+            return [(x,y) for y in range(height//cell_height) for x in range(width//cell_width) if min(pixels[((y*cell_height)*width+x*cell_width)*3:((y*cell_height)*width+x*cell_width)*3+3])>180]
         def phases(seconds):
             samples=[];until=time.monotonic()+seconds
             while time.monotonic()<until:samples.append(cursor_sample());time.sleep(.08)
@@ -519,8 +639,15 @@ try:
         wait_for(lambda text:'\n/\n/ >' in text and text.count('/ >')>=5)
         raise ProfileComplete()
     if a.scroll_only:
-        started=time.monotonic();type_line('graphics-check scroll');wait_for(lambda text:'SCROLL 59\n/ >' in text and all(f'SCROLL {i:02}' in text for i in range(12,60)) and 'SCROLL 00' not in text,90)
-        (work/'scroll.json').write_text(json.dumps(dict(wall_seconds=time.monotonic()-started,cpus=a.cpus,accelerator=a.accel),indent=2)+'\n');raise ProfileComplete()
+        screen_height=int(screenshot.read_bytes().split(b'\n',3)[1].split()[1])
+        started=time.monotonic();type_line('graphics-check scroll');wait_for(lambda text:'SCROLL 59\n/ >' in text and all(f'SCROLL {i:02}' in text for i in range(max(0,62-screen_height//cell_height),60)) and 'SCROLL 00' not in text,90)
+        elapsed=time.monotonic()-started
+        type_line('ls /system/apps');wait_for(lambda text:all(name in text for name in ('terminal','monitor','js')) and text.count('/ >')>=2)
+        type_line('graphics-check bulk');wait_for(lambda text:'BULK DONE' in text,120)
+        samples={int(k):int(v) for k,v in re.findall(r'PROFILE bulk([0-4])_ns=([0-9]+)',screen())};assert len(samples)==5
+        single={int(k):int(v) for k,v in re.findall(r'PROFILE line([0-4])_ns=([0-9]+)',screen())};assert len(single)==5
+        import statistics
+        (work/'scroll.json').write_text(json.dumps(dict(wall_seconds=elapsed,line_samples_ns=single,line_median_ns=statistics.median(single.values()),bulk_samples_ns=samples,bulk_median_ns=statistics.median(samples.values()),cpus=a.cpus,accelerator=a.accel,ls_verified=True,text_sha256=hashlib.sha256((build/'apps/text.elf').read_bytes()).hexdigest(),graphics_sha256=hashlib.sha256((build/'apps/graphics-vga.elf').read_bytes()).hexdigest()),indent=2)+'\n');raise ProfileComplete()
     if a.render_only:
         started=time.monotonic();type_line('graphics-check render');wait_for(lambda text:'RENDER DONE' in text,120)
         values={k:int(v) for k,v in re.findall(r'PROFILE ((?:clear|scroll)[0-4]_ns)=([0-9]+)',screen())};assert len(values)==10
@@ -629,7 +756,7 @@ finally:
                 if any(initial['clock'][key]!=final['clock'][key] for key in fields):raise RuntimeError('clock source changed during CPU measurement')
             (work/'cpu.json').write_text(json.dumps(result,indent=2)+'\n');raw.unlink()
         except Exception as error:status='failed';failure='CPU report: '+str(error)
-    (work/'result.json').write_text(json.dumps(dict(status=status,error=failure,runtime_foundation=runtime_identity,cpus=a.cpus,accelerator=a.accel,storage_devices=a.storage_devices,diagnostic_kernel=str(a.kernel) if a.kernel else None,mmio_trace=a.mmio_trace),indent=2)+'\n')
+    (work/'result.json').write_text(json.dumps(dict(status=status,error=failure,runtime_foundation=runtime_identity if a.runtime_only else None,javascript=runtime_identity if ((a.editor_only and not a.native_editor) or a.javascript_only or a.js_engine_only) else None,cpus=a.cpus,accelerator=a.accel,gpu=a.gpu,storage_devices=a.storage_devices,diagnostic_kernel=str(a.kernel) if a.kernel else None,mmio_trace=a.mmio_trace),indent=2)+'\n')
 if status=='passed' and not a.keep_artifacts:
     subprocess.run(['python3',str(root/'src/tools/clean-tests.py'),'--root',str(work)],check=True)
 if a.startup_only and status=='passed':print(f'STARTUP: prompt {boot_timing["first_prompt_seconds"]:.3f}s; verified key echo {boot_timing["interactive_seconds"]:.3f}s; timings {work}/startup.json',flush=True)

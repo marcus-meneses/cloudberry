@@ -40,14 +40,19 @@ def main():
             run(['make',f'-j{a.jobs}','all-target-newlib'],build/'build.log',cwd=build,env=env)
             run(['make','install-target-newlib'],build/'install.log',cwd=build,env=env)
             stamp.write_text(json.dumps(identity,indent=2)+'\n')
-        shutil.copy2(source/'COPYING.NEWLIB',work/'COPYING.NEWLIB')
+        if not (work/'COPYING.NEWLIB').exists():shutil.copy2(source/'COPYING.NEWLIB',work/'COPYING.NEWLIB')
         flags=FLAGS.split()+['-Wall','-Wextra','-Werror','-ffreestanding','-fno-builtin','-isystem',str(sysroot/'x86_64-elf/include')]
         (work/'tmp').mkdir(exist_ok=True)
         objects=[]
         for name in ('heap','runtime','system','libc','crt0'):
-            obj=work/(name+'.o');temporary=work/(name+'.tmp.o');run([cc,*flags,'-c',str(ROOT/f'src/sdk/{name}.c'),'-o',str(temporary)],work/(name+'.log'));temporary.replace(obj)
+            obj=work/(name+'.o');temporary=work/(name+'.tmp.o');fingerprint=hashlib.sha256(json.dumps(identity,sort_keys=True).encode())
+            for dependency in [ROOT/f'src/sdk/{name}.c',*sorted((ROOT/'src/sdk').glob('*.h')),*sorted((ROOT/'src/interfaces').glob('*.h'))]:fingerprint.update(dependency.read_bytes())
+            digest=fingerprint.hexdigest();object_stamp=work/(name+'.sha256')
+            if not obj.exists() or not object_stamp.exists() or object_stamp.read_text()!=digest:
+                run([cc,*flags,'-c',str(ROOT/f'src/sdk/{name}.c'),'-o',str(temporary)],work/(name+'.log'));temporary.replace(obj);object_stamp.write_text(digest)
             if name!='crt0':objects.append(str(obj))
-        library=work/'libcloudberry.a';temporary=work/'libcloudberry.tmp.a';temporary.unlink(missing_ok=True)
-        subprocess.run([str(prefix)+'ar','rcs',str(temporary),*objects],check=True);temporary.replace(library)
+        library=work/'libcloudberry.a';temporary=work/'libcloudberry.tmp.a'
+        if not library.exists() or any(pathlib.Path(obj).stat().st_mtime_ns>library.stat().st_mtime_ns for obj in objects):
+            temporary.unlink(missing_ok=True);subprocess.run([str(prefix)+'ar','rcs',str(temporary),*objects],check=True);temporary.replace(library)
         print('SDK: '+str(work.relative_to(ROOT))+' (static libc/libm, handle-backed runtime, SSE2 user code)')
 if __name__=='__main__':main()

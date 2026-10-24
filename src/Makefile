@@ -65,6 +65,13 @@ QEMU_ACCEL ?= tcg
 # VM topology: one socket, QEMU_CPUS cores, one thread per core.
 QEMU_CPUS ?= 1
 QEMU_DISPLAY ?= gtk
+# Device model and host GL are distinct from guest driver readiness.
+QEMU_GPU ?= vga
+ifeq ($(filter $(QEMU_GPU),vga virtio virgl),)
+$(error QEMU_GPU must be vga, virtio or virgl)
+endif
+QEMU_GPU_DEVICE = $(if $(filter virgl,$(QEMU_GPU)),virtio-vga-gl,$(if $(filter virtio,$(QEMU_GPU)),virtio-vga,VGA))$(if $(and $(filter-out vga,$(QEMU_GPU)),$(filter-out none,$(QEMU_IOMMU))),$(comma)iommu_platform=on,)
+QEMU_GPU_DISPLAY = $(QEMU_DISPLAY)$(if $(and $(filter virgl,$(QEMU_GPU)),$(if $(findstring gl=,$(QEMU_DISPLAY)),,yes)),$(comma)gl=on,)
 QEMU_IOMMU ?= none
 ifeq ($(filter $(QEMU_IOMMU),none intel amd),)
 $(error QEMU_IOMMU must be none, intel or amd)
@@ -86,7 +93,7 @@ QEMU_BOOT_MEDIA_MODE = $(if $(filter 1,$(QEMU_BOOT_WRITABLE)),snapshot=on,readon
 QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
     -rtc base=utc,clock=host \
     $(QEMU_IOMMU_FLAGS) -accel $(QEMU_ACCEL) -cpu $(QEMU_CPU) -smp cpus=$(QEMU_CPUS),sockets=1,cores=$(QEMU_CPUS),threads=1 -bios "$(OVMF)" \
-    -device VGA -device qemu-xhci,id=xhci \
+    -device $(QEMU_GPU_DEVICE) -device qemu-xhci,id=xhci \
     -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
     -drive if=none,id=bootmedia,format=raw,$(QEMU_BOOT_MEDIA_MODE),file="$(QEMU_BOOT_IMAGE)" \
     -device usb-bot,id=bootusb,bus=xhci.0 \
@@ -95,7 +102,7 @@ QEMU_FLAGS = -no-user-config -nodefaults -machine q35 -m 512M \
     -device nvme,drive=nvmedisk,serial=CLOUDBERRY2NVME \
     -drive if=none,id=satadisk,format=raw,file="$(SATA_DISK)" \
     -device ide-hd,bus=ide.0,drive=satadisk \
-    -display $(QEMU_DISPLAY) -name Cloudberry-v2 \
+    -display $(QEMU_GPU_DISPLAY) -name Cloudberry-v2 \
     -debugcon stdio -global isa-debugcon.iobase=0xe9 \
     -monitor none -no-reboot -no-shutdown
 
@@ -134,7 +141,7 @@ $(BUILD)/src-image-inputs: FORCE
 $(KERNEL): $(OBJECTS) boot/linker.ld $(BUILD)/src-kernel-inputs Makefile
 	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf tools/build-boot-image.py tools/image-version.py tools/filesystem-tree.py tools/stage-kmodules.py
+$(ISO): $(BUILD)/src-handler-bundles/.ready $(IO_MODULE) $(IO_BACKENDS) $(HANDLES_MODULE) $(PROCESS_MODULE) $(KERNEL) $(MEM_MODULE) $(HWENUM_MODULE) $(INTHANDLE_MODULE) $(SCHEDULER_MODULE) $(MMIO_MODULE) $(CLOCK_MODULE) $(TIMER_MODULE) $(EVENT_MODULE) $(SPLASH_MODULE) $(APIC_MODULE) $(THREADS_MODULE) $(SMP_MODULE) $(IRQ_MODULE) $(PCI_MODULE) $(NVME_MODULE) $(SATA_MODULE) $(IOMMU_MODULE) $(XHCI_MODULE) $(ACPI_MODULE) $(PLATFORM_MODULE) $(USB_MODULE) $(USB_HUB_MODULE) $(USB_STORAGE_MODULE) $(PARTITION_MODULE) $(EXT4_FS_MODULE) $(ISO9660_FS_MODULE) $(BOOTSTRAP_MODULE) $(CONFIG_MODULE) boot/cloudberry.cnf boot/limine.conf $(wildcard script/samples/*) tools/build-boot-image.py tools/image-version.py tools/filesystem-tree.py tools/stage-kmodules.py
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/limine $(STAGE)/kmodules/drivers $(STAGE)/kmodules/helpers $(STAGE)/EFI/BOOT
 	cp $(KERNEL) $(STAGE)/kernel.elf
@@ -324,7 +331,7 @@ _test-inthandle-faults: $(ISO) $(addprefix $(BUILD)/tests/src-fault-,1.elf 2.elf
 $(BUILD)/%.d: ;
 .SECONDARY:
 
--include $(wildcard $(BUILD)/src-*.d $(BUILD)/kmodules/*.d $(BUILD)/tests/src-*.d)
+-include $(wildcard $(BUILD)/src-*.d $(BUILD)/kmodules/*.d $(BUILD)/tests/src-*.d $(BUILD)/tests/gpu-*.d)
 
 $(BUILD)/kmodules/scheduler-pic.o: kmodules/shared/scheduler.h kmodules/shared/inthandle.h
 $(BUILD)/kmodules/scheduler.elf: $(BUILD)/kmodules/scheduler-pic.o $(BUILD)/kmodules/scheduler.exports.o kmodules/shared/module.ld
@@ -1030,11 +1037,13 @@ test-handles:
 	@mkdir -p $(BUILD)/tests
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined tests/handles.c -o $(BUILD)/tests/handles
 	$(BUILD)/tests/handles
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fsanitize=undefined -DCB_HANDLES_PROFILE tests/handles.c -o $(BUILD)/tests/handles-profile-host
+	$(BUILD)/tests/handles-profile-host
 
 $(BUILD)/apps/keyboard.elf: handlers/keyboard/report.c handlers/keyboard/report.h common/hid-report.c common/hid-report.h interfaces/admission.h handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/hid.h interfaces/startup.h sdk/system.c sdk/system.h interfaces/keyboard.h interfaces/io.h sdk/application.ld
 	@mkdir -p $(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/keyboard/keyboard.c handlers/keyboard/hid.c handlers/keyboard/report.c common/hid-report.c sdk/system.c -o $@
-$(BUILD)/src-handler-bundles/.ready: $(BUILD)/installer-trusted-key.bin $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts fsctl install)) $(foreach p,terminal echo cat ls pwd monitor accounts fsctl install,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display graphics text filesystem mouse identity sessions installer)) $(foreach p,display graphics text filesystem mouse identity sessions installer,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
+$(BUILD)/src-handler-bundles/.ready: $(BUILD)/kmodules/gpu-virtio.kmod drivers/gpu-virtio.driver $(BUILD)/installer-trusted-key.bin $(addprefix $(BUILD)/apps/,$(addsuffix .elf,terminal echo cat ls pwd monitor accounts fsctl install js editor bench3d)) $(foreach p,terminal echo cat ls pwd monitor accounts fsctl install js editor bench3d,apps/$(p)/manifest.json) $(addprefix $(BUILD)/apps/,$(addsuffix .elf,display-vga graphics-vga display-opengl graphics-opengl text filesystem mouse identity sessions installer)) $(foreach p,display-vga graphics-vga display-opengl graphics-opengl text filesystem mouse identity sessions installer,handlers/$(p)/manifest.json handlers/$(p)/provider.cnf) $(BUILD)/apps/keyboard.elf $(BUILD)/apps/applications.elf $(BUILD)/apps/launch.elf $(BUILD)/apps/true.elf handlers/keyboard/manifest.json handlers/keyboard/provider.cnf handlers/keyboard/config.cnf $(wildcard handlers/keyboard/layouts/*.json) handlers/applications/manifest.json handlers/applications/provider.cnf apps/installed.json apps/launch/manifest.json apps/true/manifest.json $(wildcard fonts/*) tools/build-initial.py tools/build-installations.py tools/identity-db.py tools/filesystem-tree.py handlers/identity/crypto/vendor/LICENSE
 	rm -rf $(BUILD)/src-handler-bundles
 	@mkdir -p $(BUILD)/src-handler-bundles/keyboard/layouts $(BUILD)/src-handler-bundles/applications $(BUILD)/src-handler-bundles/launch $(BUILD)/src-handler-bundles/true
 	cp $(BUILD)/apps/keyboard.elf $(BUILD)/src-handler-bundles/keyboard/keyboard.elf
@@ -1043,9 +1052,18 @@ $(BUILD)/src-handler-bundles/.ready: $(BUILD)/installer-trusted-key.bin $(addpre
 	cp $(BUILD)/apps/applications.elf handlers/applications/manifest.json handlers/applications/provider.cnf $(BUILD)/src-handler-bundles/applications/
 	cp $(BUILD)/apps/launch.elf apps/launch/manifest.json $(BUILD)/src-handler-bundles/launch/
 	cp $(BUILD)/apps/true.elf apps/true/manifest.json $(BUILD)/src-handler-bundles/true/
-	$(foreach p,display graphics text filesystem mouse identity sessions installer,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,display-vga graphics-vga display-opengl graphics-opengl text filesystem mouse identity sessions installer,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf handlers/$(p)/manifest.json handlers/$(p)/provider.cnf $(BUILD)/src-handler-bundles/$(p)/;)
+	cp fonts/UbuntuMono-R.ttf $(BUILD)/src-handler-bundles/graphics-vga/
+	cp $(ROOT)/bin/sdk/freetype/LICENSE.TXT $(BUILD)/src-handler-bundles/graphics-vga/FreeType-LICENSE.txt
+	cp $(ROOT)/bin/sdk/freetype/FTL.TXT $(BUILD)/src-handler-bundles/graphics-vga/FTL.TXT
+	cp $(ROOT)/bin/sdk/COPYING.NEWLIB $(BUILD)/src-handler-bundles/graphics-vga/
+	cp $(BUILD)/src-handler-bundles/graphics-vga/UbuntuMono-R.ttf $(BUILD)/src-handler-bundles/graphics-vga/FreeType-LICENSE.txt $(BUILD)/src-handler-bundles/graphics-vga/FTL.TXT $(BUILD)/src-handler-bundles/graphics-vga/COPYING.NEWLIB $(BUILD)/src-handler-bundles/graphics-opengl/
 	cp handlers/identity/crypto/vendor/LICENSE $(BUILD)/src-handler-bundles/identity/THIRD-PARTY-LICENSE.txt
-	$(foreach p,terminal echo cat ls pwd monitor accounts fsctl install,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
+	$(foreach p,terminal echo cat ls pwd monitor accounts fsctl install js editor bench3d,mkdir -p $(BUILD)/src-handler-bundles/$(p) && cp $(BUILD)/apps/$(p).elf apps/$(p)/manifest.json $(BUILD)/src-handler-bundles/$(p)/;)
+	cp $(ROOT)/bin/sdk/quickjs/LICENSE $(BUILD)/src-handler-bundles/js/THIRD-PARTY-LICENSE.txt
+	cp $(ROOT)/bin/sdk/COPYING.NEWLIB $(BUILD)/src-handler-bundles/js/COPYING.NEWLIB
+	cp $(ROOT)/bin/sdk/COPYING.NEWLIB $(BUILD)/src-handler-bundles/editor/COPYING.NEWLIB
+	cp $(BUILD)/kmodules/gpu-virtio.kmod drivers/gpu-virtio.driver $(BUILD)/src-handler-bundles/
 	python3 tools/build-installations.py apps/installed.json $(BUILD)/src-handler-bundles $(BUILD)/src-handler-bundles/installed.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/applications/catalog.bin
 	cp $(BUILD)/src-handler-bundles/installed.bin $(BUILD)/src-handler-bundles/identity/catalog.bin
@@ -1133,41 +1151,46 @@ test-installations:
 	python3 tests/installations.py $(BUILD)/tests/installation-contract $(BUILD)/tests
 
 # Application-facing rendering providers (independent replaceable contracts).
-CONSOLE_PROVIDERS := display graphics text filesystem mouse identity sessions installer
+CONSOLE_PROVIDERS := display-vga graphics-vga text filesystem mouse identity sessions installer
 CONSOLE_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(CONSOLE_PROVIDERS)))
 IDENTITY_CRYPTO := handlers/identity/crypto/password.c handlers/identity/crypto/strings.c handlers/identity/crypto/vendor/source/sha256.c handlers/identity/crypto/vendor/source/utils.c
 IDENTITY_CRYPTO_FLAGS := -Ihandlers/identity/crypto/vendor/include -Ihandlers/identity/crypto/compat -fno-builtin
 define CONSOLE_RULE
 $(BUILD)/apps/$(1).elf: handlers/$(1)/$(1).c
 	@mkdir -p $$(@D)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics,$(1)),handlers/graphics/raster.c) $(if $(filter mouse,$(1)),handlers/mouse/hid.c common/hid-report.c) $(if $(filter identity,$(1)),handlers/identity/format.c handlers/identity/store.c $(IDENTITY_CRYPTO) $(IDENTITY_CRYPTO_FLAGS)) $(if $(filter installer,$(1)),$(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o -Xlinker --gc-sections) sdk/system.c -o $$@
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< $(if $(filter graphics-vga,$(1)),handlers/graphics-vga/raster.c) $(if $(filter mouse,$(1)),handlers/mouse/hid.c common/hid-report.c) $(if $(filter identity,$(1)),handlers/identity/format.c handlers/identity/store.c $(IDENTITY_CRYPTO) $(IDENTITY_CRYPTO_FLAGS)) $(if $(filter installer,$(1)),$(BUILD)/apps/installer-monocypher.o $(BUILD)/apps/installer-ed25519.o -Xlinker --gc-sections) sdk/system.c -o $$@
 endef
-$(foreach p,$(CONSOLE_PROVIDERS),$(eval $(call CONSOLE_RULE,$(p))))
-$(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wildcard interfaces/*.h) handlers/graphics/font.h
+$(foreach p,$(filter-out graphics-vga,$(CONSOLE_PROVIDERS)),$(eval $(call CONSOLE_RULE,$(p))))
+$(CONSOLE_ELFS): sdk/service.h sdk/system.h sdk/system.c sdk/application.ld $(wildcard interfaces/*.h)
 
-$(BUILD)/apps/graphics.elf: handlers/graphics/raster.c handlers/graphics/raster.h handlers/graphics/glyphs.h
+$(BUILD)/apps/mouse.elf: handlers/mouse/cursor.inc interfaces/graphics-overlay.h
+$(BUILD)/apps/graphics-vga.elf: handlers/graphics-vga/raster.c handlers/graphics-vga/raster.h handlers/graphics-vga/glyphs.h
 
-SHELL_APPS := terminal echo cat ls pwd monitor accounts fsctl install
+SHELL_APPS := terminal echo cat ls pwd monitor accounts fsctl install js editor bench3d
 SHELL_ELFS := $(addprefix $(BUILD)/apps/,$(addsuffix .elf,$(SHELL_APPS)))
 define SHELL_RULE
 $(BUILD)/apps/$(1).elf: apps/$(1)/$(1).c sdk/stream.h sdk/service.h sdk/application.h sdk/system.c $(wildcard interfaces/*.h)
 	@mkdir -p $$(@D)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $$< sdk/system.c -o $$@
 endef
-$(foreach p,$(SHELL_APPS),$(eval $(call SHELL_RULE,$(p))))
+$(foreach p,$(filter-out js editor,$(SHELL_APPS)),$(eval $(call SHELL_RULE,$(p))))
 $(BUILD)/apps/terminal.elf: apps/terminal/parser.h apps/terminal/editor.h apps/terminal/editing.inc
 
 .PHONY: test-console-host
-test-console-host:
+test-console-host: freetype
 	@mkdir -p $(BUILD)/tests
-	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/raster.c handlers/graphics/raster.c -o $(BUILD)/tests/raster
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined -I$(FREETYPE_ROOT)/freetype-2.15.0/include tests/raster.c handlers/graphics-vga/raster.c handlers/graphics-vga/font-engine.c $(FREETYPE_ROOT)/host/libfreetype.a -o $(BUILD)/tests/raster
 	$(BUILD)/tests/raster
-	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/graphics-present.c handlers/graphics/raster.c sdk/system.c -Wl,--gc-sections -o $(BUILD)/tests/graphics-present
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -I$(FREETYPE_ROOT)/freetype-2.15.0/include tests/graphics-present.c handlers/graphics-vga/raster.c handlers/graphics-vga/font-engine.c $(FREETYPE_ROOT)/host/libfreetype.a sdk/system.c -Wl,--gc-sections -o $(BUILD)/tests/graphics-present
 	$(BUILD)/tests/graphics-present
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/display-copy.c -Wl,--gc-sections -o $(BUILD)/tests/display-copy
 	$(BUILD)/tests/display-copy
 	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/streams.c -o $(BUILD)/tests/streams
 	$(BUILD)/tests/streams
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/text-batching.c -Wl,--gc-sections -o $(BUILD)/tests/text-batching
+	$(BUILD)/tests/text-batching
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/mouse-cursor.c sdk/system.c -Wl,--gc-sections -o $(BUILD)/tests/mouse-cursor
+	$(BUILD)/tests/mouse-cursor
 
 .PHONY: test-console-boot
 test-console-boot: $(ISO) $(BUILD)/tests/apps/graphics-check.elf
@@ -1427,3 +1450,233 @@ test-runtime-foundations:
 .PHONY: _test-runtime-foundations
 _test-runtime-foundations: $(ISO) $(BUILD)/tests/apps/graphics-check.elf $(BUILD)/tests/apps/runtime-foundation.elf
 	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --runtime-only --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+
+.PHONY: quickjs test-js-engine test-js-engine-host _test-js-engine
+quickjs: sdk
+	python3 tools/build-quickjs.py
+QUICKJS := $(SDK_ROOT)/quickjs
+JS_CORE := apps/js/engine.c
+$(BUILD)/tests/apps/js-engine.elf: tests/javascript/engine.c $(JS_CORE) apps/js/engine.h $(ROOT)/bin/sdk/quickjs/libquickjs.a $(ROOT)/bin/sdk/libcloudberry.a $(ROOT)/bin/sdk/crt0.o | quickjs
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) -isystem $(QUICKJS)/source $(SDK_LINK) $(SDK_ROOT)/crt0.o $< $(JS_CORE) -Wl,--start-group $(QUICKJS)/libquickjs.a $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+test-js-engine:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-js-engine
+_test-js-engine: $(ISO) $(BUILD)/tests/apps/graphics-check.elf $(BUILD)/tests/apps/js-engine.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --js-engine-only --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+test-js-engine-host: quickjs
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -DCONFIG_VERSION='"2026-06-04"' -isystem $(QUICKJS)/source tests/javascript/engine.c $(JS_CORE) $(addprefix $(QUICKJS)/source/,$(addsuffix .c,quickjs dtoa libregexp libunicode cutils)) -lm -o $(BUILD)/tests/js-engine-host
+	$(BUILD)/tests/js-engine-host
+
+JS_SOURCES := apps/js/devices.c apps/js/main.c apps/js/bindings.c apps/js/modules.c $(JS_CORE)
+$(BUILD)/apps/js.elf: $(JS_SOURCES) apps/js/bindings.h apps/js/engine.h $(wildcard sdk/*.h sdk/*.c) $(ROOT)/bin/sdk/quickjs/libquickjs.a $(ROOT)/bin/sdk/libcloudberry.a $(ROOT)/bin/sdk/crt0.o | quickjs
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) -isystem $(QUICKJS)/source $(SDK_LINK) $(SDK_ROOT)/crt0.o $(JS_SOURCES) -Wl,--start-group $(QUICKJS)/libquickjs.a $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+
+.PHONY: test-javascript _test-javascript
+test-javascript:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-javascript
+_test-javascript: $(ISO) $(BUILD)/tests/apps/graphics-check.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --javascript-only --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+
+$(ROOT)/bin/sdk/quickjs/libquickjs.a: | quickjs
+	@test -f $@
+$(ROOT)/bin/sdk/libcloudberry.a $(ROOT)/bin/sdk/crt0.o: | sdk
+	@test -f $@
+
+.PHONY: test-js-editor _test-js-editor test-js-editor-model
+test-js-editor-model:
+	node --test tests/javascript/editor-model.mjs
+test-js-editor:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-js-editor
+_test-js-editor: $(ISO) $(BUILD)/tests/apps/graphics-check.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --editor-only --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+
+
+FREETYPE_ROOT := $(ROOT)/bin/sdk/freetype
+FONT_SOURCES := handlers/graphics-vga/font-engine.c
+.PHONY: freetype
+freetype: sdk
+	python3 tools/build-freetype.py
+	gcc -std=c11 -O2 -g -I$(FREETYPE_ROOT)/freetype-2.15.0/include tools/font-atlas.c $(FONT_SOURCES) handlers/graphics-vga/raster.c $(FREETYPE_ROOT)/host/libfreetype.a -o $(FREETYPE_ROOT)/font-atlas
+	$(FREETYPE_ROOT)/font-atlas fonts/UbuntuMono-R.ttf > $(FREETYPE_ROOT)/atlas.json
+$(FREETYPE_ROOT)/target/libfreetype.a $(FREETYPE_ROOT)/host/libfreetype.a: | freetype
+	@test -f $@
+$(BUILD)/apps/graphics-vga.elf: handlers/graphics-common/provider.inc handlers/graphics-vga/graphics-vga.c handlers/graphics-vga/glyphs.h handlers/graphics-vga/overlay.inc handlers/graphics-vga/scene.inc handlers/graphics-vga/raster.c handlers/graphics-vga/raster.h $(FONT_SOURCES) handlers/graphics-vga/font-engine.h $(FREETYPE_ROOT)/target/libfreetype.a $(ROOT)/bin/sdk/libcloudberry.a $(wildcard sdk/*.h interfaces/*.h) | freetype
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) -I$(FREETYPE_ROOT)/freetype-2.15.0/include $(SDK_LINK) handlers/graphics-vga/graphics-vga.c handlers/graphics-vga/raster.c $(FONT_SOURCES) -Wl,--start-group $(FREETYPE_ROOT)/target/libfreetype.a $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+
+# Native graphical editor: ordinary SDK application, independently of QuickJS.
+EDITOR_SOURCES := apps/editor/editor.c apps/editor/model.c apps/editor/platform.c apps/editor/view.c
+$(BUILD)/apps/editor.elf: $(EDITOR_SOURCES) $(wildcard apps/editor/*.h sdk/*.h) $(ROOT)/bin/sdk/libcloudberry.a $(ROOT)/bin/sdk/crt0.o | sdk
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) $(SDK_LINK) $(SDK_ROOT)/crt0.o $(EDITOR_SOURCES) -Wl,--start-group $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+.PHONY: test-editor-model
+test-editor-model:
+	@mkdir -p $(BUILD)/tests/editor
+	gcc -std=c11 -fsanitize=undefined -O2 -Wall -Wextra -Werror tests/editor-model.c apps/editor/model.c -Wl,--wrap=malloc,--wrap=calloc -o $(BUILD)/tests/editor/model
+	$(BUILD)/tests/editor/model
+
+.PHONY: test-editor _test-editor
+test-editor:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-editor
+_test-editor: $(ISO) $(BUILD)/tests/apps/graphics-check.elf
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --fixtures --editor-only --native-editor --diagnostics --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+
+.PHONY: test-render-selection
+test-render-selection:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/render-selection.c -o $(BUILD)/tests/render-selection
+	$(BUILD)/tests/render-selection
+
+# GPU transport remains disk-loaded. Read-only discovery never takes over scanout.
+$(BUILD)/kmodules/gpu-virtio.elf: $(BUILD)/kmodules/gpu-virtio-pic.o $(BUILD)/kmodules/virtio-pci-pic.o $(BUILD)/kmodules/gpu-virtio.exports.o kmodules/shared/module.ld tools/check-module-pic.py
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/kmodules/virtio-pci-pic.o: kmodules/shared/virtio/pci.c kmodules/shared/virtio/pci.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/kmodules/gpu-virtio-pic.o: kmodules/shared/gpu-virtio-render.inc kmodules/shared/render-selection.h kmodules/shared/gpu-virtio-io.inc interfaces/gpu.h interfaces/io.h kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h
+.PHONY: test-virtio-gpu-host
+test-virtio-gpu-host:
+	python3 tests/gpu-frame.py
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/virtio-pci.c kmodules/shared/virtio/pci.c -o $(BUILD)/tests/virtio-pci
+	$(BUILD)/tests/virtio-pci
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/gpu-virtio.c kmodules/shared/virtio/pci.c -Wl,--gc-sections -o $(BUILD)/tests/gpu-virtio
+	$(BUILD)/tests/gpu-virtio
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -DCB_GPU_TEST_PROFILE tests/gpu-virtio.c kmodules/shared/virtio/pci.c -Wl,--gc-sections -o $(BUILD)/tests/gpu-trace-host
+	$(BUILD)/tests/gpu-trace-host
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined tests/gpu-bridge.c kmodules/shared/virtio/pci.c -Wl,--gc-sections -o $(BUILD)/tests/gpu-bridge
+	$(BUILD)/tests/gpu-bridge
+
+$(BUILD)/tests/gpu-virtio-probe-pic.o: tests/gpu-virtio-probe.c kmodules/shared/gpu-virtio.c kmodules/shared/gpu-virtio-io.inc interfaces/gpu.h interfaces/io.h kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/gpu-virtio-probe.elf: $(BUILD)/tests/gpu-render-pic.o $(BUILD)/tests/gpu-virgl-pic.o $(BUILD)/tests/gpu-virtio-probe-pic.o $(BUILD)/kmodules/virtio-pci-pic.o $(BUILD)/kmodules/gpu-virtio.exports.o kmodules/shared/module.ld
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/tests/gpu-virtio-probe.kmod: $(BUILD)/tests/gpu-virtio-probe.elf
+	$(CROSS_PREFIX)objcopy -O binary $< $@
+GPU_TEST_DISPLAY ?=
+.PHONY: test-virtio-gpu _test-virtio-gpu
+test-virtio-gpu:
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-virtio-gpu
+_test-virtio-gpu: $(ISO) $(BUILD)/tests/gpu-virtio-probe.kmod
+	python3 tests/gpu-virtio-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL) --gpu=$(if $(filter virgl,$(QEMU_GPU)),virgl,virtio) --iommu=$(QEMU_IOMMU) $(if $(GPU_TEST_DISPLAY),--display="$(GPU_TEST_DISPLAY)",)
+
+# Experimental GPU display: buildable, deliberately absent from boot catalog.
+$(BUILD)/apps/display-opengl.elf: handlers/display-opengl/display-opengl.c handlers/display-opengl/render.c handlers/display-opengl/render.h handlers/display-opengl/render-surfaces.inc handlers/graphics-opengl/virgl.c handlers/graphics-opengl/virgl.h handlers/graphics-opengl/virgl-alpha.inc sdk/service.h sdk/system.c $(wildcard interfaces/*.h) sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld handlers/display-opengl/display-opengl.c handlers/display-opengl/render.c handlers/graphics-opengl/virgl.c sdk/system.c -o $@
+.PHONY: test-virgl-render
+# Uses host libvirglrenderer + surfaceless software EGL, no GPU/KVM/window.
+test-virgl-render:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -g -Wall -Wextra -Werror -fsanitize=undefined tests/virgl-render.c handlers/display-opengl/render.c handlers/graphics-opengl/virgl.c -Wl,-l:libvirglrenderer.so.1 -o $(BUILD)/tests/virgl-render
+	LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless $(BUILD)/tests/virgl-render
+
+$(BUILD)/tests/gpu-render-pic.o: handlers/display-opengl/render.c handlers/display-opengl/render.h handlers/display-opengl/render-surfaces.inc interfaces/render-backend.h interfaces/gpu.h handlers/graphics-opengl/virgl.h
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/gpu-virgl-pic.o: handlers/graphics-opengl/virgl.c handlers/graphics-opengl/virgl.h handlers/graphics-opengl/virgl-alpha.inc
+	@mkdir -p $(@D)
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+
+.PHONY: experimental-opengl
+experimental-opengl: $(BUILD)/apps/display-opengl.elf $(BUILD)/apps/graphics-opengl.elf
+
+$(BUILD)/apps/graphics-opengl.elf: handlers/graphics-opengl/graphics-opengl.c handlers/graphics-opengl/present.inc handlers/graphics-common/provider.inc handlers/graphics-vga/glyphs.h handlers/graphics-vga/overlay.inc handlers/graphics-vga/scene.inc handlers/graphics-vga/raster.c handlers/graphics-vga/raster.h $(FONT_SOURCES) handlers/graphics-vga/font-engine.h $(FREETYPE_ROOT)/target/libfreetype.a $(ROOT)/bin/sdk/libcloudberry.a $(wildcard sdk/*.h interfaces/*.h) | freetype
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) -I$(FREETYPE_ROOT)/freetype-2.15.0/include $(SDK_LINK) handlers/graphics-opengl/graphics-opengl.c handlers/graphics-vga/raster.c $(FONT_SOURCES) -Wl,--start-group $(FREETYPE_ROOT)/target/libfreetype.a $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+
+.PHONY: test-graphics-opengl
+test-graphics-opengl: freetype
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections -fsanitize=undefined -I$(FREETYPE_ROOT)/freetype-2.15.0/include tests/graphics-opengl.c handlers/display-opengl/render.c handlers/graphics-opengl/virgl.c handlers/graphics-vga/raster.c handlers/graphics-vga/font-engine.c $(FREETYPE_ROOT)/host/libfreetype.a sdk/system.c -Wl,--gc-sections,-l:libvirglrenderer.so.1 -o $(BUILD)/tests/graphics-opengl
+	LIBGL_ALWAYS_SOFTWARE=1 EGL_PLATFORM=surfaceless $(BUILD)/tests/graphics-opengl
+
+# Paired provider acceptance uses copied media and a test-only admission/observer.
+$(BUILD)/tests/apps/gpu-pair.elf: tests/apps/gpu-pair.c tests/gpu-pair.h sdk/service.h sdk/system.c $(wildcard interfaces/*.h) sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld $< sdk/system.c -o $@
+$(BUILD)/tests/gpu-pair-address.h: $(BUILD)/tests/apps/gpu-pair.elf tests/gpu-pair-address.py
+	python3 tests/gpu-pair-address.py $(CROSS_PREFIX)nm $< $@
+$(BUILD)/tests/gpu-pair.json: kmodules/shared/gpu-virtio.json tests/gpu-pair-exports.py
+	@mkdir -p $(@D)
+	python3 tests/gpu-pair-exports.py $< $@
+$(BUILD)/tests/gpu-pair.exports.S: $(BUILD)/tests/gpu-pair.json tools/module-exports.py
+	python3 tools/module-exports.py $< $@
+$(BUILD)/tests/gpu-pair.exports.o: $(BUILD)/tests/gpu-pair.exports.S
+	$(CC) $(MODULE_CFLAGS) -c $< -o $@
+$(BUILD)/tests/gpu-pair-vga-pic.o: tests/gpu-pair-module.c tests/gpu-pair.h $(BUILD)/tests/gpu-pair-address.h kmodules/shared/gpu-virtio.c kmodules/shared/gpu-virtio-io.inc kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h
+	$(CC) $(MODULE_CFLAGS) -I$(abspath $(BUILD)/tests) -DGPU_PAIR_ACCEL=0 -c $< -o $@
+$(BUILD)/tests/gpu-pair-virgl-pic.o: tests/gpu-pair-module.c tests/gpu-pair.h $(BUILD)/tests/gpu-pair-address.h kmodules/shared/gpu-virtio.c kmodules/shared/gpu-virtio-io.inc kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h
+	$(CC) $(MODULE_CFLAGS) -I$(abspath $(BUILD)/tests) -DGPU_PAIR_ACCEL=1 -c $< -o $@
+$(BUILD)/tests/gpu-pair-vga-pic.o $(BUILD)/tests/gpu-pair-virgl-pic.o $(BUILD)/tests/gpu-pair-fault-pic.o: tests/gpu-pair-restore.inc tests/gpu-pair-lifecycle.inc kmodules/shared/gpu-virtio-render.inc kmodules/shared/bootstrap.h interfaces/startup.h
+$(BUILD)/tests/gpu-pair-%.elf: $(BUILD)/tests/gpu-pair-%-pic.o $(BUILD)/tests/gpu-pair.exports.o $(BUILD)/kmodules/virtio-pci-pic.o kmodules/shared/module.ld
+	python3 tools/check-module-pic.py $(filter %.o,$^)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-T,kmodules/shared/module.ld $(filter %.o,$^) -o $@
+$(BUILD)/tests/gpu-pair-%.kmod: $(BUILD)/tests/gpu-pair-%.elf
+	$(CROSS_PREFIX)objcopy -O binary $< $@
+GPU_TEST_CAPTURE ?= 0
+.PHONY: test-gpu-pair _test-gpu-pair test-gpu-pair-host test-gpu-pair-screen
+test-gpu-pair-host:
+	python3 tests/gpu-pair-host.py
+test-gpu-pair: test-gpu-pair-host
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-gpu-pair
+test-gpu-pair-screen:
+	$(MAKE) --no-print-directory test-gpu-pair QEMU_GPU=virgl GPU_TEST_CAPTURE=1 GPU_TEST_DISPLAY=egl-headless
+_test-gpu-pair: $(ISO) experimental-opengl $(BUILD)/tests/gpu-pair-vga.kmod $(BUILD)/tests/gpu-pair-virgl.kmod
+	python3 tests/gpu-pair-boot.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL) --backend=$(if $(filter virgl virtio,$(QEMU_GPU)),$(QEMU_GPU),vga) $(if $(GPU_TEST_DISPLAY),--display="$(GPU_TEST_DISPLAY)",) $(if $(filter 1,$(GPU_TEST_CAPTURE)),--require-screen,) $(if $(GPU_TEST_FAULT),--startup-fault=$(GPU_TEST_FAULT),) $(if $(filter 1,$(GPU_TEST_PROFILE)),--profile,)
+
+# Startup faults live only in copied provider binaries and this test module.
+$(BUILD)/tests/gpu-pair-fault-pic.o: tests/gpu-pair-module.c tests/gpu-pair.h $(BUILD)/tests/gpu-pair-address.h kmodules/shared/gpu-virtio.c kmodules/shared/gpu-virtio-io.inc kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h
+	$(CC) $(MODULE_CFLAGS) -I$(abspath $(BUILD)/tests) -DGPU_PAIR_ACCEL=1 -DGPU_PAIR_STARTUP_FAULT=1 -c $< -o $@
+$(BUILD)/tests/apps/gpu-pair-fail-open.elf: GPU_PAIR_FAULT_CODE=201
+$(BUILD)/tests/apps/gpu-pair-fail-scanout.elf: GPU_PAIR_FAULT_CODE=202
+$(BUILD)/tests/apps/gpu-pair-fail-graphics.elf: GPU_PAIR_FAULT_CODE=203
+$(BUILD)/tests/apps/gpu-pair-fail-release.elf: GPU_PAIR_FAULT_CODE=204
+$(addprefix $(BUILD)/tests/apps/gpu-pair-fail-,open.elf scanout.elf release.elf): tests/gpu-pair-fault-provider.c handlers/display-opengl/display-opengl.c handlers/display-opengl/render.c handlers/display-opengl/render.h handlers/display-opengl/render-surfaces.inc handlers/graphics-opengl/virgl.c handlers/graphics-opengl/virgl.h handlers/graphics-opengl/virgl-alpha.inc sdk/service.h sdk/system.c $(wildcard interfaces/*.h) sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld -DGPU_PAIR_FAULT_CODE=$(GPU_PAIR_FAULT_CODE) $< handlers/display-opengl/render.c handlers/graphics-opengl/virgl.c sdk/system.c -o $@
+$(BUILD)/tests/apps/gpu-pair-fail-graphics.elf: tests/gpu-pair-fault-provider.c handlers/graphics-opengl/graphics-opengl.c handlers/graphics-opengl/present.inc handlers/graphics-common/provider.inc handlers/graphics-vga/glyphs.h handlers/graphics-vga/overlay.inc handlers/graphics-vga/scene.inc handlers/graphics-vga/raster.c handlers/graphics-vga/raster.h $(FONT_SOURCES) handlers/graphics-vga/font-engine.h $(FREETYPE_ROOT)/target/libfreetype.a $(ROOT)/bin/sdk/libcloudberry.a $(wildcard sdk/*.h interfaces/*.h) | freetype
+	@mkdir -p $(@D)
+	TMPDIR="$(SDK_ROOT)/tmp" $(CC) $(SDK_CFLAGS) -DGPU_PAIR_FAULT_CODE=$(GPU_PAIR_FAULT_CODE) -I$(FREETYPE_ROOT)/freetype-2.15.0/include $(SDK_LINK) $< handlers/graphics-vga/raster.c $(FONT_SOURCES) -Wl,--start-group $(FREETYPE_ROOT)/target/libfreetype.a $(SDK_ROOT)/libcloudberry.a -lc -lm -lgcc -Wl,--end-group -o $@
+GPU_TEST_FAULT ?=
+_test-gpu-pair: $(if $(GPU_TEST_FAULT),$(BUILD)/tests/gpu-pair-fault.kmod $(BUILD)/tests/apps/gpu-pair-fail-$(GPU_TEST_FAULT).elf,)
+.PHONY: test-gpu-pair-failures _test-gpu-pair-failures _gpu-pair-failure-fixtures
+_gpu-pair-failure-fixtures: $(ISO) experimental-opengl $(BUILD)/tests/gpu-pair-fault.kmod $(addprefix $(BUILD)/tests/apps/gpu-pair-fail-,open.elf scanout.elf graphics.elf release.elf)
+test-gpu-pair-failures: test-gpu-pair-host
+	$(MAKE) --no-print-directory BUILD="$(TEST_BUILD)" ISO="$(TEST_BUILD)/cloudberry.iso" KERNEL="$(TEST_BUILD)/kernel.elf" STAGE="$(TEST_BUILD)/src-iso-root" _test-gpu-pair-failures
+_test-gpu-pair-failures: _gpu-pair-failure-fixtures
+	python3 tests/gpu-pair-failures.py "$(abspath $(BUILD))" --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)
+
+.PHONY: test-gpu-probe
+test-gpu-probe:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=gnu11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/gpu-probe.c kmodules/shared/virtio/pci.c -o $(BUILD)/tests/gpu-probe
+	$(BUILD)/tests/gpu-probe
+
+# Diagnostic variants stay in isolated media; never candidate prerequisites.
+$(BUILD)/tests/apps/gpu-pair-profile.elf: tests/apps/gpu-pair.c tests/gpu-pair.h sdk/service.h sdk/system.c $(wildcard interfaces/*.h) sdk/application.ld
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-stack-protector -fno-pie -mno-red-zone -mgeneral-regs-only -nostdlib -static -no-pie -Wl,--build-id=none,-z,noexecstack,-z,max-page-size=4096,-T,sdk/application.ld -DGPU_PAIR_PROFILE=1 $< sdk/system.c -o $@
+$(BUILD)/tests/gpu-pair-profile-address.h: $(BUILD)/tests/apps/gpu-pair-profile.elf tests/gpu-pair-address.py
+	python3 tests/gpu-pair-address.py $(CROSS_PREFIX)nm $< $@
+$(BUILD)/tests/gpu-pair-profile-pic.o: tests/gpu-pair-module.c tests/gpu-performance.inc tests/handles-profile.h tests/gpu-pair.h $(BUILD)/tests/gpu-pair-profile-address.h kmodules/shared/gpu-virtio.c kmodules/shared/gpu-virtio-io.inc kmodules/shared/gpu-virtio.h kmodules/shared/virtio/pci.h kmodules/shared/virtio/gpu-wire.h tests/gpu-pair-restore.inc tests/gpu-pair-lifecycle.inc kmodules/shared/gpu-virtio-render.inc
+	$(CC) $(MODULE_CFLAGS) -I$(abspath $(BUILD)/tests) -DGPU_PAIR_ACCEL=1 -DGPU_PAIR_PROFILE=1 -c $< -o $@
+.PHONY: test-gpu-pair-profile
+test-gpu-pair-profile:
+	$(MAKE) --no-print-directory test-gpu-pair QEMU_GPU=virgl GPU_TEST_PROFILE=1 GPU_TEST_CAPTURE=1 GPU_TEST_DISPLAY=egl-headless
+_test-gpu-pair: $(if $(filter 1,$(GPU_TEST_PROFILE)),$(BUILD)/tests/gpu-pair-profile.kmod $(BUILD)/tests/apps/gpu-pair-profile.elf $(BUILD)/tests/handles-profile.kmod,)
+
+$(BUILD)/apps/bench3d.elf: apps/bench3d/model.h
+
+.PHONY: test-bench3d-model test-bench3d
+test-bench3d-model:
+	@mkdir -p $(BUILD)/tests
+	gcc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=undefined tests/bench3d-model.c -o $(BUILD)/tests/bench3d-model
+	$(BUILD)/tests/bench3d-model
+test-bench3d: $(ISO)
+	python3 tests/console-boot.py "$(abspath $(BUILD))" --bench3d-only --cpus=$(QEMU_CPUS) --accel=$(QEMU_ACCEL)

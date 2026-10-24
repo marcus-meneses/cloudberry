@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "name": "/@graphics",
+      "operations": [
+        "info",
+        "rectangle",
+        "path",
+        "present",
+        "font_info",
+        "text_batch",
+        "surface_create",
+        "surface_release",
+        "surface_place"
+      ]
+    },
+    {
+      "name": "/@keyboard",
+      "scope": "boot-input",
+      "operations": [
+        "read",
+        "focus_claim",
+        "focus_release"
+      ]
+    },
+    {
+      "name": "/@mouse",
+      "scope": "boot-input",
+      "operations": [
+        "cursor_hide",
+        "cursor_show"
+      ]
+    },
+    {
+      "name": "/@io",
+      "scope": "self",
+      "operations": [
+        "now_ns"
+      ]
+    },
+    {
+      "name": "/@streams",
+      "operations": [
+        "read",
+        "write"
+      ]
+    }
+  ]
+}

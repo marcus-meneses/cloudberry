@@ -83,7 +83,7 @@ static const unsigned char *registry_find(struct registry_snapshot *s,uint64_t u
     }
 static int registry_resource(void *context,const char *name,const char *scope,int publish){int *io=context;
     *io=mf_equal(name,"/@io");
-    return !(publish && name[0]=='/' && name[1]=='@') && !mf_equal(scope,"process-manager") && !mf_equal(scope,"display") && !mf_equal(scope,"filesystem") && !mf_equal(scope,"graphics") && (!*io || mf_equal(scope,"self"));
+    return !mf_equal(name,"/@graphics-overlay") && !(publish && name[0]=='/' && name[1]=='@') && !mf_equal(scope,"process-manager") && !mf_equal(scope,"display") && !mf_equal(scope,"filesystem") && !mf_equal(scope,"graphics") && (!*io || mf_equal(scope,"self"));
     }
 static int registry_operation(void *context,const char *name){return !*(int *)context || (mf_equal(name,"now_ns") || mf_equal(name,"utc") || mf_equal(name,"random"));
     }

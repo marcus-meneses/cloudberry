@@ -3,7 +3,54 @@
 Target: modern (2016+) Intel/AMD x86-64, UEFI, PCIe, NVMe, AHCI and xHCI.
 Kmodules are coupled kernel mechanisms; isolated handlers use a separate handle layer.
 
-Current closure (2026-10-22): ownership management, explicit account homes,
+Current rendering milestone (2026-10-24): production capability/release hooks,
+exact-device selection and normal catalog activation are implemented. Qualified
+virtio-vga/VirGL selects OpenGL; unsupported/default/2D devices use VGA. Host
+policy/transport/ABI, catalog and 2D fallback checks pass. Four-CPU native KVM
+paired scanout/restoration and all four startup-failure cases now pass with
+production qualification/release evidence and matching source/module hashes.
+This closes the rendering selection milestone for the tested virtio-vga/VirGL
+configuration; physical GPU support remains separate.
+
+Partial redraw work (2026-10-24): initialized GPU surfaces receive bounded
+rectangle patches; dirty uploads remain separate from public damage tracking.
+Composition preserves the complete previous frame and clips base/layers to damage.
+Newline presentation stays intact. Startup requests 1024×768. Candidate build,
+real host VirGL pixel/transport/ABI checks, and four-CPU TCG console scrolling
+pass. Measured edit work drops from 96 MiB to 10/48 KiB and 8,384 to 224 GPU
+transport calls per 32 updates. These are host work counts, not native timings.
+Four-CPU KVM paired-screen requalification also passes: six matching 1024×768
+frames, input, cleanup/restart and VGA restoration, with matching source/module/
+provider hashes. Report: `bin/tests/gpu-pair/9d8a3f857b89400bbba136f7ef118895/result.json`
+at the workspace root. This validates correctness, not native rendering speed.
+
+Performance follow-up (2026-10-24): operation-sized GPU replies replace two
+blanket 15 KiB bodies per RPC; independent lifetimes and pre-dispatch reservation
+remain intact. Candidate/host checks and a four-CPU TCG startup/key-echo smoke pass. An isolated 32-edit profiler now
+attributes broker phases/locks and GPU I/O/fence waits, with no diagnostic
+readbacks/screenshots during measurement and raw clock/frame samples retained.
+Run `test-gpu-pair-profile QEMU_CPUS=4 QEMU_ACCEL=kvm`; select the next broker or
+GPU synchronization change from that evidence. Four-CPU KVM profiling now passes
+with matching hashes and zero clock/allocation errors (report below). No
+production lock redesign or relaxed fences are claimed. Storage flushing
+remains deferred. See tests/README.md and kmodules/shared/handles.md.
+
+Profiler repair (2026-10-24): reproduced and corrected pause-time loss of
+admitted probes' phase timestamps. Entry generations and serialized control
+prevent cross-window admission/report reset. Positive-clock gate regressions,
+fixture checks and diagnostic builds pass. Finalization exports rejection
+counters and raw observations; genuine error checks remain enforced. Native
+profiling rerun now passes. The production broker rebuild is byte-identical.
+
+Kernel method lookup closure (2026-10-24): ABI 3.1 adds a page-backed numeric
+method hash index. Boot builds it during publication; later module loads insert
+only new nodes and affected bucket heads. Existing records/stubs remain stable.
+Name adapters hash their input without scanning names; precomputed-key resolution
+reads no method text. Version/lifetime filtering and atomic batches remain intact.
+Candidate build, host hub/ABI checks, four-CPU TCG hub growth and disk-module
+initialization/failure checks pass. See kernel/hub.md and tests/README.md.
+
+Installation closure (2026-10-22): ownership management, explicit account homes,
 nested interactive login, persistent development media and signed local
 application installation are implemented.
 See the closure at the end for validation. Earlier sections record chronological
@@ -55,13 +102,19 @@ Closed execution priorities (2026-10-22; validation details at the end):
 
 Current next priorities (2026-10-22):
 
-1. Commit and push the accepted runtime foundations.
-2. Cross-compile the pinned QuickJS core in isolation. Validate allocation hooks,
-   stack limits, exceptions, Unicode, math and OOM cleanup before packaging it.
-3. Implement JavaScript bindings over handles: streams/files, owned processes,
-   timers, Promise completion and structured errors.
-4. Package a script-runner application with script files, arguments, inherited
-   streams/cwd and module loading; then advance to interactive shell functionality.
+1. Closed: accepted runtime foundations committed and pushed as `53bd001`.
+2. Closed engine gate: pinned QuickJS cross-compiles; host UBSan and isolated
+   one-CPU TCG verify allocation hooks, stack limits, exceptions, Unicode, math
+   and OOM cleanup (`fcc543a0dd024119a830afd433f95d47`). UTC-failure adapter
+   and binary-constructor regression pass host UBSan and four-CPU TCG in
+   `a7d051a7f39948ceb8d9ae89efcc66cf`.
+3. Closed: js binds handles for streams/files, owned processes, deadlines,
+   Promise completion and structured lossless errors. Isolated one/four-CPU TCG
+   acceptance passes; see [the js contract](apps/js/README.md).
+4. Closed: ordinary installed js runner supports ES-module files, arguments,
+   inherited streams/cwd, -e and an initial one-line interactive REPL. Modules,
+   redirection/pipes and return to terminal pass one/four-CPU TCG. Full shell
+   grammar/job control and Node/browser compatibility remain separate.
 5. Expand C++ support: target runtime/standard library, constructors/destructors,
    new/delete and exception unwinding, retaining the public C OS ABI.
 6. Formalize the Cloudberry compiler target/sysroot and its startup/library/ABI
@@ -87,9 +140,8 @@ port requirements. Rebuilding the whole OS is not a prerequisite for 7.1–7.2.
 
 The execution and [runtime foundations](sdk/README.md) passed AMD KVM acceptance;
 see the closure below and [runtime-port.md](sdk/runtime-port.md). Native Intel CPU
-and physical-device qualification remain separate. The JavaScript implementation
-has not begun. This list records sequence, not authorization to start later items
-as part of a documentation update.
+and physical-device qualification remain separate. JavaScript now runs in the ordinary js application, with packaged acceptance
+recorded alongside its contract. Later priorities remain separate work.
 
 User threads/TLS, richer public memory/filesystem contracts, networking and full
 V8/Node support remain later extensions; the selected smaller interpreter does
@@ -2244,3 +2296,467 @@ operations, deadlines/timers, denial, async child completion and abandoned wait.
 This closes the pending native SDK acceptance for the tested AMD configuration;
 it does not qualify Intel/physical devices or complete libc/engine conformance.
 Documentation is updated. No JavaScript engine or shell was added.
+
+
+## JavaScript priorities 1–4 closure (2026-10-22)
+
+Accepted C foundations were committed/pushed as 53bd001. The verified QuickJS
+2026-06-04 C core now cross-compiles against the target SDK. Custom allocation
+hooks preserve accounting and realloc semantics, and process/engine stack bounds
+stay separate. The host UBSan probe and isolated target probe exercise exceptions,
+Unicode/regexp, math/BigInt, Promise jobs, catchable recursion overflow, initialized
+UTC failure behavior, binary construction and deterministic OOM teardown.
+Four-CPU target engine acceptance: a7d051a7f39948ceb8d9ae89efcc66cf.
+
+The ordinary js installation uses named-handle SDK adapters, inherited streams,
+owned child completion, Promise/readiness/deadline dispatch, source-module loading,
+arguments/cwd and an initial REPL. One-CPU packaged acceptance:
+118392dab0bf48acbc21a1fcb4d60f2d; four-CPU packaged acceptance:
+09b2dbab9f2a4bcab3c15ab2bc3a3a0d. Binary round trips, large pipe backpressure/EOF,
+stream lifecycle, timers, lossless owner denial, child output redirection,
+modules/cache/meta, restricted manifest/UTC, terminal pipes/redirection and
+interactive return pass. Final four-CPU packaged acceptance, including REPL
+shared-stdin child execution and EOF return, passes in
+`1cb638e04afa4b84ae45c18c54e43945`; its binary digest matches the candidate and
+its recorded scripts match source. Tests remain isolated from candidate images and clean successful media.
+
+The candidate now packages js plus engine/Newlib licenses; no test scripts/probes
+are installed. SDK objects/archives retain timestamps when their content inputs
+are unchanged, while app links track library changes. Interface/installation
+host checks and the candidate image build pass. User-host packaged runner KVM
+acceptance passes in `aef558a8fb5945ee8a89b42b58bf31f2` with four CPUs. The saved
+invocation explicitly selects KVM; binary/scripts and QuickJS/Newlib identities
+match the current build. Child stdin forwarding/completion and terminal return
+are confirmed. This closes the packaged native-host gate; isolated engine
+OOM/recursion coverage remains host UBSan/TCG, and native Intel/physical-device
+qualification remains separate.
+Priorities 5–7 remain next, with C++ runtime support preceding compiler-target and
+native toolchain work; networking, full POSIX, V8/Node, user threads/TLS and native
+compiler self-hosting are not claimed by this interpreter milestone.
+
+
+## Graphical JavaScript sample (2026-10-22)
+
+The ordinary js runner now lazily acquires graphics, keyboard and mouse handles.
+Graphics remains backed by the existing graphics→display chain; input uses
+submitted provider reads, wait-any completion and explicit close/abandon, with
+keyboard focus returned on exit. No kernel/handler/backend changes were needed.
+The build installs editor.js and its document model in /system/script/samples;
+there is no boot-time copying or new terminal builtin. Menus/dialogs, UTF-8
+editing, line clipboard, undo/redo, find, scoped open/save and dirty confirmation
+live entirely in JavaScript.
+
+Focused model tests and interface/installation contracts pass. The real GUI
+passes four-CPU TCG in console/4e3cbfd3a156482aa75187da05899578, exercising
+mouse menus, keyboard editing, save/open/find, cancellation/discard, saved bytes
+and terminal focus/input after exit. Runner/sample digests are verified. This is
+a sample UI, not a compositor or new font engine; saving uses existing recreate
+semantics rather than atomic replacement. Native KVM for the extension remains
+separate from the earlier core-runner acceptance. Priorities 5–7 remain unchanged.
+
+## TrueType and editor UI (2026-10-22)
+
+Implemented FreeType-backed Unicode TrueType rasterization and Ubuntu Mono as the
+system default, queried text cell metrics, mouse-owned composited arrow cursor,
+retained JS editor rows with deferred native batches/sparse presentation, and
+folder browsing in Open/Save As (path entry, sorting, hidden toggle, new folders,
+replacement confirmation). This supersedes the earlier bitmap-font/crosshair
+sample constraints. Native GPU acceleration, font shaping, clipboard services
+and a desktop/window compositor remain later work.
+
+
+## Accelerated rendering backend sequence (2026-10-23)
+
+1. Established: suffix the software providers as graphics-vga/display-vga;
+   preserve public handles; inspect PCI GPUs and gate pair selection on full
+   driver readiness; stop/reap/release before fallback; publish selection status.
+2. Implemented: virtio PCI capabilities/transport, virtqueues, GPU resources/scanout,
+   completion fences and interrupt-driven notification with bounded waits.
+   Four-CPU TCG scanout and Intel/AMD IOMMU paths pass; physical acceptance remains.
+3. VirGL capset/context/texture/submission/readback transport is implemented and
+   qualified on four-CPU native KVM. Next: rendering state/shader translation.
+   Safe firmware scanout restoration is still required before automatic activation.
+4. Implement graphics-opengl/display-opengl against those facilities; preserve
+   all current graphics/display semantics, fonts, overlays and failure behavior.
+   Their definitions are staged, but no fake renderer is installed or selected.
+5. Validate accelerated execution and fallback on disposable media; host GPU/KVM
+   acceptance separately. Native Intel/AMD/NVIDIA GPU drivers remain later work.
+
+
+GPU progress (2026-10-23): virtio-gpu is now a disk-loaded driver with modern PCI
+control transport, split queue, MSI-X wakeups/fences, tracked DMA-backed 2D
+resources and scanout. Initial VirGL capset/context, level-0 2D texture attachment/
+upload and opaque submission APIs are implemented. This advances rendering step 2
+and transport portions of step 3, without closing OpenGL runtime/handler work.
+Native KVM/VirGL transport acceptance is now closed by the host report below.
+The next gates are state/shader translation and
+GPU-backed composition/font rendering,
+then proven scanout restoration before accelerated automatic selection is enabled.
+
+
+Native GPU transport gate closed: `gpu-virtio-boot/b2caeb93e73c47adb9896554b750af3e` passed
+on four-CPU KVM with VirGL, matching the source/candidate digests at that milestone. It verified
+23 commands/23 IRQ notifications, 65,024 readback pixels, capsets, context,
+texture upload, submission and cleanup. Screen capture remains unverified;
+no GPU performance or finished OpenGL UI claim follows from this result.
+The privileged GPU bridge is now implemented (see below). Next implementation
+is rendering state/shader/composition/font integration, with scanout restoration required
+before automatic accelerated backend activation.
+
+
+GPU bridge milestone: the private `/@io` `gpu` contract now binds ownership to
+the catalog-selected display provider, copies inline buffers, retains tracked
+resources/contexts in the driver, and drains all owned devices on process exit.
+Failed cleanup retains DMA, owner pins and the process binding; replacements
+cannot inherit or steal uncertain devices. Handles reserve larger replies before
+mutation and preserve unknown outcomes on transport failure. Host model coverage
+includes authority, bounds, stale cookies, capsets, contexts, submission/readback,
+and cleanup failure/retry. The isolated GPU boot fixture also checks mediated IO
+routing with a test-only principal. OpenGL provider binaries, private rendering
+command sharing, shader/state translation, accelerated glyph/composition work and
+safe scanout restoration remain the next gates; automatic selection stays closed.
+
+Bridge acceptance passed on four-CPU TCG:
+`gpu-virtio-boot/8acd034a4a864962a3a2b9822331e9a2` (`bridge_verified=true`).
+Normal VGA startup/input passed in `console/bb9433db5e77438faed098d0a3730003`.
+The bridge uses generic `gpu.invoke`/`gpu.exit` hub surfaces so a future GPU
+backend can supply the same transport contract. Native bridge/VirGL acceptance
+remains distinct from the earlier native transport milestone.
+
+
+### GPU drawing and experimental display provider
+
+Implemented: bounded integer-only VirGL surface/framebuffer/clear/blit encoder;
+GPU target, solid-color and scratch resources; upload staging; overlap-safe copy;
+actual scanout discovery; and an experimental display-opengl provider preserving
+public display operations. The private versioned `/@display.render` info/batch
+contract admits only the bound graphics provider. It validates the full batch,
+presents once, and preserves UNKNOWN on a failure after partial execution.
+
+Host acceptance runs the production engine against installed virglrenderer with
+surfaceless software GL: actual pixel output, upload, four copy overlap directions,
+batch validation, readback, failure poisoning and cleanup retry pass. The new
+guest VirGL gate requires 3,072 independently checked drawing pixels through I/O.
+The host tests do not establish native device performance or userland IPC behavior.
+
+The guest drawing gate now passes (native report below). Next: integrate complete graphics primitives,
+surface/font/overlay rendering, then prove scanout restoration and full paired
+provider startup/failure acceptance. The display executable builds separately
+(`experimental-opengl`) and is not installed in normal media. Automatic selection
+remains gated; the earlier native report qualifies its recorded transport revision.
+
+
+Final local checks: real host VirGL/software-GL rendering and C/C++ interface,
+I/O authority, transport/bridge checks pass. Four-CPU TCG GPU regression passes
+in `gpu-virtio-boot/e732f438f40c424b94f5ab9c1c810650` (15 commands/15 IRQs,
+bridge verified, drawing explicitly unverified because 2D mode has no VirGL).
+Normal VGA startup/key echo passes in `console/9af164faebd6467fb943b999df0e6176`.
+Candidate and isolated GPU/I/O/handle binaries match. The experimental display
+provider compiles but is not installed. The subsequent native report below closes guest drawing/readback; full
+provider IPC/graphics/font/overlay/restoration acceptance remains pending.
+
+
+Native GPU drawing gate closed: `gpu-virtio-boot/fbc98226fec0475a93bfe504688342f3` passes
+on four-CPU KVM/VirGL with current source and candidate/isolated GPU digests.
+It completes 50 fenced commands/50 IRQs, I/O bridge checks, 3,072 drawing pixels
+and 65,024 resource/texture readback pixels. Visible GL scanout is unverified;
+this is engine/transport acceptance, not provider-process IPC or full graphics UI.
+Next: complete graphics primitives, owned surface composition, fonts/overlays,
+paired userland provider acceptance and proven scanout restoration. Normal boot
+keeps VGA until those gates close.
+
+
+### Experimental graphics provider and cached GPU composition
+
+Implemented both buildable providers with a shared public decoder. The OpenGL
+presentation path caches process-owned BGRA surfaces, composes clipped hierarchy/
+text/overlays on the GPU, reuses pixels for layout/scroll/cursor movement, and
+retains public generations/damage/ownership and font/primitive semantics. Complex
+vector and glyph rasterization still uses the shared CPU implementation. Cached
+surface changes currently upload full backing; partial transfer/atlas work can
+follow measured performance, without assuming an accelerated speedup.
+
+The display validates uploads and frame chunks, blocks public mutations during
+an open frame, swaps a separate GPU target only on END, and sweeps graphics-client
+resources on exit/replacement. Transparent composition uses explicit TGSI shaders
+and blend state: older VirGL BLIT flags alone did not preserve alpha. Tokens are
+monotonic across device reopen. Host real-GL and shared VGA contract checks pass.
+
+The native `COMPOSE PASS` gate for the shaders/frame path now passes. Next:
+paired guest process startup/IPC and visible output, then scanout restoration and
+safe startup-failure fallback. Both providers stay outside the installed catalog
+and no complete readiness/release surfaces are advertised until those close.
+
+
+Final local acceptance: real host VirGL/provider/FreeType tests pass, including
+cached moves/scroll without uploads, transparent cursor restoration, complete
+upload validation, stale tokens and ownership cleanup. The existing software
+console/raster/font/mouse suite and C/C++ ABI checks also pass. Candidate build
+and four-CPU VGA startup/key echo pass (`console/563d903917fc4a09abdbe2194d4bbdc4`).
+The final four-CPU TCG GPU regression is
+`gpu-virtio-boot/f53afbf7ac0b4c6baa0ab8b8a967dc0f` (15 commands/15 IRQs).
+It explicitly reports composition unverified because that run uses the 2D device.
+Report sources match; candidate/isolated kernel modules and VGA provider binaries
+match. The subsequent native report below closes the composition/alpha gate. Its command was:
+`make -C src test-virtio-gpu QEMU_CPUS=4 QEMU_ACCEL=kvm QEMU_GPU=virgl GPU_TEST_DISPLAY=gtk`.
+The test exercises shared composition code through kernel I/O, not both guest
+provider receive loops; paired-process acceptance and restoration remain separate.
+
+
+Native composition/alpha acceptance passed on four-CPU KVM/VirGL:
+[report](../bin/tests/gpu-virtio-boot/982b7a1a52364c9d8f2dd0e77001ac9a/result.json).
+The recorded rendering/bridge sources and candidate/isolated GPU binaries match.
+All 74 fenced commands and 74 IRQ notifications completed, with I/O bridge,
+3,072 drawing pixels, 3,072 composition pixels and 65,024 resource/texture readback
+pixels validated. Composition checks cover staged surfaces, an unchanged front
+target before END, and the explicit source-over shader (with one-byte rounding
+tolerance for blended channels). `composition_verified=true`; visible GL capture
+remains unverified. This fixture runs shared rendering code through kernel I/O,
+not both provider receive loops as guest userland processes. The log confirms
+normal selection still chooses VGA with zero qualified accelerators.
+Next: paired guest provider startup/IPC and visible output, followed by proven
+scanout restoration/failure fallback before automatic accelerated selection.
+
+
+### Paired provider startup/IPC gate — current work
+
+Implemented a disposable paired-provider fixture and closed its four-CPU TCG
+VGA reference: separate address spaces, public handle calls, clipped retained
+surfaces, TrueType text, mouse/keyboard input, app reaping, layer cleanup and
+cursor restoration. Public readiness now follows private render/overlay
+publication, preventing dependency acquisition races at startup.
+
+The native `test-gpu-pair` KVM/VirGL run now passes through the actual
+experimental provider receive loops. GPU resource readback and visible capture
+are reported separately. Next, close visible scanout acceptance; the resource
+readback pass alone does not establish it.
+Then prove firmware scanout restoration and safe startup-failure fallback;
+normal catalogs still exclude the experimental providers until those gates
+close. The fixture's admission/release hooks never enter production images.
+
+
+The repeated paired-provider boot also exposed a volume/driver readiness race.
+Provider startup now waits for successful selected-module completion before
+catalog loading, `/boot` mounting or provider launch. Focused tests cover pending
+completion, success, failure, snapshot errors and timeout without holding the
+application-operation token. The post-fix four-CPU paired VGA Make target passes
+(`gpu-pair/a7fa0f5961894d9c9d3845db1969a8a2`).
+
+
+Final paired VGA reference after startup ordering correction:
+`gpu-pair/c1031c60a51347c89b058eea0bbdcd86/result.json`.
+Two consecutive four-CPU boots pass all five visible frame checks, actual
+provider IPC, keyboard/mouse and exit cleanup. The final report's source hashes
+and production-module hashes match the candidate and isolated builds. Host
+rendering/ABI regressions and candidate build pass. Normal four-CPU VGA terminal
+startup/key echo also passes (`console/f4e171ac33b648ea8df496bffd238513`).
+Native paired KVM/VirGL acceptance has now passed, as recorded below; visible
+GL output and safe firmware restoration remain pending.
+
+
+Native paired-provider acceptance passed on four-CPU KVM/VirGL:
+[report](../bin/tests/gpu-pair/3553b8e542524e6eb0bd9aa3f29617e2/result.json).
+The recorded production sources, candidate provider and production-module
+hashes match; the disposable fixture has since gained restoration checks.
+Separate display/graphics/app processes (2/3/11) completed 80 graphics calls and
+14 GPU readback captures at 640×480, verifying clipped hierarchy, TrueType text,
+mouse/keyboard input and automatic app-owner exit cleanup.
+`provider_ipc_verified`, `resource_pixels_verified` and `exit_cleanup_verified`
+are true. All five QMP observations captured empty RAM surfaces, so
+`screen_capture_verified=false`: visible GL scanout is still unverified.
+Next: visible-scanout evidence, then safe firmware restoration/startup-failure
+fallback. Normal catalogs remain VGA; this result does not authorize automatic
+GPU activation or establish provider-restart recovery.
+
+
+### Strict scanout and VGA-restoration acceptance
+
+The paired fixture now reaps the old text/mouse/graphics/display processes,
+checks GPU ownership/DMA/IRQ cleanup, starts the VGA pipeline, and verifies a
+new ordinary app's public graphics calls, TrueType text and visible pixels.
+Four-CPU TCG with virtio-vga passes a real native 2D takeover/reset and all six
+screen observations (`gpu-pair/cbed813cd9db4fc1a4a5710025d72878`).
+No production reset path was duplicated or readiness bypass added.
+
+Next native command:
+`make -C src test-gpu-pair-screen QEMU_CPUS=4 QEMU_ACCEL=kvm`.
+It uses EGL-headless scanout readback, opens no desktop window, and requires
+matching GL pixels plus the final restored VGA frame. Blank captures now fail
+this strict target. The prior GTK run still qualifies IPC/resource pixels only.
+See tests/README.md for evidence boundaries. After native scanout/restoration,
+startup-failure injection and safe fallback remain before automatic activation.
+Normal catalogs remain VGA throughout these isolated checks.
+
+
+Native strict capture result: [report](../bin/tests/gpu-pair/b31768e6c71e459787599e91c84dc4bd/result.json).
+All five GL scanout observations matched at 1024×768, including clipped colors,
+TrueType text, cursor movement/hiding and app-exit cleanup. Production source
+hashes match. The overall run FAILED in phase 9 before restoration: the test
+looked up display by its publication after graphics teardown could already have
+triggered display self-exit and unpublication. This is partial scanout evidence,
+not a passing restoration or automatic-activation result.
+
+The test now snapshots all four provider PIDs before stopping dependencies,
+then terminates/reaps those identities even if they have already unpublished.
+Withdrawal, successful reap, bootstrap release and GPU quiescence are still
+mandatory; no cleanup check was relaxed. A deterministic host regression models
+display self-exit after graphics, cleanup timeout, retained publication and
+metadata-release failure. Rerun the same strict native command for restoration.
+
+Post-fix local acceptance: `gpu-pair/c8f6bbfc4de74539ad92289775f177d4` passes on four-CPU
+TCG/virtio-vga with native reset/restoration and all six screen observations.
+All five host fixture/evidence tests pass, including deterministic early
+unpublication. Final report source hashes match. Native GL restoration remains
+pending the corrected strict rerun.
+
+
+### Native scanout and post-success restoration accepted
+
+Four-CPU KVM/VirGL [report](../bin/tests/gpu-pair/5a7a29d9773644d5a3f546fe22660619/result.json) passes
+with current source, candidate provider and production-module hashes matching.
+All six mandatory scanout captures match: five accelerated frames at 1024×768
+and the restored VGA frame at 1280×800. The run completed 114 graphics calls and
+14 GPU snapshots, verified text/input/app-owner cleanup, reaped the original
+providers, confirmed GPU quiescence, and started new display/graphics/app
+processes (12/13/16) that drew successfully.
+`screen_capture_verified`, `provider_restart_verified` and
+`restoration_verified` are all true. This closes the native scanout and
+post-success restoration gates for this tested virtio-vga/VirGL configuration.
+It does not establish physical-GPU portability or recovery from incomplete
+provider startup. Next: inject startup failures and verify cleanup/fallback,
+then enable production readiness/release selection. Normal catalogs remain VGA
+until that remaining gate closes.
+
+
+### Startup-failure rollback matrix — ready for native acceptance
+
+Added copied-binary faults after device OPEN, first PRESENT, and graphics private
+INFO. The test records real process exits and requires bootstrap to reap failed
+providers, withdraw publications and clear GPU ownership/resources/DMA/IRQ before
+VGA fallback. A fourth case deliberately rejects the release contract; startup
+must stop without selecting VGA or launching an app. Production provider bodies,
+reset/exit paths and normal boot selection are unchanged.
+
+Four-CPU TCG passes ownership rollback/fallback and uncertain-release refusal;
+all four fault binaries and host selector/lifecycle tests pass. Native command:
+`make -C src test-gpu-pair-failures QEMU_CPUS=4 QEMU_ACCEL=kvm`.
+The matrix opens no window, requires screen matches in positive cases, and saves
+one aggregate report plus individual case reports under bin/tests. Full GL
+startup-failure acceptance remains pending; production readiness/release selection
+and normal catalog activation stay deferred until it passes. See tests/README.md.
+
+
+### Startup matrix log-framing correction
+
+Native matrix `gpu-pair-failures/a07721ef52b14b7d80e64a53b13f5e44` passed OPEN
+rollback, then stopped during the scanout case's app-exit screen check. The
+host parsed a partially written phase record and sampled cursor Y=7 instead of
+its completed Y=753. Rechecking the saved phase-8 screenshot with the complete
+record matches every required pixel; the run remains recorded as failed, and
+later cases were not executed.
+
+The runner now consumes only newline-terminated debug records, including PASS
+and release-rejection records. A regression checks every character boundary of
+phase/result messages, preserves earlier complete records, and verifies the
+full cursor coordinate. No pixel, cleanup or fallback check was weakened, and
+no OS/provider code changed. All six host checks pass. The complete corrected
+native matrix remains required before production activation.
+
+
+### Native startup-failure matrix accepted
+
+Four-CPU KVM/VirGL [matrix report](../bin/tests/gpu-pair-failures/12f783373a554ba198869b0e2b094fa1/result.json)
+passes all four cases. OPEN, first-PRESENT and graphics-private-INFO failures
+reaped the failed processes and cleared GPU ownership/resources/DMA/IRQ before
+VGA fallback. Each positive case completed 118 public graphics calls, USB input,
+app-exit cleanup, replacement providers and six matching screen observations.
+The synthetic release refusal correctly stopped startup without fallback or
+app launch. All individual source hashes and candidate production-module hashes
+match the accepted reports.
+
+Together with native successful-pair/scanout/restoration acceptance, this closes
+the planned runtime qualification gates for the tested virtio-vga/VirGL path.
+It does not turn the fixture admission/release hooks into production policy.
+Next: implement production capability detection and release surfaces, then
+install/select the qualified provider pair through the normal catalog. Normal
+boot remains VGA until that implementation is validated.
+
+
+Production rendering selection is now implemented. `gpu-virtio-render.inc`
+checks cold/unclaimed firmware ownership, actual feature banks and the VGA mode;
+release verifies production reset cleanup and unchanged firmware mode. The
+private selected-device operation prevents choosing an unrelated enumerated GPU.
+Both providers and font/license resources now ship through the normal catalog.
+See the current status at the top and tests/README.md for follow-up commands.
+
+
+Final production build and host policy/transport/ABI/catalog/namespace checks
+pass. The default VGA startup/key-echo reference is
+`console/605eeadd8ee54f189574cf275fbf4647`; the final unmodified production 2D
+fallback reference is `console/11fbc770383341bd821447e4c1e98dfa`.
+The final four-CPU isolated OPEN-failure reference is
+`gpu-pair/5acfaaefc1124934a5c1e729b005ab50`, with six matching frames and current
+source/candidate production-module hashes, including the boot geometry backend.
+All four updated startup-fault binaries build. Native acceptance of the
+production hooks now passes; see the accepted reports below.
+
+
+### Production rendering acceptance — 2026-10-24
+
+Four-CPU native KVM/VirGL acceptance passes with the production capability and
+release hooks, without forced native GL admission:
+
+- Healthy pair: `bin/tests/gpu-pair/b5224bd82b29405fb06a828979f23fff/result.json`;
+  114 graphics calls, 14 resource captures and six matching scanout frames.
+  Input, client exit cleanup, provider restart and restored VGA output pass.
+- Startup-failure matrix:
+  `bin/tests/gpu-pair-failures/642d341ef6c7401e907328c26ec62cce/result.json`.
+  OPEN, scanout and graphics failures restore VGA with matching frames; the
+  release-refusal case correctly rejects fallback. All four cases pass.
+
+All five runs record verified production probe/release execution. Their source
+and candidate production-module hashes match the accepted build. Normal catalog
+activation is enabled; unsupported/default/2D devices retain VGA fallback. This
+acceptance covers the tested virtual GPU configuration, not physical GPU drivers
+or a rendering performance benchmark. Reports are local artifacts under the
+workspace root; isolated tests use disposable media.
+
+
+## Native GPU/broker profiling acceptance — 2026-10-24
+
+Report: `bin/tests/gpu-pair/c9ab0d3d50ba4e0da57f515fcbaab2d0/result.json` at
+the workspace root. Four-CPU KVM/VirGL passes all six 1024×768 screen phases,
+input, cleanup/restart and VGA restoration. Production and diagnostic source/
+module/provider hashes match. Finalization has zero active probes, GPU/broker
+clock errors and allocation failures. All 32 raw edit samples are retained.
+
+This HPET-mode instrumented run measures median 51.141 ms, nearest-rank p95
+53.029 ms and maximum 53.667 ms per edit-and-present interval. 128 fenced GPU
+commands (four per edit) occupy a combined 27.852 ms per edit, about 54.7% of
+the client interval. These completion spans include host/device, IRQ and wake/
+scheduling time, not pure GPU execution. Maximum broker lock hold is 301.29 µs
+and wait is 2.635 ms. The window records 1,478 allocations and 1,478 frees.
+Nested actor and handoff/service spans must not be added to the frame interval.
+
+Timestamp overhead median is 29.12 µs, so instrumentation materially affects
+these results. Next: obtain an uninstrumented control and attribute notify →
+IRQ → deferred completion → wake → resumed caller before changing fence/queue
+behavior. These data do not justify a broad broker-lock rewrite. Keep HPET and
+TSC samples separate; no normal-UI frame-rate claim follows from this run.
+Derived values are saved alongside the report in `analysis.json`.
+
+
+## Bundled 3D benchmark — 2026-10-24
+
+`bench3d` is installed as an ordinary system app: rotating shaded cubes, optional
+wireframe, adjustable load, pause/resume and on-screen FPS/frame/geometry/call
+statistics. It uses CPU perspective/culling/depth sorting and public graphics
+primitives; no private GPU or kernel API is granted to the app. Timings cover
+the application/rendering pipeline, including blocking and presentation.
+Model checks (1,668 UBSan scenes), candidate build and four-CPU TCG GUI checks
+pass; guest report `console/c09a24a053b5484e9cb53f4e038400f7` under `bin/tests`.
+The GUI check covers visible geometry, stats, load/wireframe/pause, Esc/focus
+return and bounded auto-exit. KVM/backend comparisons remain separate measurements.
+The root README is now a project presentation; the source README is a concise
+layout/build/contracts guide. Chronological development evidence stays here and
+in component/test documentation.

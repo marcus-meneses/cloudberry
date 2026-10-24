@@ -3,14 +3,31 @@
 #include "handle.h"
 #define CB_GRAPHICS_NAME "/@graphics"
 #define CB_GRAPHICS_INTERFACE_ID {{0x43,0x42,0x47,0x46,0x58,0x31,0x46,0x3b,0x91,0xe1,0x40,0xa,0x1c,0x87,0xc0,0x8}}
-enum {CB_GRAPHICS_INFO=1,CB_GRAPHICS_FILL,CB_GRAPHICS_GLYPH,CB_GRAPHICS_SURFACE_CREATE,CB_GRAPHICS_SURFACE_RELEASE,CB_GRAPHICS_SURFACE_INFO,CB_GRAPHICS_STATE,CB_GRAPHICS_LINE,CB_GRAPHICS_RECTANGLE,CB_GRAPHICS_ELLIPSE,CB_GRAPHICS_ARC,CB_GRAPHICS_BEZIER,CB_GRAPHICS_PATH,CB_GRAPHICS_BITMAP,CB_GRAPHICS_BLIT,CB_GRAPHICS_PRESENT,CB_GRAPHICS_GLYPHS};
+enum {CB_GRAPHICS_INFO=1,CB_GRAPHICS_FILL,CB_GRAPHICS_GLYPH,CB_GRAPHICS_SURFACE_CREATE,CB_GRAPHICS_SURFACE_RELEASE,CB_GRAPHICS_SURFACE_INFO,CB_GRAPHICS_STATE,CB_GRAPHICS_LINE,CB_GRAPHICS_RECTANGLE,CB_GRAPHICS_ELLIPSE,CB_GRAPHICS_ARC,CB_GRAPHICS_BEZIER,CB_GRAPHICS_PATH,CB_GRAPHICS_BITMAP,CB_GRAPHICS_BLIT,CB_GRAPHICS_PRESENT,CB_GRAPHICS_GLYPHS,CB_GRAPHICS_FONT_INFO,CB_GRAPHICS_TEXT_BATCH,CB_GRAPHICS_SURFACE_PLACE,CB_GRAPHICS_SURFACE_SCROLL};
 /* GLYPHS: nonempty cb_glyph[] payload; validates all entries, draws in order,
  * then presents once. GLYPH retains its single-entry contract. */
 struct cb_glyph {uint32_t x,y,codepoint,foreground,background,reserved;};
+/* FONT_INFO: empty or cb_graphics_font_request. TEXT_BATCH: header followed by
+ * nonempty cb_glyph[]. Size 0 uses system default; DEFER postpones presentation. */
+struct cb_graphics_font_request {uint32_t pixel_size,reserved;};
+struct cb_graphics_font {uint32_t cell_width,cell_height,ascent,pixel_size;char family[64];};
+struct cb_graphics_text_batch {uint64_t surface;uint32_t pixel_size,flags;};
+enum {CB_GRAPHICS_DEFER=1};
 /* Surface 0 is the display-sized canvas; other IDs belong to their creator.
  * New primitives use ARGB straight alpha; legacy GLYPH/FILL use opaque RGB. */
 struct cb_graphics_info {uint32_t width,height;uint64_t surfaces,pixel_bytes;};
 struct cb_graphics_create {uint32_t width,height;};
+/* Optional extended CREATE: a container supplies position/clipping, no pixels. */
+enum {CB_SURFACE_CONTAINER=1,CB_SURFACE_VISIBLE=1};
+struct cb_graphics_create_ex {uint32_t width,height,flags,reserved;};
+/* PLACE accepts a nonempty array, validated atomically. Parent 0 is the main
+ * canvas. Parents/children must have the same owner; cycles are rejected.
+ * Siblings compose in attachment order; moving in the same parent keeps order.
+ * Parent release detaches (does not destroy) its children. */
+struct cb_graphics_place {uint64_t surface,parent;int32_t x,y;uint32_t flags,reserved;};
+/* Move a parent's direct children, retaining their cached pixels. Presentation
+ * stays deferred. Parent bounds clip its complete descendant hierarchy. */
+struct cb_graphics_scroll {uint64_t surface;int32_t dx,dy;};
 struct cb_graphics_ref {uint64_t surface;};
 struct cb_graphics_surface_info {uint64_t surface,generation;uint32_t width,height;int32_t damage_x,damage_y,damage_width,damage_height;uint32_t dirty,reserved;};
 struct cb_graphics_state {uint64_t surface;int32_t matrix[6];int32_t clip_x,clip_y,clip_width,clip_height;uint32_t composition,reserved;};

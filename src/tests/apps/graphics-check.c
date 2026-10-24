@@ -80,6 +80,13 @@ __attribute__((noreturn)) void _start(const struct cb_startup *packet){struct cb
         begin=profile_now(clock);CB_REQUIRE(cb_fs_call(&client,fs,CB_FILESYSTEM_REMOVE,"/profile-io.tmp",0,0)==CB_OK);profile_report("fs_remove_ns",profile_now(clock)-begin);
         CB_REQUIRE(cb_write_all(&client,cb_standard(1),"PROFILE DONE\n",13)==CB_OK);cb_exit(0);
     }
+    if(start.header.argc>1 && cb_application_argument(&start,1)[0]=='b'){
+        cb_handle_t text=cb_acquire(CB_TEXT_NAME,(struct cb_interface_id)CB_TEXT_INTERFACE_ID),clock=cb_acquire(CB_IO_NAME,(struct cb_interface_id)CB_IO_INTERFACE_ID);
+        char lines[4080];for(unsigned i=0;i<sizeof(lines);++i)lines[i]=i%40==39?'\n':'a'+(i/40+i%40)%26;
+        uint64_t samples[5],single[5];for(unsigned trial=0;trial<5;++trial){CB_REQUIRE(cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_CLEAR,NULL,0,0)==CB_OK);uint64_t begin=profile_now(clock);CB_REQUIRE(cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_WRITE,lines,sizeof(lines),0)==CB_OK);samples[trial]=profile_now(clock)-begin;}
+        for(unsigned trial=0;trial<5;++trial){uint64_t begin=profile_now(clock);CB_REQUIRE(cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_WRITE,"\n",1,0)==CB_OK);single[trial]=profile_now(clock)-begin;}
+        CB_REQUIRE(cb_invoke(&client,text,(struct cb_interface_id)CB_TEXT_INTERFACE_ID,CB_TEXT_CLEAR,NULL,0,0)==CB_OK);for(unsigned trial=0;trial<5;++trial){char name[]="bulk0_ns";name[4]='0'+trial;profile_report(name,samples[trial]);char line[]="line0_ns";line[4]='0'+trial;profile_report(line,single[trial]);}CB_REQUIRE(cb_write_all(&client,cb_standard(1),"BULK DONE\n",10)==CB_OK);cb_exit(0);
+    }
     if(start.header.argc>1 && cb_application_argument(&start,1)[0]=='s'){
         char lines[600];for(unsigned i=0;i<60;++i){cb_copy(lines+i*10,"SCROLL 00\n",10);lines[i*10+7]='0'+i/10;lines[i*10+8]='0'+i%10;}CB_REQUIRE(cb_write_all(&client,cb_standard(1),lines,sizeof(lines))==CB_OK);cb_exit(0);
     }

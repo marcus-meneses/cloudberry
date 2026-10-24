@@ -1,0 +1,8 @@
+version=1
+executable=graphics-opengl.elf
+manifest=manifest.json
+ready=/@graphics
+installation_id=dece006883e43d6e0797e65b291c3264
+cpu=0
+stack_bytes=262144
+files=UbuntuMono-R.ttf

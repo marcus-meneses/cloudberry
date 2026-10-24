@@ -13,7 +13,7 @@ static struct {struct kernel_surfaces hub;struct kernel_surface methods[13];stru
 static struct {struct hwenum_table table;struct hwenum_descriptor entries[2];} hardware;
 static struct {struct mmio_table table;struct mmio_region entries[3];} mmio;
 static int attached,mapped,fail_map,fail_unmap,preempt_enable,fail_publish;
-static unsigned allocations;
+static unsigned allocations;static unsigned reject_bar0,mapped_bar0;
 static uint64_t serial;static void *dma;static int fail_pages;
 uint16_t pci_read16(uintptr_t p) {uint16_t value;memcpy(&value,(void *)p,2);return value;}
 uint32_t pci_read32(uintptr_t p) {
@@ -30,7 +30,7 @@ static struct kernel_surface_result allocate(MODULE_ARGS) {MODULE_UNUSED();void 
 static struct kernel_surface_result release(MODULE_ARGS) {MODULE_UNUSED();free((void *)b);--allocations;return module_result(1,1);}
 static struct kernel_surface_result map(MODULE_ARGS) {
     MODULE_UNUSED();if(a==0)return module_result((uintptr_t)config,b==0);
-    if(a==1)return module_result((uintptr_t)bar0,b==sizeof(bar0));
+    if(a==1){++mapped_bar0;return module_result((uintptr_t)bar0,!reject_bar0 && b==sizeof(bar0));}
     return module_result((uintptr_t)bar4,a==2 && b==sizeof(bar4));
 }
 static struct kernel_surface_result pages(MODULE_ARGS) {
@@ -130,6 +130,13 @@ int main(int argc,char **argv) {
     irq.masked=1;assert(!CALL(pci_surface_msi,&irq,0,0).status && !CALL(pci_surface_release,0,99,1).status);
     config[0x41]=0xf0;config[0xf0]=5;pci_write16((uintptr_t)config+0xf2,0x180);
     assert(CALL(pci_surface_claim,0,99,&dev).status);config[0x41]=0;
+    /* Selective mapping avoids a framebuffer BAR; MSI-X table/PBA remain
+     * mapped automatically even when they are outside the requested mask. */
+    config[0x41]=0;config[0x40]=0x11;pci_write32((uintptr_t)config+0x44,4);pci_write32((uintptr_t)config+0x48,4);
+    reject_bar0=1;mapped_bar0=0;assert(CALL(pci_surface_claim,0,99,&dev).status && mapped_bar0==1);
+    mapped_bar0=0;assert(!pci_surface_claim(0,99,(uintptr_t)&dev,1u<<4,0,0).status && !mapped_bar0 && !dev.bars[0].address && dev.bars[0].bytes==16384 && dev.bars[4].address);
+    assert(!CALL(pci_surface_release,0,99,1).status);assert(pci_surface_claim(0,99,(uintptr_t)&dev,64,0,0).status);
+    reject_bar0=0;mapped_bar0=0;assert(!pci_surface_claim(0,99,(uintptr_t)&dev,1u<<0,0,0).status && mapped_bar0==1 && dev.bars[4].address);assert(!CALL(pci_surface_release,0,99,1).status);
     puts("PASS PCI: BAR probe/restore, capability cycles, ownership, MSI/MSI-X bounds, DMA retention/preemption, active ATS/cycles and conservative fallback");
     return 0;
 }

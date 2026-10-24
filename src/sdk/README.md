@@ -2,8 +2,8 @@
 
 The optional static userland SDK consists of Newlib libc/libm plus Cloudberry's
 allocator, startup entry and handle adapters. Existing providers/apps retain
-their freestanding builds. No engine, interpreter, test app or SDK archive is
-added to normal boot media. The kernel and ISRs retain their existing compiler
+their freestanding builds. The ordinary [js app](../apps/js/README.md) uses this
+SDK, as does the [native editor](../apps/editor/README.md); test executables/scripts and SDK archives stay outside candidate media. The kernel and ISRs retain their existing compiler
 flags; SDK applications use SSE2-capable userland compilation.
 
 ```sh
@@ -126,7 +126,8 @@ paths passes in report `81d6f8ba5c2141c9919b0af94846ca7f`, with the same probe
 digest and Newlib identity as the final TCG runs. Native Intel/physical-device
 qualification and broader libc conformance remain separate.
 
-The JavaScript shell remains deferred. General user threads/TLS, networking,
+The [js runner and initial REPL](../apps/js/README.md) now use these foundations.
+General user threads/TLS, networking,
 dynamic linking, Node compatibility and richer public file APIs remain later work.
 
 Final TCG acceptance: one CPU `8d5b65c533754970b7fc60898d27292a` and four CPUs
